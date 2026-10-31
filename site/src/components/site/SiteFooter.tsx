@@ -65,7 +65,7 @@ export default function SiteFooter() {
             </a>
           </div>
           <p className="mono-label" style={{ color: 'var(--ink-3)' }}>
-            本软件免费 · 仅供个人学习使用 · 无商业许可
+            当前试用免费 · 仅供个人学习使用 · 无商业许可
           </p>
         </div>
       </div>

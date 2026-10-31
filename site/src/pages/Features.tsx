@@ -216,6 +216,40 @@ function ReviewIllustration() {
   )
 }
 
+const CATEGORY_GROUPS = [
+  { t: '课堂纪要', n: 1 },
+  { t: '我的疑问', n: 2 },
+  { t: '重点与摘要', n: 4 },
+  { t: '词汇', n: 12 },
+  { t: '短语', n: 5 },
+  { t: '自测问答', n: 6 },
+  { t: '练习', n: 8 },
+]
+
+function CategoryIllustration() {
+  return (
+    <div className="rounded-3xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
+      <p className="mono-label mb-5">ORGANIZED BY TYPE</p>
+      <div className="grid grid-cols-2 gap-2">
+        {CATEGORY_GROUPS.map((group) => (
+          <div
+            key={group.t}
+            className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5"
+            style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 800 }}>{group.t}</span>
+            <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--brand-deep)' }}>{group.n} 项</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 rounded-xl px-4 py-3" style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}>
+        <p style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--brand-deep)' }}>复习 · 今日到期 5</p>
+        <p style={{ fontSize: 11, marginTop: 3, color: 'var(--ink-2)' }}>词汇 2 · 短语 1 · 自测 1 · 练习 1</p>
+      </div>
+    </div>
+  )
+}
+
 const SECTIONS = [
   {
     label: 'ON-DEVICE ASR',
@@ -249,8 +283,15 @@ const SECTIONS = [
     label: 'STUDY PACKAGE',
     title: '课后一键生成，把课堂变成学习包',
     body: '按课堂、讲义、备考三种场景，按需生成主题化 AI 学习包：重点内容、词汇短语、重难点、自测卡，以及你标记疑问的参考解答。整个学习包可以导出 Markdown，放进你自己的笔记体系。',
-    points: ['课堂 / 讲义 / 备考三种纪要场景', '疑问自动附参考解答', '学习包 Markdown 一键导出'],
+    points: ['课堂 / 讲义 / 备考三种纪要场景', '生成后按类型归档', '疑问自动附参考解答', '学习包 Markdown 一键导出'],
     illustration: <PackageIllustration />,
+  },
+  {
+    label: 'ORGANIZED BY TYPE',
+    title: '学习内容自动归档，复习不再翻长列表',
+    body: '课程详情页把学习内容分为课堂纪要、我的疑问、重点与摘要、词汇、短语、自测问答和练习；每类显示数量与预览，点开二级页查看带来源的具体内容。复习页按类型汇总今日到期与卡片总数，进入分类后逐张复习，也能浏览该分类全部卡片。',
+    points: ['课程页 7 类归档，空分类不显示', '复习页显示每类今日到期与总数', '二级页查看来源和全部卡片'],
+    illustration: <CategoryIllustration />,
   },
   {
     label: 'DOCUMENT PARSING',
@@ -262,8 +303,8 @@ const SECTIONS = [
   {
     label: 'EXAM & REVIEW',
     title: '从备考六级，到期末冲刺',
-    body: '导入六级等标准词表可确定性去重建卡，也可以按你自己的讲义语境提取词汇。复习排期由 FSRS 间隔重复算法安排，支持 TTS 跟读——备考材料不再是「存了就看不动」的收藏夹。',
-    points: ['CET-6 标准词表确定性导入', '按资料语境提取词汇短语', 'FSRS 复习排期 + TTS 跟读'],
+    body: '导入六级等标准词表可确定性去重建卡，也可以按你自己的讲义语境提取词汇。复习排期由 FSRS 间隔重复算法安排，复习页按词汇、短语、自测问答和练习分类；支持 TTS 跟读——备考材料不再是「存了就看不动」的收藏夹。',
+    points: ['CET-6 标准词表确定性导入', '按资料语境提取词汇短语', '按类型查看今日到期与全部卡片', 'FSRS 复习排期 + TTS 跟读'],
     illustration: <ReviewIllustration />,
   },
 ]
@@ -277,8 +318,19 @@ export default function Features() {
             <p className="mono-label mono-label--brand">FEATURES</p>
             <h1 className="display mt-5 max-w-3xl" style={{ fontSize: 'clamp(36px, 5vw, 60px)' }}>
               听课、学习、复习，
+              <br />
               <span style={{ color: 'var(--brand)' }}>一条链路走完</span>
             </h1>
+          </Reveal>
+          <Reveal delay={0.08}>
+            <div
+              className="mt-8 max-w-3xl rounded-2xl px-5 py-4"
+              style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}
+            >
+              <p style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)', lineHeight: 1.8 }}>
+                离线听课不需要注册账号；AI 学习包、翻译、云端听课和文档解析需要在「设置 → 试用额度」激活管理员发放的手机号。额度按每日次数/时长和有效期管理，多台设备共用，离线功能不受影响。
+              </p>
+            </div>
           </Reveal>
         </div>
       </section>

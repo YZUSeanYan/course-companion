@@ -56,9 +56,9 @@ const FEATURES = [
   { icon: IconEar, t: '本地 / 云端听课', d: '离线识别在手机本地完成，模型按需下载；也可主动开启云端听课，按课堂环境选择合适方式。' },
   { icon: IconGlobe, t: 'AI 实时翻译', d: '转写定稿后进入独立翻译队列，中英双语对照；网络失败不打断录音，课堂原文优先保存到本机。' },
   { icon: IconBack, t: '一键标记疑问', d: '听课中随时标记没听懂的地方，自动附上课堂原文，可补充备注；来不及写时，一键也能先把疑问留住。' },
-  { icon: IconNotes, t: 'AI 学习包', d: '课后按课堂、讲义或备考场景生成纪要、词汇短语、重难点与自测卡，标记的疑问附参考解答。' },
+  { icon: IconNotes, t: 'AI 学习包', d: '课后按课堂、讲义或备考场景生成纪要、词汇短语、重难点与自测卡；生成后按类型归档，标记的疑问附参考解答。' },
   { icon: IconDoc, t: '音频与讲义导入', d: '导入已有音频整理成课堂记录；PDF / JPG / PNG 讲义可逐页提取文本、保留页图并进行视觉解析。' },
-  { icon: IconCards, t: '备考间隔复习', d: '六级等标准词表确定性导入，按资料语境提取词汇，FSRS 算法安排复习节奏，支持 TTS 跟读。' },
+  { icon: IconCards, t: '备考间隔复习', d: '六级等标准词表确定性导入，按资料语境提取词汇，FSRS 安排复习节奏；复习页按词汇、短语、自测和练习分类。' },
 ]
 
 const MANIFESTO = [
@@ -225,6 +225,16 @@ export default function Home() {
               </Reveal>
             ))}
           </div>
+          <Reveal delay={0.1}>
+            <div
+              className="mt-8 rounded-2xl px-5 py-4"
+              style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}
+            >
+              <p style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)', lineHeight: 1.8 }}>
+                <strong>试用说明：</strong>离线听课不需要注册账号；AI 学习包、翻译、云端听课和文档解析需要在「设置 → 试用额度」激活管理员发放的手机号。额度按每日次数/时长和有效期管理，多台设备共用，离线功能不受影响。
+              </p>
+            </div>
+          </Reveal>
         </div>
       </section>
 
@@ -299,7 +309,7 @@ export default function Home() {
               下节课，带上知习。
             </h2>
             <p className="mx-auto mt-5 max-w-md" style={{ color: 'rgba(255,255,255,.85)', fontSize: 15.5, lineHeight: 1.8 }}>
-              知习 v{CURRENT_RELEASE.version} {CURRENT_RELEASE.channel} · {CURRENT_RELEASE.minAndroidShort} · {CURRENT_RELEASE.abi} · 无需账号
+              知习 v{CURRENT_RELEASE.version} {CURRENT_RELEASE.channel} · {CURRENT_RELEASE.minAndroidShort} · {CURRENT_RELEASE.abi} · 离线无需账号 · AI/云端需激活额度
             </p>
             <div className="flex flex-wrap justify-center gap-4 mt-9">
               <Link to="/download" className="btn btn-light" style={{ fontWeight: 800 }}>
