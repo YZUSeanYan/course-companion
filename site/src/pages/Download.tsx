@@ -86,7 +86,7 @@ export default function Download() {
                 也可以主动开启云端听课。
               </div>
               <p className="body-2 mt-4" style={{ fontSize: 13, lineHeight: 1.7 }}>
-                本版修复生成学习包后打开课程可能出现的列表崩溃，并为复杂图示增加视觉模型自动回退。
+                本版将学习包改为后台生成，网络短暂中断后可继续等待结果，且同一讲义不会重复创建任务；同时保留此前课程列表与复杂图示修复。
               </p>
             </div>
 

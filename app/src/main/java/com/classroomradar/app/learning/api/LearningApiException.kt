@@ -28,6 +28,11 @@ sealed class LearningApiException(
         cause: Throwable? = null,
     ) : LearningApiException("$operation returned an invalid response: $detail", cause)
 
+    class JobFailed(
+        val code: String,
+        val userMessage: String,
+    ) : LearningApiException("Learning job failed [$code]: $userMessage")
+
     class CredentialStorage(
         detail: String,
         cause: Throwable? = null,

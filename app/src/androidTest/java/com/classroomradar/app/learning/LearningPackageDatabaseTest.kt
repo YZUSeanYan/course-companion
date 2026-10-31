@@ -47,4 +47,37 @@ class LearningPackageDatabaseTest {
 
         dao.deleteCourse(courseId)
     }
+
+    @Test
+    fun completedAnalysisCanBeFoundForRetryDeduplication() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val dao = ClassroomDatabase.get(context).learningDao()
+        val now = System.currentTimeMillis()
+        val courseId = dao.insertCourse(CourseEntity(name = "Retry dedup test", createdAtMillis = now))
+        val run = AnalysisRunEntity(
+            courseId = courseId,
+            targetType = "MATERIAL",
+            targetId = 7L,
+            inputSha256 = "a".repeat(64),
+            promptVersion = "learning-minutes-v2",
+            schemaVersion = "2.0",
+            model = "test-model",
+            status = "COMPLETED",
+            createdAtMillis = now,
+            completedAtMillis = now,
+        )
+        dao.insertAnalysisRun(run)
+
+        val found = dao.findCompletedAnalysisRun(
+            courseId = courseId,
+            targetType = "MATERIAL",
+            targetId = 7L,
+            inputSha256 = "a".repeat(64),
+            promptVersion = "learning-minutes-v2",
+            schemaVersion = "2.0",
+        )
+        assertEquals(run.model, found?.model)
+        assertEquals(null, dao.findCompletedAnalysisRun(courseId, "MATERIAL", 8L, "a".repeat(64), "learning-minutes-v2", "2.0"))
+        dao.deleteCourse(courseId)
+    }
 }

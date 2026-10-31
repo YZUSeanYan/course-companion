@@ -170,7 +170,11 @@ class LearningPresenter(private val appContext: Context) {
                 val itemCount = withContext(Dispatchers.IO) {
                     persistAnalysis(course.id, targetType, targetId, response, startedAt)
                 }
-                _message.value = "AI 学习包已生成：新增 $itemCount 项学习内容和复习卡片"
+                _message.value = if (itemCount == 0) {
+                    "这份内容的学习包已存在，无需重复生成。"
+                } else {
+                    "AI 学习包已生成：新增 $itemCount 项学习内容和复习卡片"
+                }
             } catch (error: Exception) {
                 _message.value = analysisErrorMessage(error)
             } finally {
@@ -296,19 +300,25 @@ class LearningPresenter(private val appContext: Context) {
     }
 
     private fun analysisErrorMessage(error: Exception): String = when (error) {
+        is LearningApiException.JobFailed -> when (error.code) {
+            "quota_exceeded" -> "今天的学习包生成次数已达上限，请明天再试。"
+            "provider_unavailable" -> "AI 模型暂时繁忙，任务未完成：${error.userMessage}"
+            "timeout" -> "讲义分析用时较长，暂时还没有结果。请稍后重试，已开始的同一任务会继续复用。"
+            else -> "学习包生成未完成：${error.userMessage}"
+        }
         is LearningApiException.Network -> {
             val reason = when (error.kind) {
-                NetworkErrorKind.TIMEOUT -> "连接或响应超时"
-                NetworkErrorKind.TLS -> "HTTPS 证书或加密连接失败"
-                else -> "无法建立网络连接"
+                NetworkErrorKind.TIMEOUT -> "与 AI 服务的连接等待超时"
+                NetworkErrorKind.TLS -> "HTTPS 安全连接失败，请检查系统时间或网络代理"
+                else -> "网络连接中断，未能继续获取生成结果"
             }
-            "$reason（${aiServiceConfig.displayTarget}）。请确认后端已启动、服务地址正确；真机不能用 10.0.2.2。"
+            "$reason。请检查 Wi-Fi 或移动网络后重试；若后台任务已创建，服务端会继续处理且同一讲义不会重复创建。"
         }
         is LearningApiException.Http -> when (error.httpCode) {
             401, 403 -> "AI 服务鉴权失败（HTTP ${error.httpCode}），请重新检查服务或联系后端管理员。"
             404 -> "AI 服务路径不存在（HTTP 404），请检查设置中的服务地址。"
             429 -> "AI 服务请求额度已用尽或触发限流，请稍后重试。"
-            503 -> "后端已连接，但 AI 模型不可用：${error.detail}。请配置服务端模型并重启后端。"
+            503 -> "后端已连接，但 AI 模型不可用：${error.detail}"
             else -> "生成学习包失败（HTTP ${error.httpCode}）：${error.detail}"
         }
         is LearningApiException.InvalidResponse ->
@@ -323,6 +333,15 @@ class LearningPresenter(private val appContext: Context) {
         response: AnalysisResultDto,
         startedAt: Long,
     ): Int {
+        val existing = repository.findCompletedAnalysisRun(
+            courseId = courseId,
+            targetType = targetType,
+            targetId = targetId,
+            inputSha256 = response.inputSha256,
+            promptVersion = response.promptVersion,
+            schemaVersion = response.schemaVersion,
+        )
+        if (existing != null) return 0
         val now = System.currentTimeMillis()
         val pack = response.learningPackage
         val items = buildList {

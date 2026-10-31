@@ -131,6 +131,37 @@ Lecsync 未配置、不可用、超时或响应无效时，继续使用现有 V2
 
 严格 schema 禁止额外字段并限制数组与文本长度。成功响应使用 `200`；输入校验失败为 `422`；无效 token 为 `401`；限流/每日配额为 `429`；provider 配置或可用性问题为 `503`；provider 无效响应经一次修复仍失败为 `502`。
 
+### 学习包后台任务
+
+手机网络不适合长时间等待没有响应字节的同步请求。客户端可先创建任务，再用短连接轮询：
+
+```text
+POST /v2/learning-pack/jobs
+Authorization: Bearer <device token>
+Content-Type: application/json
+```
+
+请求体与同步 `/v2/learning-pack` 相同，成功立即返回 `202`：
+
+```json
+{"jobId": "b3fd9d7e-6d8f-4f60-a8c5-112233445566", "status": "queued"}
+```
+
+轮询接口：
+
+```text
+GET /v2/learning-pack/jobs/{jobId}
+Authorization: Bearer <device token>
+```
+
+`status` 为 `queued`、`processing`、`succeeded` 或 `failed`。成功时 `result` 与同步响应的完整结构相同；失败时只返回脱敏的 `error.code` 和中文 `error.message`。其他设备读取同一 jobId 返回 `404`。
+
+```json
+{"jobId":"...","status":"failed","error":{"code":"provider_unavailable","message":"AI 服务暂时不可用，请稍后重试。"}}
+```
+
+同一设备的相同规范化请求会复用正在运行的任务；15 分钟内成功的同请求也直接复用，避免重复计费。任务状态持久化到 SQLite，服务重启时未完成任务会标记失败，不会假装仍在运行。原同步接口继续保留用于兼容。
+
 ## 测试
 
 测试使用临时 SQLite 数据库和 `httpx.MockTransport`，不会访问真实模型：

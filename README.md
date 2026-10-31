@@ -32,7 +32,7 @@
 - 音频工具支持同步转写、长音频任务、音频链接、Voice Typing 文件与短语音 WebSocket、任务取消/删除及云端录音下载。全部经自有网关，APK 不内置模型 API 密钥。
 - 自动老师提问已退出新链路；旧识别数据只读保留。录音与课堂详情均可手动“标记疑问”，附原文，备注可留空。
 - 学习项目支持自由填写课程/项目性质，课程性质会进入纪要请求。
-- v2 学习纪要：按 SESSION/MATERIAL/EXAM 生成主题化纪要、词汇短语、重难点、自测卡及手动疑问参考解答。
+- v2 学习纪要：按 SESSION/MATERIAL/EXAM 生成主题化纪要、词汇短语、重难点、自测卡及手动疑问参考解答。学习包通过后台任务生成，客户端用短连接轮询，移动网络短暂中断后可继续查询且不会重复创建同一讲义任务。
 - 复杂文档：PDF/JPG/PNG 上传后逐页生成原图与 PageAsset；文本可靠页使用原生文本，复杂页可插拔 MinerU。支持可替换多模态模型，OCR 不冒充视觉理解。
 - CET6/通用备考：按资料语境提取词汇，CET6 标准 CSV/TSV 词表确定性导入、去重并生成 FSRS 卡片。
 - 原页图与解析状态展示、双语导出、AI 学习包 Markdown 导出、复习卡片与 TTS。
@@ -46,7 +46,7 @@
 - MinerU、LibreOffice 是可选本地解析器，未配置时复杂页保留原图并标记 `NEEDS_VISION_PARSER`，不伪造结构化内容。
 - DOCX/PPTX 转换接口需 LibreOffice 环境；Android 文件入口目前以 TXT/PDF/图片为主。
 - 复杂页一次最多送 4 页给视觉模型，需后续按页队列扩展；云端音频任务和可选录音删除已实现，真实预生成缓存样例尚未提供。
-- 真实外教口音、长课续航、真机麦克风与模型成本未验收；正式 HTTPS 网关、V2.0.2 签名包和官网下载页已完成，参赛 PPT 尚未准备。
+- 真实外教口音、长课续航、真机麦克风与模型成本未验收；正式 HTTPS 网关、V2.0.3 签名包和官网下载页已完成，参赛 PPT 尚未准备。
 
 ## 本地构建
 
@@ -76,7 +76,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8765
 - 地址：`https://zhixi.seanyan.store`。APP 的“设置 → AI 服务连接”填此域名即可，不填 Lecsync 地址或任何密钥。
 - 服务端以 systemd `zhixi-gateway` 运行，仅监听 `127.0.0.1:8766` 并由 nginx 提供 HTTPS；`/health` 返回 200，现有各站点验收均为 200。
 - Lecsync 密钥只保存在服务器 `/opt/zhixi-gateway/.env`（权限 600），不进入 APK。DeepSeek/Kimi/MiMo 与视觉模型需另行配置，AI 学习包和视觉功能不能仅凭 Lecsync 地址推断可用。
-- 新构建可注入默认地址：`-PLEARNING_API_BASE_URL=https://zhixi.seanyan.store`。V2.0.2 签名包位于桌面 `知习-V2.0.2.apk`，官网下载页为 `https://shuike.seanyan.store/#/download`；release 不内置模型权重，首次离线听课前需在设置中下载或恢复模型。
+- 新构建可注入默认地址：`-PLEARNING_API_BASE_URL=https://zhixi.seanyan.store`。V2.0.3 签名包位于桌面 `知习-V2.0.3.apk`，官网下载页为 `https://shuike.seanyan.store/#/download`；release 不内置模型权重，首次离线听课前需在设置中下载或恢复模型。
 
 ## AI 服务连接与离线模型下载
 
@@ -89,7 +89,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8765
 ## 验证基线
 
 - Android：71 项 JVM 单测，覆盖课堂、导入、DTO、FSRS、CET6 词表、地址校验、术语编辑格式、FastAPI 错误解析、文本 PDF 视觉需求、学习列表复合 key、模型下载进度/镜像回退与完整性校验；Room 2→8 迁移保留历史与复习卡。
-- 设备：19 项测试，覆盖中英文 ASR、模型隔离与回收站、暂停/继续、学习包与 Lecsync 鉴权恢复、Realtime 消息和云端失败→本机识别回退。
-- 服务端：73 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、配额、设备隔离、学习包结构修复后的提供方回退、视觉复用现有密钥与跨提供方回退、PDF/图片页资产、SSRF 与失败路径。
+- 设备：22 项测试，覆盖中英文 ASR、模型隔离与回收站、暂停/继续、学习包后台任务轮询/失败/鉴权恢复、本地重复学习包去重、Realtime 消息和云端失败→本机识别回退。
+- 服务端：84 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径。
 
 完整结果与未完成项见 `docs/VERIFICATION.md`，AI 数据流见 `docs/AI_IMPLEMENTATION.md`。

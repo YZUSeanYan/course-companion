@@ -66,7 +66,7 @@ class LecsyncApiClientDeviceTest {
         val server = MockWebServer()
         server.enqueue(MockResponse().setResponseCode(201).setBody("{\"deviceId\":\"device\",\"token\":\"development-token\",\"tokenType\":\"bearer\"}"))
         val received = java.util.concurrent.CopyOnWriteArrayList<JsonObject>()
-        val latch = CountDownLatch(4)
+        val latch = CountDownLatch(5)
         val listener = object : okhttp3.WebSocketListener() {
             override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
                 webSocket.send("{\"type\":\"session.ready\",\"sessionId\":\"s1\"}")

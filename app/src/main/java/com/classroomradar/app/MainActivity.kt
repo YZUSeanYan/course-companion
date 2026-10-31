@@ -2526,7 +2526,7 @@ private fun SettingsScreen(
         item {
             val context = LocalContext.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("知习 v2.0.2 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
+                Text("知习 v2.0.3 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
                 Text("包含 sherpa-onnx 与 Silero VAD 等开源组件，详情见应用随附的第三方声明。", color = LiquidTextSecondary)
                 Row(
                     modifier = Modifier

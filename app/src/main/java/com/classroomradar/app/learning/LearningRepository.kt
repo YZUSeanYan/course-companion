@@ -41,6 +41,22 @@ class LearningRepository private constructor(private val dao: LearningDao) {
     fun saveLearningPackage(items: List<LearningItemEntity>, cards: List<ReviewCardEntity>, run: AnalysisRunEntity) =
         dao.saveLearningPackage(items, cards, run)
 
+    fun findCompletedAnalysisRun(
+        courseId: Long,
+        targetType: String,
+        targetId: Long,
+        inputSha256: String,
+        promptVersion: String,
+        schemaVersion: String,
+    ): AnalysisRunEntity? = dao.findCompletedAnalysisRun(
+        courseId,
+        targetType,
+        targetId,
+        inputSha256,
+        promptVersion,
+        schemaVersion,
+    )
+
     companion object {
         @Volatile private var instance: LearningRepository? = null
 
