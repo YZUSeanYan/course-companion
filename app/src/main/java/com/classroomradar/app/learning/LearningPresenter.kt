@@ -5,6 +5,8 @@ import android.net.Uri
 import com.classroomradar.app.BuildConfig
 import com.classroomradar.app.data.ClassroomRepository
 import com.classroomradar.app.learning.api.AiServiceConfig
+import com.classroomradar.app.learning.api.AccountStatusDto
+import com.classroomradar.app.learning.api.AccountStatusStore
 import com.classroomradar.app.learning.api.AnalysisChunkInput
 import com.classroomradar.app.learning.api.AnalysisRequest
 import com.classroomradar.app.learning.api.AnalysisResultDto
@@ -14,6 +16,7 @@ import com.classroomradar.app.learning.api.LearningApiException
 import com.classroomradar.app.learning.api.LearningPackRequestV2
 import com.classroomradar.app.learning.api.ManualDoubtInput
 import com.classroomradar.app.learning.api.NetworkErrorKind
+import com.classroomradar.app.learning.api.normalizeAccountPhone
 import com.classroomradar.app.learning.api.VisualBlockInput
 import com.classroomradar.app.learning.api.requiresVisionForLearningPack
 import android.util.Base64
@@ -46,6 +49,7 @@ class LearningPresenter(private val appContext: Context) {
     private val classroomRepository = ClassroomRepository.get(appContext)
     private val lectureImporter = LectureImporter()
     private val aiServiceConfig = AiServiceConfig(appContext)
+    private val accountStatusStore = AccountStatusStore(appContext)
     private val learningApi = LearningApiClient(
         appContext,
         BuildConfig.LEARNING_API_BASE_URL,
@@ -54,12 +58,13 @@ class LearningPresenter(private val appContext: Context) {
     private val protocolJson = Json { ignoreUnknownKeys = false }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var detailJob: Job? = null
+    private var accountRefreshJob: Job? = null
     private var selectedCourseId: Long? = null
 
     private val _courses = MutableStateFlow<List<CourseEntity>>(emptyList())
     val courses: StateFlow<List<CourseEntity>> = _courses.asStateFlow()
-    private val _reviewCards = MutableStateFlow<List<ReviewCardEntity>>(emptyList())
-    val reviewCards: StateFlow<List<ReviewCardEntity>> = _reviewCards.asStateFlow()
+    private val _reviewEntries = MutableStateFlow<List<ReviewCardWithSource>>(emptyList())
+    val reviewEntries: StateFlow<List<ReviewCardWithSource>> = _reviewEntries.asStateFlow()
     private val _courseDetail = MutableStateFlow(CourseDetailState())
     val courseDetail: StateFlow<CourseDetailState> = _courseDetail.asStateFlow()
     private val _isImporting = MutableStateFlow(false)
@@ -70,12 +75,20 @@ class LearningPresenter(private val appContext: Context) {
     val serviceStatus: StateFlow<String> = _serviceStatus.asStateFlow()
     private val _aiServiceUrl = MutableStateFlow(aiServiceConfig.baseUrl)
     val aiServiceUrl: StateFlow<String> = _aiServiceUrl.asStateFlow()
+    private val _accountStatus = MutableStateFlow(accountStatusStore.load())
+    val accountStatus: StateFlow<AccountStatusDto?> = _accountStatus.asStateFlow()
+    private val _accountSupported = MutableStateFlow(accountStatusStore.isSupported())
+    val accountSupported: StateFlow<Boolean> = _accountSupported.asStateFlow()
+    private val _accountMessage = MutableStateFlow<String?>(null)
+    val accountMessage: StateFlow<String?> = _accountMessage.asStateFlow()
+    private val _isAccountBusy = MutableStateFlow(false)
+    val isAccountBusy: StateFlow<Boolean> = _isAccountBusy.asStateFlow()
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
     init {
         scope.launch { repository.observeCourses().collect { _courses.value = it } }
-        scope.launch { repository.observeAllCards().collect { _reviewCards.value = it } }
+        scope.launch { repository.observeAllCardsWithSource().collect { _reviewEntries.value = it } }
     }
 
     fun createCourse(name: String, courseNature: String, examProfile: String = CourseEntity.PROFILE_FOREIGN_CLASS) {
@@ -177,6 +190,7 @@ class LearningPresenter(private val appContext: Context) {
                 }
             } catch (error: Exception) {
                 _message.value = analysisErrorMessage(error)
+                refreshAccount(silent = true)
             } finally {
                 _isAnalyzing.value = false
             }
@@ -301,6 +315,8 @@ class LearningPresenter(private val appContext: Context) {
 
     private fun analysisErrorMessage(error: Exception): String = when (error) {
         is LearningApiException.JobFailed -> when (error.code) {
+            "account_required" -> "AI 学习包需要先激活试用额度：设置 → 试用额度 → 输入手机号。"
+            "account_expired", "account_disabled" -> error.userMessage
             "quota_exceeded" -> "今天的学习包生成次数已达上限，请明天再试。"
             "provider_unavailable" -> "AI 模型暂时繁忙，任务未完成：${error.userMessage}"
             "timeout" -> "讲义分析用时较长，暂时还没有结果。请稍后重试，已开始的同一任务会继续复用。"
@@ -314,11 +330,21 @@ class LearningPresenter(private val appContext: Context) {
             }
             "$reason。请检查 Wi-Fi 或移动网络后重试；若后台任务已创建，服务端会继续处理且同一讲义不会重复创建。"
         }
-        is LearningApiException.Http -> when (error.httpCode) {
-            401, 403 -> "AI 服务鉴权失败（HTTP ${error.httpCode}），请重新检查服务或联系后端管理员。"
-            404 -> "AI 服务路径不存在（HTTP 404），请检查设置中的服务地址。"
-            429 -> "AI 服务请求额度已用尽或触发限流，请稍后重试。"
-            503 -> "后端已连接，但 AI 模型不可用：${error.detail}"
+        is LearningApiException.Http -> when {
+            error.errorCode == "account_required" ->
+                "AI 学习包、翻译和云端听课需要先激活试用额度：设置 → 试用额度 → 输入手机号。"
+            error.errorCode == "account_expired" -> error.detail
+            error.errorCode == "account_disabled" -> error.detail
+            error.errorCode == "quota_exceeded" -> error.detail
+            error.errorCode == "device_limit_reached" -> error.detail
+            error.httpCode == 401 ->
+                "AI 服务鉴权失败（HTTP 401），请重新检查服务或联系后端管理员。"
+            error.httpCode == 403 ->
+                if (error.detail.isNotBlank()) error.detail else "当前设备没有试用额度，请联系管理员。"
+            error.httpCode == 404 -> "AI 服务路径不存在（HTTP 404），请检查设置中的服务地址。"
+            error.httpCode == 429 ->
+                if (error.detail.isNotBlank()) error.detail else "AI 服务请求额度已用尽或触发限流，请稍后重试。"
+            error.httpCode == 503 -> "后端已连接，但 AI 模型不可用：${error.detail}"
             else -> "生成学习包失败（HTTP ${error.httpCode}）：${error.detail}"
         }
         is LearningApiException.InvalidResponse ->
@@ -448,12 +474,95 @@ class LearningPresenter(private val appContext: Context) {
 
     fun saveAiServiceUrl(rawUrl: String) {
         try {
+            val previous = _aiServiceUrl.value
             _aiServiceUrl.value = aiServiceConfig.save(rawUrl)
             _serviceStatus.value = "服务地址已保存 · ${aiServiceConfig.displayTarget}"
+            if (previous != _aiServiceUrl.value) {
+                _accountStatus.value = null
+                _accountSupported.value = true
+                _accountMessage.value = "服务地址已更换，请重新激活试用额度"
+            }
             checkAiService()
         } catch (error: IllegalArgumentException) {
             _serviceStatus.value = "服务地址未保存：${error.message}"
         }
+    }
+
+    fun refreshAccount(silent: Boolean = false) {
+        if (accountRefreshJob?.isActive == true) return
+        accountRefreshJob = scope.launch {
+            try {
+                val status = learningApi.accountStatus()
+                accountStatusStore.save(status)
+                _accountStatus.value = status
+                _accountSupported.value = true
+                if (!silent) {
+                    _accountMessage.value = if (status.activated) {
+                        "额度状态已刷新"
+                    } else {
+                        "尚未激活试用额度"
+                    }
+                }
+            } catch (error: LearningApiException.Http) {
+                if (error.httpCode == 404 || error.httpCode == 405) {
+                    accountStatusStore.markUnsupported()
+                    _accountStatus.value = null
+                    _accountSupported.value = false
+                    if (!silent) _accountMessage.value = "当前 AI 服务未启用手机号额度"
+                } else if (!silent) {
+                    _accountMessage.value = accountErrorMessage(error)
+                }
+            } catch (error: Exception) {
+                if (!silent) _accountMessage.value = accountErrorMessage(error)
+            }
+        }
+    }
+
+    fun activateAccount(rawPhone: String) {
+        val phone = normalizeAccountPhone(rawPhone)
+        if (phone == null) {
+            _accountMessage.value = "请输入 11 位中国大陆手机号"
+            return
+        }
+        if (_isAccountBusy.value) return
+        _isAccountBusy.value = true
+        _accountMessage.value = null
+        scope.launch {
+            try {
+                val status = learningApi.activateAccount(phone)
+                accountStatusStore.save(status)
+                _accountStatus.value = status
+                _accountSupported.value = true
+                _accountMessage.value = "已激活 ${status.phoneMasked}，今日额度已同步"
+            } catch (error: Exception) {
+                _accountMessage.value = accountErrorMessage(error)
+            } finally {
+                _isAccountBusy.value = false
+            }
+        }
+    }
+
+    fun consumeAccountMessage() {
+        _accountMessage.value = null
+    }
+
+    private fun accountErrorMessage(error: Exception): String = when (error) {
+        is LearningApiException.Http -> when (error.errorCode) {
+            "account_not_found" -> "未找到该手机号的试用额度，请联系管理员添加"
+            "account_disabled" -> "试用账号已停用，请联系管理员"
+            "account_expired" -> error.detail
+            "device_limit_reached" -> error.detail
+            "device_bound_elsewhere" -> error.detail
+            else -> when (error.httpCode) {
+                401 -> "设备凭据失效，请重新保存服务地址后再试"
+                403 -> error.detail.ifBlank { "当前设备没有试用额度，请联系管理员" }
+                404, 405 -> "当前 AI 服务未启用手机号额度"
+                429 -> error.detail
+                else -> "额度服务请求失败（HTTP ${error.httpCode}）：${error.detail}"
+            }
+        }
+        is LearningApiException.Network -> "网络连接失败，请检查 Wi-Fi 或移动网络后重试"
+        else -> error.message ?: "额度服务暂时不可用"
     }
 
     fun checkAiService() {
@@ -478,6 +587,9 @@ class LearningPresenter(private val appContext: Context) {
             } catch (error: Exception) {
                 "服务检查失败 · ${aiServiceConfig.displayTarget}\n${error.message ?: "未知错误"}"
             }
+        }
+        if (_serviceStatus.value.contains("在线")) {
+            refreshAccount(silent = true)
         }
     }
 
@@ -578,15 +690,14 @@ class LearningPresenter(private val appContext: Context) {
                     if (course.teacher.isNotBlank()) appendLine("- 教师：${course.teacher}")
                     appendLine("- 导出时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date())}")
                     appendLine()
-                    items.groupBy { it.type }.forEach { (type, group) ->
-                        appendLine("## " + when (type) {
-                            LearningItemEntity.TYPE_VOCABULARY -> "词汇"
-                            LearningItemEntity.TYPE_PHRASE -> "短语"
-                            LearningItemEntity.TYPE_KEY_POINT -> "重难点与摘要"
-                            LearningItemEntity.TYPE_QUESTION -> "课堂提问"
-                            LearningItemEntity.TYPE_QUIZ -> "练习题"
-                            else -> "学习内容"
-                        })
+                    val grouped = items.groupBy { it.type }
+                    val orderedGroups = LearningCategory.entries.mapNotNull { category ->
+                        grouped[category.type]?.let { category.label to it }
+                    } + grouped
+                        .filterKeys { LearningCategory.fromType(it) == null }
+                        .map { (type, group) -> learningTypeLabel(type) to group }
+                    orderedGroups.forEach { (label, group) ->
+                        appendLine("## $label")
                         appendLine()
                         group.forEach { item ->
                             appendLine("### ${item.title}")
@@ -611,6 +722,7 @@ class LearningPresenter(private val appContext: Context) {
 
     fun close() {
         detailJob?.cancel()
+        accountRefreshJob?.cancel()
         scope.cancel()
     }
 }

@@ -145,6 +145,9 @@ class LearningPackJobError(StrictV2Model):
         "quota_exceeded",
         "provider_unavailable",
         "invalid_response",
+        "account_required",
+        "account_expired",
+        "account_disabled",
         "internal",
     ]
     message: str = Field(min_length=1, max_length=1000)

@@ -4,19 +4,21 @@
 
 ## 自动化结果
 
-- Android JVM：**71 项单元测试，0 失败**，包含课堂、导入、DTO、FSRS、CET6 CSV/TSV 词表、AI 地址校验、术语编辑格式、FastAPI 错误数组、文本 PDF 视觉需求、学习/讲义列表复合 key、真实下载字节进度、镜像回退与完整性校验。
-- FastAPI：**84 项 pytest 通过**，包含完整 Lecsync REST/Realtime/Voice Typing、提供方字段归一化、Kimi 温度约束、schema 修复失败后的跨提供方回退、视觉模型复用现有密钥与 MiMo→DeepSeek 回退、学习包异步任务创建/轮询/去重/跨设备隔离/总超时/重启恢复、幂等、配额、Webhook 加密与验签、页面资产、上传和密钥不泄露。
-- Android lint、debug、release、debugAndroidTest：全部成功。官网 TypeScript/Vite 构建成功，本轮下载页与发布常量定向 ESLint 通过；全仓模板组件仍有此前已知的 8 项 lint 规则错误，本次未改动这些模板。
-- **22 项设备测试全部通过**：Room 2→8 迁移、旧课堂/复习卡/历史自动识别保留、模型隔离与回收站恢复、中文与英文 ASR、录音暂停/继续/停止且 session 不变、学习包后台任务轮询成功/失败/鉴权恢复、本地重复学习包去重、Realtime 消息与过期令牌恢复、云端失败→本机识别回退，以及课堂/复习 UI fixture。
+- Android JVM：**78 项单元测试，0 失败**，包含课堂、导入、DTO、FSRS、CET6 CSV/TSV 词表、AI 地址校验、术语编辑格式、FastAPI 错误数组、文本 PDF 视觉需求、学习/讲义列表复合 key、学习内容分类顺序与未知类型回退、复习分类到期统计、试用手机号规范化、账号 DTO、真实下载字节进度、镜像回退与完整性校验。
+- FastAPI：**95 项 pytest 通过**，包含完整 Lecsync REST/Realtime/Voice Typing、提供方字段归一化、Kimi 温度约束、schema 修复失败后的跨提供方回退、视觉模型复用现有密钥与 MiMo→DeepSeek 回退、学习包异步任务创建/轮询/去重/跨设备隔离/总超时/重启恢复、试用账号激活/停用/到期/设备上限、多设备共享额度、管理后台登录/CSRF/账号 CRUD/批量导入/统计、请求日志、手机号密文存储、幂等、配额、Webhook 加密与验签、页面资产、上传和密钥不泄露。
+- Android lint、debug、release、debugAndroidTest：全部成功。官网 TypeScript/Vite 构建成功，本轮下载页与发布常量定向 ESLint 通过；全仓模板组件仍有此前已知的 8 项 lint 规则错误，本次未改动这些模板。运营后台 `npm ci && npm run build` 成功。
+- **24 项设备测试全部通过**：Room 2→8 迁移、旧课堂/复习卡/历史自动识别保留、模型隔离与回收站恢复、中文与英文 ASR、录音暂停/继续/停止且 session 不变、学习包后台任务轮询成功/失败/鉴权恢复、本地重复学习包去重、试用额度激活请求与错误码头、Realtime 消息与过期令牌恢复、云端失败→本机识别回退，以及课堂/复习 UI fixture。
 
 ## 正式部署与真实联调
 
-- 正式网关 `https://zhixi.seanyan.store/health` 返回 200 和 `providerConfigured=true`；systemd `zhixi-gateway` 为 active，后端仅绑定 `127.0.0.1:8766`。当前运行 `/opt/zhixi-gateway-20261031-r6`，R5/R4/R3 与旧 unit 均保留用于回滚。
+- 正式网关 `https://zhixi.seanyan.store/health` 返回 200 和 `providerConfigured=true`；systemd `zhixi-gateway` 为 active，后端仅绑定 `127.0.0.1:8766`。当前运行 `/opt/zhixi-gateway-20261031-r9`，R8/R7/R6/R5/R4/R3 与旧 unit 均保留用于回滚。
+- 运营后台 `https://zhixi.seanyan.store/admin/` 已上线，nginx 原有 `location /` 代理全部路径，无需新增 location。管理员密码、`ADMIN_SESSION_SECRET`、`ACCOUNT_ENCRYPTION_KEY` 只写入服务器 `/opt/zhixi-gateway/.env`（600）；登录后 `/admin/api/session` 返回 `authenticated=true`，概览、账号、设备、请求页均返回 200。页面使用 HttpOnly + Secure + SameSite=Strict 签名 cookie，写操作要求 `X-Requested-With: zhixi-admin`。
+- 生产冒烟：在运营后台创建 `139****0099` 测试账号，正式签名 V2.0.4 安装在模拟器并默认连接 `https://zhixi.seanyan.store`，在「设置 → 试用额度」成功激活并显示有效期与 0/1、0/5、0/1000、0/1 额度；后台立即显示该账号、1 台设备和脱敏请求记录。测试完成后已在后台删除该账号，删除后 App 刷新回到未激活状态。另用未激活设备请求 `/v1/analyze`，返回 403、`x-zhixi-error-code: account_required` 和中文激活指引；`/v1/accounts/me` 返回 `activated=false, required=true`。
 - Lecsync 实际文本翻译成功返回中文结果；1 秒合成音频完成 `session.ready → usage.update → session.ended`。
 - DeepSeek Flash、Kimi `k3.1-pro-highspeed`、MiMo `mimo-v2.6-flash` 均已分别生成真实学习包；Kimi 按接口要求使用 `temperature=1`。提供方字段别名、`sourceId/sourceIds` 和严格 schema 修复已验证。
 - APP 设置页已显示正式域名在线；公网 WebSocket 云端课堂实际开始、收到实时文本并正常停止。R4 公网合成文本生成返回 HTTP 200；随后 APP 内再次真实生成并保存 **39 项学习内容和复习卡片**，完整通过 APP→网关→模型→Room 链路。
 - 视觉能力已用真实模型探针和正式网关验证：MiMo `mimo-v2.6-pro` 与 DeepSeek `deepseek-flash` 均能读取合成图；正式 `/v2/learning-pack` 返回 200、`model=mimo-v2.6-pro` 和 1 条 `visualNotes`，模型正确读出 A/B 支座、中心 `F = 12 kN`、`L = 8 m`、`24 kN·m` 及公式，sourceId 为有效的 `qa-page-1`。R6 公网再次验证 MiMo 经一次修复仍结构无效时自动切换 `deepseek-flash` 并返回 200，证明跨视觉提供方回退生效。视觉端点复用现有 MiMo/DeepSeek 密钥，不新增 APP 密钥。
-- 官网首页、功能、隐私与下载页已更新并发布 V2.0.3；公网 APK 完整下载后 SHA-256 与本地签名包一致。前代 APK、下载计数、网关健康及 `seanyan.store`、`www`、`api`、`quiz`、`hanshang`、`classroom`、`listen`、`token` 均保持 200。
+- 官网首页、功能、隐私与下载页已更新并发布 V2.0.4；公网 APK 完整下载后 SHA-256 与本地签名包一致。前代 APK、下载计数、网关健康及 `seanyan.store`、`www`、`api`、`quiz`、`hanshang`、`classroom`、`listen`、`token` 均保持 200。
 - Lecsync 环境文件权限为 600，未进入源码、APK 或最终汇报。
 
 ## 本轮功能验收
@@ -34,6 +36,8 @@
 - AI 学习包在结构修复失败后继续按 DeepSeek→Kimi→MiMo 回退；可靠原生文本 PDF 不再被无条件要求视觉 Provider，FastAPI 422 数组可显示具体原因。Markdown 导出成功提示在当前页面可见，系统选择器使用 `*/*` 保留 `.md`，已实际生成并核对导出文件，不再追加 `.txt`。
 - V2.0.2 修复真机“生成学习包后闪退”：课程讲义与学习内容原先在同一 `LazyColumn` 使用各自裸数据库 ID，双方均为 `1` 时触发重复 key；现已改为 `material-*`、`learning-*`，课堂疑问与转写改为 `doubt-*`、`transcript-*`，并用相同 ID 场景的 JVM 回归测试及模拟器课程页打开验证。复杂视觉生成的前端读取等待放宽到 600 秒，并增加跨视觉提供方结构回退。
 - V2.0.3 修复移动网络中的长请求 499：nginx 日志确认手机请求已到达服务端，但同步生成在模型返回前被客户端网络中断。正式网关改为 `POST /v2/learning-pack/jobs` 快速返回任务号，App 使用短连接轮询，网络短暂中断可重试；同设备同内容复用 active/15 分钟内成功任务，本地按 inputSha256 防止重复插入。验证：POST 202、轮询 succeeded、重复 POST 复用同 jobId；APP 内真实图片生成 29 项，二次生成提示“学习包已存在”；R8 增加 360 秒总超时，防止 provider 长时间无返回时任务永久 processing。
+- 学习内容分类改版：课程页不再平铺全部学习条目，而是按“课堂纪要、我的疑问、重点与摘要、词汇、短语、自测问答、练习”生成分类卡片，显示数量与内容预览，点开二级页面查看带来源的具体条目；零条目分类不显示，未知历史类型归入末位“学习内容”。复习页改为分类总览（今日到期/卡片总数），进入分类后保留翻面、朗读和 FSRS 评分，并列出该分类全部卡片；“全部到期”可跨分类连续复习。模拟器以 13 项学习内容、9 张复习卡（5 张到期）验证分类顺序、二级页返回、翻面评分与到期数实时递减；Room 仅新增 JOIN 查询，无表结构或迁移变化。
+- V2.0.4 试用额度与运营后台：新增 `access_accounts`、`account_devices`、`account_daily_usage`、`account_lecsync_usage`、`api_requests` 表；手机号用 HMAC 查找、Fernet 密文保存，App 本地仅存脱敏号码。新设备激活手机号后，AI 学习包、翻译、云端音频和文档解析按账号级每日额度结算，多设备共享；停用、到期、设备上限和额度耗尽均有可执行中文提示，离线听课不受影响。运营后台支持密码登录、新增/批量添加手机号、配置每日 AI 包/音频分钟/翻译字符/文档次数与有效期、禁用/解绑/删除账号，以及请求、学习包、音频、翻译、活跃设备、错误率、趋势、接口和模型分布统计。本地网关以 1 个账号、2 台设备验证激活、共享额度、管理后台新增/编辑/禁用/恢复、请求日志与手机号脱敏；运营后台在 Edge 无头浏览器逐页截图验收，控制台无错误。正式服务器部署与 V2.0.4 发布结果见下方。
 - 正式隐私政策包含本地/在线路径、提供方、凭据、保留删除、模型文件、第三方组件、未成年人及课堂授权；设置中有官网按钮。
 
 ## 真实验收边界
@@ -42,11 +46,12 @@
 2. 自有国内镜像的三个官方包已连续完成 APP 内下载、提取、全文件校验与启用，公网镜像哈希也与官方一致；镜像篡改、断连回退和旧模型保留由 JVM fixture 覆盖。真实不同运营商的下载速度仍需真机网络长期观察。
 3. 真实外教口音、长课续航、真机麦克风和模型成本未验收；视觉合成工程页已验收，不代表所有真实讲义版式都已达到同等识别质量。
 4. MinerU/LibreOffice 仍为可插拔解析器，未配置时复杂页只保留原图并标待解析；DOCX/PPTX 需对应环境。
-5. 正式 HTTPS 网关、V2.0.3 签名包与官网下载页已完成；未准备参赛 PPT。
+5. 正式 HTTPS 网关、运营后台、V2.0.4 签名包与官网下载页已完成；未准备参赛 PPT。
 
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
-- V2.0.3 签名 Release：桌面 `知习-V2.0.3.apk`，`versionName=2.0.3`、`versionCode=5`，v3 签名验证通过；大小 **50,470,298 字节**，SHA-256：`1820D74FA76576CF097C4E414CF1D13E8F0B95BAF4F0E7742BA8A6DEF72AEA80`。
-- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.3 APK 已完整下载并核对为同一 SHA-256。
+- V2.0.4 签名 Release：桌面 `知习-V2.0.4.apk`，`versionName=2.0.4`、`versionCode=6`，v3 签名验证通过；大小 **50,535,834 字节**，SHA-256：`C908BDC68B0F17238B9D05381A2E94B04425C61A3EE21654E755FAD8F184ED92`。
+- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.4 APK 已完整下载并核对为同一 SHA-256；官网首页、下载页与隐私页已更新。
+- 运营后台：`https://zhixi.seanyan.store/admin/`，管理员密码只保存在服务器 `/opt/zhixi-gateway/.env`（600），不写入仓库、APK 或前端 bundle。
 - Release 默认网关为 `https://zhixi.seanyan.store`，不包含模型权重或 API 密钥；离线模型首次使用前需下载或恢复。

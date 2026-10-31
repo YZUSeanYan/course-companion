@@ -1,5 +1,6 @@
 package com.classroomradar.app.learning
 
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -105,6 +106,14 @@ data class ReviewCardEntity(
     val lapses: Int = 0,
     val lastReviewedAtMillis: Long? = null,
     val lastRating: Int? = null,
+)
+
+/** Review card joined with its source learning item so the UI can group by type. */
+data class ReviewCardWithSource(
+    @Embedded val card: ReviewCardEntity,
+    val itemType: String,
+    val courseId: Long,
+    val itemTitle: String,
 )
 
 @Entity(

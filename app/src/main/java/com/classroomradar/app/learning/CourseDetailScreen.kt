@@ -2,6 +2,7 @@ package com.classroomradar.app.learning
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,6 +50,7 @@ fun CourseDetailScreen(
     onAnalyzeMaterial: (Long) -> Unit,
     onImportGlossary: () -> Unit,
     onExport: () -> Unit,
+    onOpenCategory: (String) -> Unit,
     onLoadPageImage: suspend (String, String) -> ByteArray,
     onConsumeMessage: () -> Unit,
     modifier: Modifier = Modifier,
@@ -59,6 +62,7 @@ fun CourseDetailScreen(
         }
         return
     }
+    val categoryGroups = remember(state.learningItems) { groupLearningItems(state.learningItems) }
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -168,21 +172,40 @@ fun CourseDetailScreen(
             )
         }
         item {
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = RadarBrandDeep)
-                Spacer(Modifier.height(1.dp))
-                Text("  AI 学习内容", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                Text(
+                    "  AI 学习内容",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = LiquidTextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.learningItems.isNotEmpty()) {
+                    Text(
+                        "${state.learningItems.size} 项",
+                        color = RadarBrandDeep,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
         if (state.learningItems.isEmpty()) {
             item {
                 GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
-                    Text("学习包生成后，词汇、短语、重难点和练习题会显示在这里，并保留来源。", color = LiquidTextSecondary)
+                    Text("学习包生成后，课堂纪要、词汇、短语、重难点和练习题会按类型归档在这里。", color = LiquidTextSecondary)
                 }
             }
         } else {
-            items(state.learningItems, key = { courseDetailItemKey("learning", it.id) }) { item ->
-                LearningItemCard(item)
+            item {
+                Text(
+                    "已按类型整理成 ${categoryGroups.size} 个分类，点开查看具体内容。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LiquidTextSecondary,
+                )
+            }
+            items(categoryGroups, key = { "category-${it.type}" }) { group ->
+                LearningCategoryCard(group = group, onClick = { onOpenCategory(group.type) })
             }
         }
         item { Spacer(Modifier.height(16.dp)) }
@@ -190,11 +213,13 @@ fun CourseDetailScreen(
 }
 
 @Composable
-internal fun LearningItemCard(item: LearningItemEntity) {
+internal fun LearningItemCard(item: LearningItemEntity, showTypeLabel: Boolean = true) {
     GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(learningTypeLabel(item.type), color = RadarBrandDeep, fontWeight = FontWeight.Bold)
+                if (showTypeLabel) {
+                    Text(learningTypeLabel(item.type), color = RadarBrandDeep, fontWeight = FontWeight.Bold)
+                }
                 if (item.inCET6) {
                     Text("CET6", color = RadarBrandDeep, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
@@ -216,14 +241,3 @@ internal fun LearningItemCard(item: LearningItemEntity) {
 }
 
 internal fun courseDetailItemKey(kind: String, id: Long): String = "$kind-$id"
-
-internal fun learningTypeLabel(type: String): String = when (type) {
-    LearningItemEntity.TYPE_VOCABULARY -> "词汇"
-    LearningItemEntity.TYPE_PHRASE -> "短语"
-    LearningItemEntity.TYPE_KEY_POINT -> "重难点"
-    LearningItemEntity.TYPE_QUESTION -> "自测问答"
-    LearningItemEntity.TYPE_QUIZ -> "练习"
-    LearningItemEntity.TYPE_MEETING_MINUTES -> "课堂/学习纪要"
-    LearningItemEntity.TYPE_DOUBT -> "我的疑问"
-    else -> "学习内容"
-}

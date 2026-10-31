@@ -5,7 +5,15 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 
-from .db import Database, QuotaExceeded
+from .accounts import resolve_quota_subject
+from .config import Settings
+from .db import (
+    AccountDisabled,
+    AccountExpired,
+    AccountRequired,
+    Database,
+    QuotaExceeded,
+)
 from .provider import (
     ProviderConfigurationError,
     ProviderInvalidResponse,
@@ -40,6 +48,12 @@ def recent_success_cutoff() -> str:
 
 
 def error_for_exception(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, AccountRequired):
+        return "account_required", str(exc)
+    if isinstance(exc, AccountDisabled):
+        return "account_disabled", str(exc)
+    if isinstance(exc, AccountExpired):
+        return "account_expired", str(exc)
     if isinstance(exc, QuotaExceeded):
         return "quota_exceeded", QUOTA_EXCEEDED_MESSAGE
     if isinstance(exc, (ProviderConfigurationError, ProviderUnavailable, TimeoutError)):
@@ -62,9 +76,9 @@ def job_response_payload(job: dict) -> dict:
 
 
 class LearningPackJobManager:
-    def __init__(self, database: Database, daily_quota: int) -> None:
+    def __init__(self, database: Database, settings: Settings) -> None:
         self.database = database
-        self.daily_quota = daily_quota
+        self.settings = settings
         self._tasks: set[asyncio.Task] = set()
         self._fail_interrupted_jobs()
 
@@ -75,7 +89,7 @@ class LearningPackJobManager:
         for job in interrupted:
             if job["analysis_id"]:
                 try:
-                    self.database.release_analysis(job["device_id"])
+                    self.database.release_analysis(job["device_id"], job.get("account_id"))
                 except Exception:
                     pass
 
@@ -102,11 +116,14 @@ class LearningPackJobManager:
         provider: V2Provider,
     ) -> None:
         analysis_id: str | None = None
+        account_id: str | None = None
         quota_reserved = False
         try:
             self.database.mark_learning_pack_job_processing(device_id, job_id)
+            subject = resolve_quota_subject(self.database, self.settings, device_id)
+            account_id = subject.account_id
             analysis_id = self.database.reserve_analysis(
-                device_id, self.daily_quota
+                device_id, subject.limits.ai_packs, account_id
             )
             quota_reserved = True
             self.database.set_learning_pack_job_analysis(
@@ -140,26 +157,26 @@ class LearningPackJobManager:
             )
         except asyncio.CancelledError:
             if quota_reserved:
-                self._release_quota(device_id)
+                self._release_quota(device_id, account_id)
             self._fail_job(
                 device_id, job_id, "internal", INTERNAL_ERROR_MESSAGE, provider
             )
             raise
         except TimeoutError:
             if quota_reserved:
-                self._release_quota(device_id)
+                self._release_quota(device_id, account_id)
             self._fail_job(
                 device_id, job_id, "provider_unavailable", PROVIDER_TIMEOUT_MESSAGE, provider
             )
         except Exception as exc:
             if quota_reserved:
-                self._release_quota(device_id)
+                self._release_quota(device_id, account_id)
             code, message = error_for_exception(exc)
             self._fail_job(device_id, job_id, code, message, provider)
 
-    def _release_quota(self, device_id: str) -> None:
+    def _release_quota(self, device_id: str, account_id: str | None) -> None:
         try:
-            self.database.release_analysis(device_id)
+            self.database.release_analysis(device_id, account_id)
         except Exception:
             pass
 

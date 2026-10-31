@@ -70,6 +70,14 @@ interface LearningDao {
     @Query("SELECT * FROM review_cards ORDER BY dueAtMillis ASC, id ASC")
     fun observeAllCards(): Flow<List<ReviewCardEntity>>
 
+    @Query(
+        "SELECT review_cards.*, learning_items.type AS itemType, " +
+            "learning_items.courseId AS courseId, learning_items.title AS itemTitle " +
+            "FROM review_cards INNER JOIN learning_items ON learning_items.id = review_cards.learningItemId " +
+            "ORDER BY review_cards.dueAtMillis ASC, review_cards.id ASC",
+    )
+    fun observeAllCardsWithSource(): Flow<List<ReviewCardWithSource>>
+
     @Query("SELECT * FROM review_cards WHERE id = :cardId")
     fun getReviewCard(cardId: Long): ReviewCardEntity?
 

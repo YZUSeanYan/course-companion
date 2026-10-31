@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .provider_catalog import provider_endpoints_from_env
 
@@ -28,6 +29,18 @@ def _float_env(name: str, default: float, minimum: float, maximum: float) -> flo
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_path: str
@@ -47,11 +60,32 @@ class Settings:
     lecsync_daily_audio_seconds: float = 3600.0
     lecsync_rate_limit: int = 60
     lecsync_max_concurrent_streams: int = 3
+    require_account_activation: bool = True
+    usage_timezone: str = "Asia/Shanghai"
+    account_encryption_key: str | None = None
+    account_default_ai_pack_daily_limit: int = 5
+    account_default_audio_minutes_daily_limit: int = 60
+    account_default_text_chars_daily_limit: int = 20000
+    account_default_document_daily_limit: int = 5
+    account_default_max_devices: int = 3
+    admin_password: str | None = None
+    admin_session_secret: str | None = None
+    admin_session_hours: int = 12
+    admin_cookie_secure: bool = True
+    admin_dist_dir: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
         endpoints = provider_endpoints_from_env()
         first = endpoints[0] if endpoints else None
+        usage_timezone = os.getenv("USAGE_TIMEZONE", "Asia/Shanghai")
+        try:
+            ZoneInfo(usage_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"USAGE_TIMEZONE is not a valid timezone: {usage_timezone}") from exc
+        admin_password = os.getenv("ADMIN_PASSWORD") or None
+        if admin_password is not None and len(admin_password) < 12:
+            raise ValueError("ADMIN_PASSWORD must be at least 12 characters")
         return cls(
             database_path=os.getenv("DATABASE_PATH", "learning_analysis.db"),
             token_pepper=os.getenv("TOKEN_PEPPER") or None,
@@ -78,7 +112,46 @@ class Settings:
             lecsync_daily_audio_seconds=_float_env("LECSYNC_DAILY_AUDIO_SECONDS", 3600.0, 1.0, 86400.0),
             lecsync_rate_limit=_int_env("LECSYNC_RATE_LIMIT", 60, 1, 1000),
             lecsync_max_concurrent_streams=_int_env("LECSYNC_MAX_CONCURRENT_STREAMS", 3, 1, 100),
+            require_account_activation=_bool_env("REQUIRE_ACCOUNT_ACTIVATION", True),
+            usage_timezone=usage_timezone,
+            account_encryption_key=os.getenv("ACCOUNT_ENCRYPTION_KEY") or None,
+            account_default_ai_pack_daily_limit=_int_env(
+                "ACCOUNT_DEFAULT_AI_PACK_DAILY_LIMIT", 5, 0, 10000
+            ),
+            account_default_audio_minutes_daily_limit=_int_env(
+                "ACCOUNT_DEFAULT_AUDIO_MINUTES_DAILY_LIMIT", 60, 0, 100000
+            ),
+            account_default_text_chars_daily_limit=_int_env(
+                "ACCOUNT_DEFAULT_TEXT_CHARS_DAILY_LIMIT", 20000, 0, 100000000
+            ),
+            account_default_document_daily_limit=_int_env(
+                "ACCOUNT_DEFAULT_DOCUMENT_DAILY_LIMIT", 5, 0, 10000
+            ),
+            account_default_max_devices=_int_env(
+                "ACCOUNT_DEFAULT_MAX_DEVICES", 3, 0, 100
+            ),
+            admin_password=admin_password,
+            admin_session_secret=os.getenv("ADMIN_SESSION_SECRET") or None,
+            admin_session_hours=_int_env("ADMIN_SESSION_HOURS", 12, 1, 168),
+            admin_cookie_secure=_bool_env("ADMIN_COOKIE_SECURE", True),
+            admin_dist_dir=os.getenv("ADMIN_DIST_DIR") or None,
         )
+
+    @property
+    def account_key(self) -> str | None:
+        return self.account_encryption_key or self.token_pepper
+
+    @property
+    def admin_enabled(self) -> bool:
+        return bool(
+            self.admin_password
+            and (self.admin_session_secret or self.token_pepper)
+            and self.account_key
+        )
+
+    @property
+    def admin_signing_secret(self) -> str | None:
+        return self.admin_session_secret or self.token_pepper
 
     @property
     def provider_configured(self) -> bool:

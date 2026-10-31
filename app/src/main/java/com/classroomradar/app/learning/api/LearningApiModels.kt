@@ -15,6 +15,41 @@ data class DeviceRegistration(
 )
 
 @Serializable
+data class AccountActivateRequest(
+    val phone: String,
+)
+
+@Serializable
+data class AccountLimitsDto(
+    val aiPacksPerDay: Int = 0,
+    val audioMinutesPerDay: Int = 0,
+    val textCharactersPerDay: Int = 0,
+    val documentsPerDay: Int = 0,
+    val maxDevices: Int = 0,
+)
+
+@Serializable
+data class AccountUsageDto(
+    val date: String = "",
+    val aiPacks: Int = 0,
+    val audioMinutes: Double = 0.0,
+    val textCharacters: Int = 0,
+    val documents: Int = 0,
+)
+
+@Serializable
+data class AccountStatusDto(
+    val activated: Boolean = false,
+    val required: Boolean = true,
+    val status: String = "none",
+    val phoneMasked: String = "",
+    val displayName: String = "",
+    val validUntil: String? = null,
+    val limits: AccountLimitsDto = AccountLimitsDto(),
+    val usage: AccountUsageDto = AccountUsageDto(),
+)
+
+@Serializable
 data class GlossaryInput(val term: String, val definition: String? = null)
 
 @Serializable

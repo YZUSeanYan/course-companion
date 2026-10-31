@@ -177,7 +177,11 @@ def test_failed_job_has_sanitized_friendly_error(settings):
 
 
 def test_quota_is_released_after_failure_and_enforced_after_success(settings):
-    limited = replace(settings, device_daily_quota=1)
+    limited = replace(
+        settings,
+        device_daily_quota=1,
+        account_default_ai_pack_daily_limit=1,
+    )
     calls = 0
     fail = {"enabled": True}
 

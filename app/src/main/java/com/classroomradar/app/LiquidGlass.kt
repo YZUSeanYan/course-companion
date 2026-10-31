@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -43,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -265,6 +267,7 @@ internal fun GlassTextInput(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     singleLine: Boolean = true,
+    keyboardType: KeyboardType = KeyboardType.Text,
 ) {
     GlassPanel(
         modifier = modifier,
@@ -279,6 +282,7 @@ internal fun GlassTextInput(
             label = { Text(label) },
             enabled = enabled,
             singleLine = singleLine,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
             colors = OutlinedTextFieldDefaults.colors(
