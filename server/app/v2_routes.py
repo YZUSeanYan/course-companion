@@ -4,11 +4,11 @@ import hashlib
 import time
 from collections import OrderedDict
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, FastAPI, HTTPException, Request
 
+from .accounts import resolve_quota_subject
+from .auth import activated_device
 from .config import Settings
-from .db import QuotaExceeded
 from .learning_jobs import (
     LearningPackJobManager,
     canonical_learning_pack_sha256,
@@ -18,7 +18,6 @@ from .learning_jobs import (
 from .lecsync import LecsyncClient
 from .provider import ProviderConfigurationError, ProviderInvalidResponse, ProviderUnavailable
 from .rate_limit import SlidingWindowRateLimiter
-from .security import token_digest
 from .v2_provider import PROMPT_VERSION_V2, SCHEMA_VERSION_V2, V2Provider
 from .provider_catalog import vision_endpoints_from_env
 from .v2_schemas import (
@@ -30,28 +29,18 @@ from .v2_schemas import (
     TranslateResponse,
 )
 
-bearer_v2 = HTTPBearer(auto_error=False)
-
 
 def register_v2_routes(app: FastAPI, settings: Settings) -> None:
     app.state.v2_provider = V2Provider(settings) if settings.provider_configured else None
     app.state.lecsync = LecsyncClient()
-    app.state.learning_jobs = LearningPackJobManager(
-        app.state.db, settings.device_daily_quota
-    )
+    app.state.learning_jobs = LearningPackJobManager(app.state.db, settings)
     translation_cache: OrderedDict[tuple[str, str, str], tuple[float, str, str]] = OrderedDict()
     translation_limiter = SlidingWindowRateLimiter(settings.lecsync_rate_limit, 60)
 
-    async def device_id(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_v2)) -> str:
-        if credentials is None or credentials.scheme.lower() != "bearer" or not settings.token_pepper:
-            raise HTTPException(status_code=401, detail="A valid bearer device token is required")
-        found = app.state.db.find_device_by_token_hash(token_digest(credentials.credentials, settings.token_pepper))
-        if found is None:
-            raise HTTPException(status_code=401, detail="Invalid device token")
-        return found
-
     @app.post("/v2/translate", response_model=TranslateResponse)
-    async def translate(payload: TranslateRequest, device: str = Depends(device_id)) -> TranslateResponse:
+    async def translate(
+        payload: TranslateRequest, device: str = Depends(activated_device)
+    ) -> TranslateResponse:
         if not translation_limiter.allow(device):
             raise HTTPException(status_code=429, detail="Translation rate limit exceeded")
         actual_hash = hashlib.sha256(payload.source_text.encode()).hexdigest()
@@ -62,10 +51,10 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
         if cached and time.monotonic() - cached[0] < 3600:
             translation_cache.move_to_end(key)
             return TranslateResponse(lineId=payload.line_id, translation=cached[1], sourceHash=actual_hash, model=cached[2], schemaVersion=SCHEMA_VERSION_V2)
-        try:
-            app.state.db.reserve_lecsync_text(device, len(payload.source_text), settings.lecsync_daily_text_quota)
-        except QuotaExceeded as exc:
-            raise HTTPException(status_code=429, detail="Daily translation quota exceeded") from exc
+        subject = resolve_quota_subject(app.state.db, settings, device)
+        app.state.db.reserve_lecsync_text(
+            device, len(payload.source_text), subject.limits.text_characters, subject.account_id
+        )
         try:
             provider: V2Provider | None = app.state.v2_provider
             lecsync: LecsyncClient = app.state.lecsync
@@ -102,21 +91,25 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
                 translation_cache.popitem(last=False)
             return TranslateResponse(lineId=payload.line_id, translation=translation, sourceHash=actual_hash, model=model, schemaVersion=SCHEMA_VERSION_V2)
         except Exception:
-            app.state.db.release_lecsync_text(device, len(payload.source_text))
+            app.state.db.release_lecsync_text(
+                device, len(payload.source_text), subject.account_id
+            )
             raise
 
     @app.post("/v2/learning-pack", response_model=LearningPackResponse)
-    async def learning_pack(payload: LearningPackRequest, device: str = Depends(device_id)) -> LearningPackResponse:
+    async def learning_pack(
+        payload: LearningPackRequest, device: str = Depends(activated_device)
+    ) -> LearningPackResponse:
         provider: V2Provider | None = app.state.v2_provider
         if provider is None:
             raise HTTPException(status_code=503, detail="AI provider is not configured")
         if payload.visual_blocks and not vision_endpoints_from_env():
             raise HTTPException(status_code=503, detail="Vision provider is not configured; OCR alone is not treated as image understanding")
         digest = canonical_learning_pack_sha256(payload)
-        try:
-            analysis_id = app.state.db.reserve_analysis(device, settings.device_daily_quota)
-        except QuotaExceeded as exc:
-            raise HTTPException(status_code=429, detail="Daily analysis quota exceeded") from exc
+        subject = resolve_quota_subject(app.state.db, settings, device)
+        analysis_id = app.state.db.reserve_analysis(
+            device, subject.limits.ai_packs, subject.account_id
+        )
         try:
             package = await provider.generate_learning_pack(payload)
             app.state.db.record_analysis(
@@ -128,13 +121,13 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
                 model=provider.model_used,
             )
         except (ProviderConfigurationError, ProviderUnavailable) as exc:
-            app.state.db.release_analysis(device)
+            app.state.db.release_analysis(device, subject.account_id)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ProviderInvalidResponse as exc:
-            app.state.db.release_analysis(device)
+            app.state.db.release_analysis(device, subject.account_id)
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except Exception:
-            app.state.db.release_analysis(device)
+            app.state.db.release_analysis(device, subject.account_id)
             raise
         return LearningPackResponse(
             analysisId=analysis_id,
@@ -151,7 +144,9 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
         status_code=202,
     )
     async def create_learning_pack_job(
-        payload: LearningPackRequest, device: str = Depends(device_id)
+        payload: LearningPackRequest,
+        request: Request,
+        device: str = Depends(activated_device),
     ) -> LearningPackJobCreateResponse:
         provider: V2Provider | None = app.state.v2_provider
         if provider is None:
@@ -166,7 +161,10 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
             )
         digest = canonical_learning_pack_sha256(payload)
         job, created = app.state.db.create_or_get_learning_pack_job(
-            device, digest, recent_success_cutoff()
+            device,
+            digest,
+            recent_success_cutoff(),
+            getattr(request.state, "account_id", None),
         )
         if created:
             app.state.learning_jobs.schedule(
@@ -182,7 +180,7 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
         response_model_exclude_none=True,
     )
     async def get_learning_pack_job(
-        job_id: str, device: str = Depends(device_id)
+        job_id: str, device: str = Depends(activated_device)
     ) -> LearningPackJobResponse:
         job = app.state.db.get_learning_pack_job(device, job_id)
         if job is None:

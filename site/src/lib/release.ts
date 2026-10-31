@@ -1,10 +1,10 @@
-export const APK_SHA256 = '1820d74fa76576cf097c4e414cf1d13e8f0b95baf4f0e7742ba8a6def72aea80'
+export const APK_SHA256 = 'c908bdc68b0f17238b9d05381a2e94b04425c61a3ee21654e755fad8f184ed92'
 
 export const CURRENT_RELEASE = {
   productName: '知习',
-  version: '2.0.3',
+  version: '2.0.4',
   channel: '正式版',
-  apkUrl: '/downloads/zhixi-v2.0.3.apk',
+  apkUrl: '/downloads/zhixi-v2.0.4.apk',
   minAndroid: 'Android 10（API 29）及以上',
   minAndroidShort: 'Android 10+',
   abi: 'arm64',

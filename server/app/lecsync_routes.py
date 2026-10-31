@@ -14,8 +14,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, WebSoc
 from fastapi.responses import Response
 from pydantic import ValidationError
 
+from .accounts import require_active_account, resolve_quota_subject
 from .config import Settings
-from .db import QuotaExceeded
+from .db import AccountError, QuotaExceeded
 from .lecsync import LecsyncClient, LecsyncError, audio_mime, verify_webhook_signature
 from .lecsync_gateway_schemas import (
     AudioOptions, RealtimeConfig, TranslationOptions, VoiceTypingOptions,
@@ -49,11 +50,22 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
 
     from fastapi import Header
 
-    def authenticated(authorization: str | None = Header(default=None)) -> str:
+    def authenticated(request: Request, authorization: str | None = Header(default=None)) -> str:
         scheme, _, token = (authorization or "").partition(" ")
         if scheme.lower() != "bearer":
             raise HTTPException(status_code=401, detail="A valid bearer device token is required")
-        return device_id(token)
+        device = device_id(token)
+        try:
+            account = require_active_account(app.state.db, settings, device)
+        except AccountError as account_error:
+            raise HTTPException(
+                status_code=account_error.status_code,
+                detail={"code": account_error.code.upper(), "message": str(account_error)},
+                headers={"X-Zhixi-Error-Code": account_error.code},
+            ) from account_error
+        request.state.device_id = device
+        request.state.account_id = None if account is None else str(account["id"])
+        return device
 
     def check_rate(device: str) -> None:
         if not limiter.allow(device) or not limiter.allow("lecsync-global"):
@@ -131,9 +143,28 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         audio_mime(file.filename or "")
         seconds = measured_seconds(content, maximum_seconds, maximum_seconds)
         try:
-            app.state.db.reserve_lecsync_audio(device, seconds, settings.lecsync_daily_audio_seconds)
-        except QuotaExceeded as exc:
-            raise HTTPException(429, {"code": "AUDIO_QUOTA_EXCEEDED", "message": "今日云端音频额度已用完"}) from exc
+            subject = resolve_quota_subject(app.state.db, settings, device)
+            app.state.db.reserve_lecsync_audio(
+                device, seconds, subject.limits.audio_seconds, subject.account_id
+            )
+        except AccountError as account_error:
+            raise HTTPException(
+                status_code=account_error.status_code,
+                detail={"code": account_error.code.upper(), "message": str(account_error)},
+                headers={"X-Zhixi-Error-Code": account_error.code},
+            ) from account_error
+        except QuotaExceeded as quota_error:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "AUDIO_QUOTA_EXCEEDED",
+                    "message": "今日云端音频额度已用完，请联系管理员或明天再试",
+                },
+                headers={
+                    "X-Zhixi-Error-Code": "quota_exceeded",
+                    "X-Zhixi-Quota-Scope": "audio",
+                },
+            ) from quota_error
         return content, seconds
 
     # The upload duration is checked by a tiny RIFF parser before any billed call.
@@ -348,15 +379,30 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         if scheme.lower() != "bearer":
             await socket.close(code=4401, reason="Authentication required")
             return
+        started = time.monotonic()
+        device: str | None = None
+        subject = None
+        accepted = False
         try:
             device = device_id(token)
+            subject = resolve_quota_subject(app.state.db, settings, device)
             if not limiter.allow(device):
                 raise LecsyncError("Too many requests", status=429, code="RESOURCE_LIMIT")
             await streams.acquire(device)
+        except AccountError as account_error:
+            reasons = {
+                "account_required": "需要激活试用额度",
+                "account_expired": "额度已到期",
+                "account_disabled": "账号已停用",
+            }
+            await socket.close(code=4403, reason=reasons.get(account_error.code, "试用额度不可用"))
+            return
         except (HTTPException, LecsyncError) as auth_error:
             await socket.close(code=4401 if isinstance(auth_error, HTTPException) else 4429)
             return
         await socket.accept()
+        accepted = True
+        request_started = started
         started = time.monotonic()
         last_audio = started
         upstream: LecsyncRealtimeConnection | None = None
@@ -379,11 +425,11 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
                 async for event in upstream.events():
                     if event.get("type") == "usage.update":
                         effective = float(event.get("effectiveSeconds", 0))
-                        app.state.db.settle_lecsync_task_audio(device, session_id, effective, settings.lecsync_daily_audio_seconds)
+                        app.state.db.settle_lecsync_task_audio(device, session_id, effective, subject.limits.audio_seconds)
                         app.state.db.update_lecsync_task(device, session_id, status="processing", actual_seconds=effective, usage=event)
                     elif event.get("type") in {"session.ended", "result", "error"}:
                         actual = audio_seconds(event, sent_seconds)
-                        app.state.db.settle_lecsync_task_audio(device, session_id, actual, settings.lecsync_daily_audio_seconds)
+                        app.state.db.settle_lecsync_task_audio(device, session_id, actual, subject.limits.audio_seconds)
                         app.state.db.update_lecsync_task(device, session_id, status="succeeded" if event["type"] != "error" else "failed", actual_seconds=actual, usage=event.get("usage") if isinstance(event.get("usage"), dict) else {})
                     await socket.send_json(event)
                     if event.get("type") in {"session.ended", "result", "error"}:
@@ -450,6 +496,18 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             if upstream is not None:
                 await upstream.__aexit__(None, None, None)
             await streams.release(device)
+            if accepted and device is not None:
+                try:
+                    app.state.db.record_api_request(
+                        device_id=device,
+                        account_id=None if subject is None else subject.account_id,
+                        method="WS",
+                        route="/v2/lecsync/realtime" if kind == "realtime" else "/v2/lecsync/voice-typing/ws",
+                        status=101,
+                        duration_ms=int((time.monotonic() - request_started) * 1000),
+                    )
+                except Exception:
+                    pass
 
     @app.websocket("/v2/lecsync/realtime")
     async def realtime(socket: WebSocket):

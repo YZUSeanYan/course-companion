@@ -17,7 +17,7 @@ const SPECS = [
   { k: '系统要求', v: CURRENT_RELEASE.minAndroid },
   { k: '设备架构', v: CURRENT_RELEASE.abi },
   { k: '安装包体积', v: CURRENT_RELEASE.sizeLabel },
-  { k: '账号要求', v: '无需注册或登录；云端服务使用匿名设备令牌鉴权' },
+  { k: '账号要求', v: '无需注册账号；AI 学习包、翻译、云端听课与文档解析需在设置中激活管理员发放的手机号试用额度，离线听课不受影响' },
   { k: '离线模型', v: 'release 版不内置模型；首次离线听课前需在设置中联网下载' },
   { k: '联网说明', v: '模型下载、云端听课 / 音频转写、Voice Typing、翻译、文档解析与 AI 学习包需联网' },
   { k: '所需权限', v: '麦克风 · 通知 · 前台服务 · 网络 · 震动；文件通过系统选择器导入' },
@@ -62,7 +62,7 @@ export default function Download() {
             </h1>
             <p className="body-2 mt-5 mx-auto max-w-xl" style={{ fontSize: 16 }}>
               本地离线听课与可选云端听课并行，支持音频导入、AI 学习包与间隔复习。
-              无需账号，安装后即可按自己的学习方式选择功能。
+              无需注册账号；AI 与云端功能需激活管理员发放的手机号试用额度。
             </p>
           </Reveal>
           <Reveal delay={0.16}>
@@ -79,14 +79,15 @@ export default function Download() {
                 下载知习 v{CURRENT_RELEASE.version}
               </a>
               <p className="mt-4" style={{ fontSize: 13.5, fontWeight: 750, color: 'var(--ink-2)' }}>
-                {CURRENT_RELEASE.channel} · {CURRENT_RELEASE.sizeLabel} · {CURRENT_RELEASE.minAndroidShort} · {CURRENT_RELEASE.abi} · 无需账号
+                {CURRENT_RELEASE.channel} · {CURRENT_RELEASE.sizeLabel} · {CURRENT_RELEASE.minAndroidShort} · {CURRENT_RELEASE.abi} · 需激活试用额度
               </p>
               <div className="model-notice mt-5">
                 <strong>首次离线听课前：</strong>release 版不内置离线识别模型，请先联网进入「设置」下载模型；
                 也可以主动开启云端听课。
               </div>
               <p className="body-2 mt-4" style={{ fontSize: 13, lineHeight: 1.7 }}>
-                本版将学习包改为后台生成，网络短暂中断后可继续等待结果，且同一讲义不会重复创建任务；同时保留此前课程列表与复杂图示修复。
+                V2.0.4 新增手机号试用额度与运营后台：AI 学习包、翻译、云端听课和文档解析需在「设置 → 试用额度」激活管理员添加的手机号；
+                额度按每日次数/时长和有效期管理，多台设备共用。离线听课和本机识别不受影响，学习内容与复习卡片也改为按类型分类浏览。
               </p>
             </div>
 

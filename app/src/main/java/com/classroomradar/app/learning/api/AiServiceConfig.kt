@@ -27,6 +27,7 @@ class AiServiceConfig(context: Context) {
         if (normalized != baseUrl) {
             // A device token belongs to one backend only. Never carry it to a new origin.
             DeviceCredentialStore(appContext).clear()
+            AccountStatusStore(appContext).clear()
             preferences.edit().putString(KEY_BASE_URL, normalized).apply()
         }
         return normalized

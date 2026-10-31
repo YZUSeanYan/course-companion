@@ -170,13 +170,19 @@ import com.classroomradar.app.learning.CloudAudioPresenter
 import com.classroomradar.app.learning.CloudAudioScreen
 import com.classroomradar.app.learning.CloudListeningSettingsScreen
 import com.classroomradar.app.learning.CourseEntity
+import com.classroomradar.app.learning.AccountSettingsCard
+import com.classroomradar.app.learning.api.AccountStatusDto
 import com.classroomradar.app.learning.LiveMinutesCard
 import com.classroomradar.app.learning.api.LecsyncFile
 import com.classroomradar.app.learning.LearningHomeScreen
 import com.classroomradar.app.learning.LearningPresenter
+import com.classroomradar.app.learning.LearningCategory
+import com.classroomradar.app.learning.LearningCategoryScreen
 import com.classroomradar.app.learning.PrivacyPolicyScreen
 import com.classroomradar.app.learning.RecordingCourseSelector
+import com.classroomradar.app.learning.ReviewHomeScreen
 import com.classroomradar.app.learning.ReviewSessionScreen
+import com.classroomradar.app.learning.learningTypeLabel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -230,13 +236,17 @@ class MainActivity : ComponentActivity() {
                 val detail by rememberState(presenter.detail)
                 val settings by rememberState(presenter.settings)
                 val courses by rememberState(learningPresenter.courses)
-                val reviewCards by rememberState(learningPresenter.reviewCards)
+                val reviewEntries by rememberState(learningPresenter.reviewEntries)
                 val learningMessage by rememberState(learningPresenter.message)
                 val courseDetail by rememberState(learningPresenter.courseDetail)
                 val isImporting by rememberState(learningPresenter.isImporting)
                 val isAnalyzing by rememberState(learningPresenter.isAnalyzing)
                 val aiServiceStatus by rememberState(learningPresenter.serviceStatus)
                 val aiServiceUrl by rememberState(learningPresenter.aiServiceUrl)
+                val accountStatus by rememberState(learningPresenter.accountStatus)
+                val accountSupported by rememberState(learningPresenter.accountSupported)
+                val accountMessage by rememberState(learningPresenter.accountMessage)
+                val isAccountBusy by rememberState(learningPresenter.isAccountBusy)
                 val cloudTasks by rememberState(cloudAudioPresenter.tasks)
                 val cloudAudioBusy by rememberState(cloudAudioPresenter.busy)
                 val cloudAudioMessage by rememberState(cloudAudioPresenter.message)
@@ -251,7 +261,11 @@ class MainActivity : ComponentActivity() {
                 var pendingCloudKind by remember { mutableStateOf<CloudAudioPresenter.AudioKind?>(null) }
                 var pendingCloudAudio by remember { mutableStateOf<Uri?>(null) }
                 var pendingVoiceToggle by remember { mutableStateOf(false) }
+                var showAccountNotice by remember { mutableStateOf(false) }
+                var pendingAccountPhone by remember { mutableStateOf("") }
                 var selectedCourseId by remember { mutableStateOf<Long?>(null) }
+                var learningCategoryType by remember { mutableStateOf<String?>(null) }
+                var reviewCategoryType by remember { mutableStateOf<String?>(null) }
                 var showUsageNotice by remember { mutableStateOf(!settings.usageNoticeAccepted) }
                 var showNotificationSettings by remember { mutableStateOf(false) }
                 var crashReport by remember { mutableStateOf(RadarCrashHandler.consumeReport(context)) }
@@ -344,6 +358,9 @@ class MainActivity : ComponentActivity() {
                         historySelecting = false
                         historySelectedIds = emptySet()
                         showHistoryDeleteConfirmation = false
+                    }
+                    if (page == AppPage.Learning || page == AppPage.Settings) {
+                        learningPresenter.refreshAccount(silent = true)
                     }
                 }
 
@@ -454,6 +471,25 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                if (showAccountNotice) {
+                    GlassConfirmDialog(
+                        title = "激活试用额度？",
+                        message = "手机号仅用于试用额度管理，不用于登录或营销。号码会发送到当前 AI 服务并由服务端加密保存；课堂内容不会随手机号上传。请确认管理员已经添加你的手机号。",
+                        confirmLabel = "同意并激活",
+                        dismissLabel = "取消",
+                        onConfirm = {
+                            appPreferences.accountNoticeAccepted = true
+                            showAccountNotice = false
+                            learningPresenter.activateAccount(pendingAccountPhone)
+                            pendingAccountPhone = ""
+                        },
+                        onDismiss = {
+                            showAccountNotice = false
+                            pendingAccountPhone = ""
+                        },
+                    )
+                }
+
                 if (showDoubtEditor) {
                     DoubtEditorDialog(
                         initialSource = doubtSourceText,
@@ -506,8 +542,21 @@ class MainActivity : ComponentActivity() {
                     BackHandler { page = backTarget(page) }
                 }
 
+                val reviewCategory = reviewCategoryType?.let { LearningCategory.fromType(it) }
+                val reviewTitle = reviewCategory?.label ?: "全部复习"
+                val reviewDescription = reviewCategory?.description ?: "所有分类中今天到期的卡片"
+                val reviewSessionCards = reviewEntries
+                    .filter { reviewCategoryType == null || it.itemType == reviewCategoryType }
+                    .map { it.card }
+                val pageTitle = when (page) {
+                    AppPage.LearningCategory -> learningCategoryType?.let { learningTypeLabel(it) } ?: "学习内容"
+                    AppPage.ReviewCategory -> reviewTitle
+                    else -> page.title
+                }
+
                 AppScaffold(
                     page = page,
+                    title = pageTitle,
                     onPageChange = { page = it },
                     onBack = { page = backTarget(page) },
                     bottomOverlay = when {
@@ -574,18 +623,37 @@ class MainActivity : ComponentActivity() {
                         AppPage.Learning -> LearningHomeScreen(
                             courses = courses,
                             message = learningMessage,
+                            accountStatus = accountStatus,
+                            accountSupported = accountSupported,
                             onCreateCourse = learningPresenter::createCourse,
                             onOpenHistory = { page = AppPage.History },
                             onOpenCourse = { courseId ->
                                 learningPresenter.loadCourse(courseId)
                                 page = AppPage.CourseDetail
                             },
+                            onOpenAccountSettings = { page = AppPage.Settings },
                             onConsumeMessage = learningPresenter::consumeMessage,
                             modifier = Modifier.padding(innerPadding),
                         )
 
-                        AppPage.Review -> ReviewSessionScreen(
-                            cards = reviewCards,
+                        AppPage.Review -> ReviewHomeScreen(
+                            entries = reviewEntries,
+                            onReviewAll = {
+                                reviewCategoryType = null
+                                page = AppPage.ReviewCategory
+                            },
+                            onOpenCategory = { type ->
+                                reviewCategoryType = type
+                                page = AppPage.ReviewCategory
+                            },
+                            modifier = Modifier.padding(innerPadding),
+                        )
+
+                        AppPage.ReviewCategory -> ReviewSessionScreen(
+                            title = reviewTitle,
+                            description = reviewDescription,
+                            cards = reviewSessionCards,
+                            cardsTitle = if (reviewCategoryType == null) "全部卡片" else "本分类卡片",
                             message = learningMessage,
                             onReview = learningPresenter::reviewCard,
                             onConsumeMessage = learningPresenter::consumeMessage,
@@ -629,8 +697,19 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             },
+                            onOpenCategory = { type ->
+                                learningCategoryType = type
+                                page = AppPage.LearningCategory
+                            },
                             onLoadPageImage = learningPresenter::loadPageImage,
                             onConsumeMessage = learningPresenter::consumeMessage,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+
+                        AppPage.LearningCategory -> LearningCategoryScreen(
+                            courseName = courseDetail.course?.name ?: "课程",
+                            type = learningCategoryType.orEmpty(),
+                            items = courseDetail.learningItems,
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -660,6 +739,19 @@ class MainActivity : ComponentActivity() {
                             aiServiceUrl = aiServiceUrl,
                             onSaveAiServiceUrl = learningPresenter::saveAiServiceUrl,
                             onCheckAiService = learningPresenter::checkAiService,
+                            accountStatus = accountStatus,
+                            accountSupported = accountSupported,
+                            accountBusy = isAccountBusy,
+                            accountMessage = accountMessage,
+                            onRefreshAccount = { learningPresenter.refreshAccount() },
+                            onActivateAccount = { phone ->
+                                if (!appPreferences.accountNoticeAccepted) {
+                                    pendingAccountPhone = phone
+                                    showAccountNotice = true
+                                } else {
+                                    learningPresenter.activateAccount(phone)
+                                }
+                            },
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -756,6 +848,8 @@ private enum class AppPage(val title: String) {
     Timeline("历史自动识别"),
     SessionDetail("课堂详情"),
     CourseDetail("课程详情"),
+    LearningCategory("学习内容"),
+    ReviewCategory("复习"),
     PrivacyPolicy("隐私说明"),
     CloudListening("云端听课"),
     CloudAudio("音频转写"),
@@ -763,6 +857,8 @@ private enum class AppPage(val title: String) {
 
 private fun backTarget(page: AppPage): AppPage = when (page) {
     AppPage.CourseDetail, AppPage.History -> AppPage.Learning
+    AppPage.LearningCategory -> AppPage.CourseDetail
+    AppPage.ReviewCategory -> AppPage.Review
     AppPage.PrivacyPolicy, AppPage.CloudListening, AppPage.CloudAudio -> AppPage.Settings
     AppPage.SessionDetail -> AppPage.History
     AppPage.Timeline -> AppPage.SessionDetail
@@ -1188,6 +1284,7 @@ private class ClassroomPresenter(private val appContext: Context) {
 @Composable
 private fun AppScaffold(
     page: AppPage,
+    title: String = page.title,
     onPageChange: (AppPage) -> Unit,
     onBack: () -> Unit,
     bottomOverlay: (@Composable () -> Unit)? = null,
@@ -1252,7 +1349,7 @@ private fun AppScaffold(
                     Spacer(Modifier.width(8.dp))
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(page.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
                     AnimatedContent(targetState = subtitle, label = "brandMotto") { text ->
                         Text(text, style = MaterialTheme.typography.labelMedium, color = LiquidTextSecondary)
                     }
@@ -2373,6 +2470,12 @@ private fun SettingsScreen(
     aiServiceUrl: String,
     onSaveAiServiceUrl: (String) -> Unit,
     onCheckAiService: () -> Unit,
+    accountStatus: AccountStatusDto?,
+    accountSupported: Boolean,
+    accountBusy: Boolean,
+    accountMessage: String?,
+    onRefreshAccount: () -> Unit,
+    onActivateAccount: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -2437,6 +2540,17 @@ private fun SettingsScreen(
                     Text(aiServiceStatus, color = LiquidTextSecondary)
                 }
             }
+        }
+        item { Text("试用额度", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
+        item {
+            AccountSettingsCard(
+                status = accountStatus,
+                supported = accountSupported,
+                busy = accountBusy,
+                message = accountMessage,
+                onActivate = onActivateAccount,
+                onRefresh = onRefreshAccount,
+            )
         }
         item { Text("离线识别模型", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
         item {
@@ -2526,7 +2640,7 @@ private fun SettingsScreen(
         item {
             val context = LocalContext.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("知习 v2.0.3 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
+                Text("知习 v2.0.4 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
                 Text("包含 sherpa-onnx 与 Silero VAD 等开源组件，详情见应用随附的第三方声明。", color = LiquidTextSecondary)
                 Row(
                     modifier = Modifier

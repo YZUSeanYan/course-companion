@@ -10,6 +10,8 @@ sealed class LearningApiException(
         val httpCode: Int,
         val detail: String,
         operation: String = "Request",
+        val errorCode: String? = null,
+        val quotaScope: String? = null,
     ) : LearningApiException("$operation failed with HTTP $httpCode: $detail")
 
     class Network(

@@ -1,6 +1,6 @@
 # Course Companion 学习分析服务
 
-独立的 FastAPI 服务，将讲义/字幕块转换为带来源引用的结构化学习包。首版只有匿名设备，没有用户账户。服务不会修改或依赖 Android app。
+独立的 FastAPI 服务，将讲义/字幕块转换为带来源引用的结构化学习包。访问使用匿名设备令牌；AI/云端功能还需激活管理员发放的手机号试用额度。服务不会修改或依赖 Android app。
 
 ## 安全与数据边界
 
@@ -31,6 +31,16 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 ```
 
 默认数据库是当前工作目录下的 `learning_analysis.db`，可通过 `DATABASE_PATH` 改为其他 SQLite 文件。
+
+## 试用账号与运营后台
+
+- `POST /v1/accounts/activate`（设备 bearer）用管理员预先添加的手机号激活当前设备；`GET /v1/accounts/me` 返回激活状态、脱敏号码、有效期、每日额度和今日用量，未激活也返回 200 方便 App 引导。
+- 手机号用 `HMAC-SHA256(手机号, TOKEN_PEPPER)` 查找，用 `ACCOUNT_ENCRYPTION_KEY` 派生的 Fernet 密钥加密保存；App 本地只存脱敏号码。一个手机号可绑定多台设备，额度按账号每日汇总。
+- AI 学习包、翻译、云端音频、实时课堂和文档解析在未激活、停用、到期或额度耗尽时返回可执行的中文错误；`detail` 保持字符串，同时返回 `X-Zhixi-Error-Code`、`X-Zhixi-Quota-Scope` 等头供新版 App 精确引导。`REQUIRE_ACCOUNT_ACTIVATION=false` 是紧急回退，会恢复旧的按设备默认额度。
+- 运营后台 API 位于 `/admin/api/*`：登录/登出/会话、概览、账号 CRUD/批量添加/解绑、设备、请求记录。管理员密码来自 `ADMIN_PASSWORD`，会话签名来自 `ADMIN_SESSION_SECRET`（或 `TOKEN_PEPPER`）；cookie 为 HttpOnly + Secure + SameSite=Strict，写操作要求 `X-Requested-With: zhixi-admin`。
+- 构建后的 `admin/dist` 通过 `ADMIN_DIST_DIR` 挂载到 `/admin/`；未设置或目录不存在时不挂载。现有 `/admin/lecsync/webhooks/*` 仍使用 `LECSYNC_ADMIN_TOKEN`，两者互不替代。
+- 每个 `/v1/*`、`/v2/*` 请求会写入 `api_requests`（设备、账号、方法、路由模板、状态码、耗时、时间），不含 query 明文或请求正文；`/health`、`/admin/*` 不计入服务用量。WebSocket 在关闭时单独记录。
+- 手机号、管理员密码、会话密钥、加密密钥只能来自服务器环境变量；不要写入源码、示例、测试、APK 或前端 bundle。
 
 ## Lecsync 全功能统一网关
 

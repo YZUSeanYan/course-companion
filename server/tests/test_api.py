@@ -73,7 +73,7 @@ def test_successful_analysis_and_no_content_in_database_or_logs(
         body = json.loads(request.content)
         assert body["model"] == "mock-model"
         assert body["response_format"] == {"type": "json_object"}
-        assert request.headers["Authorization"] == "Bearer test-only-key"
+        assert request.headers["Authorization"] == f"Bearer {settings.provider_api_key}"
         return chat_response(valid_package())
 
     client = make_client(settings, handler)
@@ -97,14 +97,18 @@ def test_successful_analysis_and_no_content_in_database_or_logs(
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     assert data["inputSha256"] == hashlib.sha256(canonical.encode()).hexdigest()
     with sqlite3.connect(settings.database_path) as connection:
-        tables = ("devices", "daily_usage", "analyses")
         rows = [
-            (table, connection.execute(f"SELECT * FROM {table}").fetchall())
-            for table in tables
+            ("devices", connection.execute("SELECT * FROM devices").fetchall()),
+            ("daily_usage", connection.execute("SELECT * FROM daily_usage").fetchall()),
+            (
+                "account_daily_usage",
+                connection.execute("SELECT * FROM account_daily_usage").fetchall(),
+            ),
+            ("analyses", connection.execute("SELECT * FROM analyses").fetchall()),
         ]
         assert connection.execute("SELECT COUNT(*) FROM analyses").fetchone()[0] == 1
         assert connection.execute(
-            "SELECT analysis_count FROM daily_usage"
+            "SELECT analysis_count FROM account_daily_usage"
         ).fetchone()[0] == 1
     persisted = repr(rows)
     assert payload["courseName"] not in persisted
@@ -191,7 +195,12 @@ def test_input_sources_ranges_and_requested_outputs_are_strict(settings, payload
 
 
 def test_daily_quota_is_enforced(settings, payload):
-    limited = replace(settings, device_daily_quota=1, analyze_rate_limit=10)
+    limited = replace(
+        settings,
+        device_daily_quota=1,
+        account_default_ai_pack_daily_limit=1,
+        analyze_rate_limit=10,
+    )
     calls = 0
 
     def handler(request):

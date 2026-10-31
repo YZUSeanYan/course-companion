@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Style
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +48,7 @@ import com.classroomradar.app.LiquidTextSecondary
 import com.classroomradar.app.RadarBrand
 import com.classroomradar.app.RadarBrandDeep
 import com.classroomradar.app.RadarBrandSoft
+import com.classroomradar.app.learning.api.AccountStatusDto
 import java.text.DateFormat
 import java.util.Date
 
@@ -53,14 +56,26 @@ import java.util.Date
 fun LearningHomeScreen(
     courses: List<CourseEntity>,
     message: String?,
+    accountStatus: AccountStatusDto?,
+    accountSupported: Boolean,
     onCreateCourse: (String, String) -> Unit,
     onOpenHistory: () -> Unit,
     onOpenCourse: (Long) -> Unit,
+    onOpenAccountSettings: () -> Unit,
     onConsumeMessage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var courseName by remember { mutableStateOf("") }
     var courseNature by remember { mutableStateOf("") }
+    val accountGuidance = when {
+        !accountSupported || accountStatus?.activated == true -> null
+        accountStatus?.status == "disabled" ->
+            "试用账号已停用" to "请联系管理员恢复账号，恢复后点击「刷新额度」即可继续使用。"
+        accountStatus?.status == "expired" ->
+            "试用额度已到期" to "有效期至 ${accountStatus.validUntil ?: "已结束"}，请联系管理员续期。离线听课不受影响。"
+        else ->
+            "先激活试用额度" to "AI 学习包、翻译和云端听课需要绑定管理员添加的手机号。离线听课和本机识别不受影响。"
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -80,6 +95,27 @@ fun LearningHomeScreen(
                         "课程讲义、词汇短语、课堂重难点和复习卡片统一归档。",
                         color = LiquidTextSecondary,
                     )
+                }
+            }
+        }
+        accountGuidance?.let { (title, body) ->
+            item {
+                GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Accent, effect = GlassEffect.Static) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = LiquidTextPrimary,
+                        )
+                        Text(body, color = LiquidTextSecondary)
+                        GlassTextAction(
+                            label = if (accountStatus?.status == "none" || accountStatus == null) "去设置激活" else "去设置查看",
+                            onClick = onOpenAccountSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                            tone = GlassTone.Success,
+                        )
+                    }
                 }
             }
         }
@@ -161,9 +197,21 @@ fun LearningHomeScreen(
 
 @Composable
 fun ReviewHomeScreen(
-    cards: List<ReviewCardEntity>,
+    entries: List<ReviewCardWithSource>,
+    onReviewAll: () -> Unit,
+    onOpenCategory: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val nowMillis = remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            nowMillis.value = System.currentTimeMillis()
+        }
+    }
+    val now = nowMillis.value
+    val summaries = remember(entries, now) { summarizeReviewCategories(entries, now) }
+    val dueCount = entries.count { it.card.dueAtMillis <= now }
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -173,23 +221,122 @@ fun ReviewHomeScreen(
             GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Accent, effect = GlassEffect.Static) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Outlined.Style, contentDescription = null, tint = RadarBrandDeep)
-                    Text("今天也要记得复习", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
-                    Text("AI 负责生成学习内容，FSRS 负责在合适的时间让你再见它一次。", color = LiquidTextSecondary)
+                    Text("复习 · 今日到期 $dueCount", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                    Text("按分类进入，每次只专注一组卡片。FSRS 会安排下一次见面的时间。", color = LiquidTextSecondary)
                 }
             }
         }
         item {
             GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${cards.size}", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = RadarBrandDeep)
-                    Text(if (cards.isEmpty()) "还没有学习卡片" else "张学习卡片已建立", color = LiquidTextSecondary)
-                    if (cards.isEmpty()) {
-                        Text("生成课程学习包后，词汇、短语和练习题会出现在这里。", color = LiquidTextSecondary)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("$dueCount", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = RadarBrandDeep)
+                        Spacer(Modifier.width(8.dp))
+                        Text("张卡片今天到期 · 共 ${entries.size} 张", color = LiquidTextSecondary, modifier = Modifier.padding(bottom = 10.dp))
                     }
+                    GlassTextAction(
+                        label = if (dueCount > 0) "复习全部到期（$dueCount）" else "今天没有到期卡片",
+                        onClick = onReviewAll,
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = Icons.Outlined.Style,
+                        tone = GlassTone.Accent,
+                        enabled = dueCount > 0,
+                    )
+                }
+            }
+        }
+        if (entries.isEmpty()) {
+            item {
+                GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = RadarBrandDeep)
+                        Text("还没有学习卡片", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                        Text("生成课程学习包后，词汇、短语、自测问答和练习会按分类出现在这里。", color = LiquidTextSecondary)
+                    }
+                }
+            }
+        } else {
+            item {
+                Text("按分类复习", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+            }
+            items(summaries, key = { "review-category-${it.type}" }) { summary ->
+                ReviewCategoryCard(summary = summary, onClick = { onOpenCategory(summary.type) })
+            }
+            if (dueCount == 0) {
+                item {
+                    Text(
+                        "今天没有到期卡片，仍可点进分类查看全部内容，或等待 FSRS 安排的复习时间。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiquidTextSecondary,
+                    )
                 }
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+@Composable
+private fun ReviewCategoryCard(
+    summary: ReviewCategorySummary,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    GlassPanel(
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+        tone = GlassTone.Neutral,
+        effect = GlassEffect.Static,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier.size(46.dp).clip(CircleShape).background(RadarBrandSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    summary.icon,
+                    contentDescription = null,
+                    tint = RadarBrandDeep,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        summary.label,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LiquidTextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        if (summary.due > 0) "今日 ${summary.due}" else "今日 0",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (summary.due > 0) RadarBrandDeep else LiquidTextSecondary,
+                    )
+                }
+                Text(
+                    summary.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LiquidTextSecondary,
+                    maxLines = 1,
+                )
+                Text(
+                    "共 ${summary.total} 张卡片",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LiquidTextSecondary.copy(alpha = 0.78f),
+                )
+            }
+            Icon(
+                Icons.Outlined.ChevronRight,
+                contentDescription = null,
+                tint = RadarBrand,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

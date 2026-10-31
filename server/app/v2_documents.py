@@ -8,13 +8,12 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .accounts import resolve_quota_subject
+from .auth import activated_device
 from .config import Settings
 from .document_pipeline import analyze_document
-from .security import token_digest
 
-bearer_documents = HTTPBearer(auto_error=False)
 ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg"}
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -23,16 +22,10 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
     root = Path(os.getenv("DOCUMENT_STORAGE_ROOT", "document_assets")).resolve()
     root.mkdir(parents=True, exist_ok=True)
 
-    async def device_id(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_documents)) -> str:
-        if credentials is None or credentials.scheme.lower() != "bearer" or not settings.token_pepper:
-            raise HTTPException(status_code=401, detail="A valid bearer device token is required")
-        found = app.state.db.find_device_by_token_hash(token_digest(credentials.credentials, settings.token_pepper))
-        if found is None:
-            raise HTTPException(status_code=401, detail="Invalid device token")
-        return found
-
     @app.post("/v2/documents/analyze")
-    async def upload_document(file: UploadFile = File(...), _: str = Depends(device_id)) -> dict:
+    async def upload_document(
+        file: UploadFile = File(...), device: str = Depends(activated_device)
+    ) -> dict:
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in ALLOWED_SUFFIXES:
             raise HTTPException(status_code=422, detail="Only PDF, JPEG and PNG documents are supported")
@@ -56,16 +49,27 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
                 raise HTTPException(status_code=422, detail="Invalid PNG signature")
             if suffix in {".jpg", ".jpeg"} and not signature.startswith(b"\xff\xd8"):
                 raise HTTPException(status_code=422, detail="Invalid JPEG signature")
+            subject = resolve_quota_subject(app.state.db, settings, device)
+            app.state.db.reserve_document(
+                device, subject.limits.documents, subject.account_id
+            )
             try:
                 asset = await asyncio.to_thread(analyze_document, source, mime, root)
             except ValueError as exc:
+                app.state.db.release_document(device, subject.account_id)
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             except RuntimeError as exc:
+                app.state.db.release_document(device, subject.account_id)
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except Exception:
+                app.state.db.release_document(device, subject.account_id)
+                raise
             return asset.to_dict()
 
     @app.get("/v2/documents/{document_id}/pages/{filename}")
-    def page_image(document_id: str, filename: str, _: str = Depends(device_id)) -> FileResponse:
+    def page_image(
+        document_id: str, filename: str, _: str = Depends(activated_device)
+    ) -> FileResponse:
         if not re.fullmatch(r"[0-9a-f]{24}", document_id) or not re.fullmatch(r"page-\d{4}\.jpg", filename):
             raise HTTPException(status_code=404, detail="Page not found")
         path = (root / document_id / "pages" / filename).resolve()

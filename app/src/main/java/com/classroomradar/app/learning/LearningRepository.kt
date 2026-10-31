@@ -11,6 +11,7 @@ class LearningRepository private constructor(private val dao: LearningDao) {
     fun getLearningItems(courseId: Long) = dao.getLearningItems(courseId)
     fun observeDueCards(nowMillis: Long) = dao.observeDueCards(nowMillis)
     fun observeAllCards() = dao.observeAllCards()
+    fun observeAllCardsWithSource() = dao.observeAllCardsWithSource()
     fun observeRecentLogs() = dao.observeRecentLogs()
 
     fun createCourse(name: String, teacher: String, language: String, examProfile: String = CourseEntity.PROFILE_FOREIGN_CLASS, courseNature: String = ""): Long = dao.insertCourse(

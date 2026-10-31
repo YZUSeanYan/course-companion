@@ -94,6 +94,67 @@ class LearningApiClientDeviceTest {
         }
     }
 
+    @Test
+    fun accountActivationSendsPhoneAndParsesQuota() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        DeviceCredentialStore(context).clear()
+        DeviceCredentialStore(context).save(DeviceCredential("device-1", "development-token"))
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                "{\"activated\":true,\"required\":true,\"status\":\"active\"," +
+                    "\"phoneMasked\":\"139****0001\",\"displayName\":\"Trial\",\"validUntil\":\"2026-11-20\"," +
+                    "\"limits\":{\"aiPacksPerDay\":5,\"audioMinutesPerDay\":60," +
+                    "\"textCharactersPerDay\":20000,\"documentsPerDay\":5,\"maxDevices\":3}," +
+                    "\"usage\":{\"date\":\"2026-10-31\",\"aiPacks\":0,\"audioMinutes\":0.0," +
+                    "\"textCharacters\":0,\"documents\":0}}",
+            ),
+        )
+        server.start()
+        try {
+            val client = LearningApiClient(context, server.url("/").toString())
+            val status = runBlocking { client.activateAccount("139 0000 0001") }
+
+            assertTrue(status.activated)
+            assertEquals("139****0001", status.phoneMasked)
+            assertEquals(5, status.limits.aiPacksPerDay)
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/v1/accounts/activate", request.path)
+            assertTrue(request.body.readUtf8().contains("13900000001"))
+        } finally {
+            DeviceCredentialStore(context).clear()
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun accountRequiredHeaderIsPreservedForGuidance() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        DeviceCredentialStore(context).clear()
+        DeviceCredentialStore(context).save(DeviceCredential("device-1", "development-token"))
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(403)
+                .setHeader("X-Zhixi-Error-Code", "account_required")
+                .setBody("{\"detail\":\"请先激活手机号\"}"),
+        )
+        server.start()
+        try {
+            val client = LearningApiClient(context, server.url("/").toString())
+            val error = runCatching {
+                runBlocking { client.accountStatus() }
+            }.exceptionOrNull()
+
+            assertTrue(error is LearningApiException.Http)
+            assertEquals("account_required", (error as LearningApiException.Http).errorCode)
+        } finally {
+            DeviceCredentialStore(context).clear()
+            server.shutdown()
+        }
+    }
+
     private fun analysisRequest() = LearningPackRequestV2(
         courseName = "Test course",
         language = "zh-CN",

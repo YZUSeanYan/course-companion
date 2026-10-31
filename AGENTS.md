@@ -34,6 +34,7 @@ app/                 Android App（Kotlin + Jetpack Compose）
 server/              FastAPI 自有网关
   app/               REST / WebSocket / 提供方适配
   tests/             pytest
+admin/               运营后台（React + Vite，构建后由网关托管在 /admin/）
 site/                官网（React + Vite）
 docs/                产品、验收、上线说明
 scripts/             本地检查与开发辅助
@@ -47,6 +48,8 @@ scripts/             本地检查与开发辅助
 - `app/src/main/java/com/classroomradar/app/data/ClassroomDatabase.kt`：Room v8。
 - `app/src/main/java/com/classroomradar/app/learning/LearningPresenter.kt`：学习包、讲义与复习。
 - `server/app/main.py`：网关入口；`server/app/v2_provider.py`：模型调用与严格校验。
+- `server/app/admin_routes.py`：运营后台登录、账号与统计 API。
+- `admin/src/`：运营后台页面；`admin/dist` 不提交。
 - `site/src/lib/release.ts`：官网版本、APK 地址与 SHA-256 的唯一当前来源。
 
 ## 4. 本地私有文件
@@ -93,6 +96,18 @@ cd site
 npm ci
 npm run build
 ```
+
+### 运营后台
+
+```bash
+cd admin
+npm ci
+npm run build
+```
+
+- 管理后台只允许项目负责人使用；不得把管理员密码写入前端、源码、测试或示例。
+- 手机号是敏感个人信息：服务端必须加密保存，App 只能保存脱敏号码；不得在日志、错误消息或测试 fixture 中使用真实手机号。
+- 修改账号、配额或管理 API 必须覆盖未激活、停用、到期、设备上限、CSRF 和越权路径。
 
 - 当前全量 ESLint 仍有已知模板错误；修改文件应定向检查，不得伪造“lint 全绿”。
 

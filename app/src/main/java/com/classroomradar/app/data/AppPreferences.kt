@@ -31,6 +31,10 @@ class AppPreferences private constructor(context: Context) {
         get() = preferences.getBoolean(KEY_CLOUD_NOTICE, false)
         set(value) = preferences.edit { putBoolean(KEY_CLOUD_NOTICE, value) }
 
+    var accountNoticeAccepted: Boolean
+        get() = preferences.getBoolean(KEY_ACCOUNT_NOTICE, false)
+        set(value) = preferences.edit { putBoolean(KEY_ACCOUNT_NOTICE, value) }
+
     var cloudTranslationEnabled: Boolean
         get() = preferences.getBoolean(KEY_CLOUD_TRANSLATION, true)
         set(value) = preferences.edit { putBoolean(KEY_CLOUD_TRANSLATION, value) }
@@ -119,6 +123,7 @@ class AppPreferences private constructor(context: Context) {
         private const val KEY_TRANSLATION_NOTICE = "translation_notice_accepted"
         private const val KEY_CLOUD_LISTENING = "cloud_listening_enabled"
         private const val KEY_CLOUD_NOTICE = "cloud_notice_accepted"
+        private const val KEY_ACCOUNT_NOTICE = "account_notice_accepted"
         private const val KEY_CLOUD_TRANSLATION = "cloud_translation_enabled"
         private const val KEY_CLOUD_SPEAKERS = "cloud_speakers_enabled"
         private const val KEY_CLOUD_DIGEST = "cloud_digest_enabled"
