@@ -83,7 +83,7 @@ npm ci
 npm run build
 ```
 
-本地联调时给网关设置 `ADMIN_PASSWORD`（至少 12 位）、`ADMIN_SESSION_SECRET`、`ADMIN_COOKIE_SECURE=false` 和 `ADMIN_DIST_DIR=<仓库>/admin/dist`，然后访问 `http://127.0.0.1:8765/admin/`。生产环境必须使用 HTTPS 且保持 `ADMIN_COOKIE_SECURE=true`。
+本地联调时给网关设置 `ADMIN_PASSWORD`（至少 8 位，建议 12 位以上）、`ADMIN_SESSION_SECRET`、`ADMIN_COOKIE_SECURE=false` 和 `ADMIN_DIST_DIR=<仓库>/admin/dist`，然后访问 `http://127.0.0.1:8765/admin/`。生产环境必须使用 HTTPS 且保持 `ADMIN_COOKIE_SECURE=true`。
 
 文本模型使用 `AI_PROVIDER_*`；复杂图像可显式配置 `VISION_PROVIDER_*`，未配置时服务端复用已有 MiMo/DeepSeek 密钥，按 `mimo-v2.6-pro → deepseek-flash` 回退。详见 `server/.env.example` 和 `server/README.md`。密钥不得写入工程。Release 禁止明文 HTTP，正式构建通过 `-PLEARNING_API_BASE_URL=https://你的学习服务域名` 注入。
 

@@ -84,8 +84,8 @@ class Settings:
         except ZoneInfoNotFoundError as exc:
             raise ValueError(f"USAGE_TIMEZONE is not a valid timezone: {usage_timezone}") from exc
         admin_password = os.getenv("ADMIN_PASSWORD") or None
-        if admin_password is not None and len(admin_password) < 12:
-            raise ValueError("ADMIN_PASSWORD must be at least 12 characters")
+        if admin_password is not None and len(admin_password) < 8:
+            raise ValueError("ADMIN_PASSWORD must be at least 8 characters")
         return cls(
             database_path=os.getenv("DATABASE_PATH", "learning_analysis.db"),
             token_pepper=os.getenv("TOKEN_PEPPER") or None,

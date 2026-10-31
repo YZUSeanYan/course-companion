@@ -13,7 +13,7 @@ npm run dev
 Vite 开发服务器会把 `/admin/api` 代理到 `http://127.0.0.1:8765`。先在 `server/` 启动网关，并在环境变量中配置：
 
 ```bash
-export ADMIN_PASSWORD='至少 12 位的本地开发密码'
+export ADMIN_PASSWORD='至少 8 位的本地开发密码（建议 12 位以上）'
 export ADMIN_SESSION_SECRET='本地随机会话密钥'
 export ADMIN_COOKIE_SECURE=false
 ```
