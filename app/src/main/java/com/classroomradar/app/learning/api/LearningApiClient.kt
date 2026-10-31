@@ -2,6 +2,7 @@ package com.classroomradar.app.learning.api
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -37,6 +38,9 @@ class LearningApiClient(
     private fun registerUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/devices/register")
     private fun analyzeUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/analyze")
     private fun learningPackV2Url(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v2/learning-pack")
+    private fun learningPackJobsUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v2/learning-pack/jobs")
+    private fun learningPackJobUrl(serviceBaseUrl: String, jobId: String): HttpUrl =
+        endpoint(serviceBaseUrl, "v2/learning-pack/jobs").newBuilder().addPathSegment(jobId).build()
     private fun translateUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v2/translate")
     private fun documentAnalyzeUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v2/documents/analyze")
 
@@ -92,26 +96,146 @@ class LearningApiClient(
     suspend fun analyzeV2(request: LearningPackRequestV2): AnalysisResultDto = withContext(Dispatchers.IO) {
         val serviceBaseUrl = currentBaseUrl()
         val body = json.encodeToString(LearningPackRequestV2.serializer(), request).toRequestBody(JSON_MEDIA_TYPE)
+        var token = ensureDevice(serviceBaseUrl).token
+        val created = try {
+            createLearningPackJob(serviceBaseUrl, token, body)
+        } catch (error: LearningApiException.Http) {
+            when (error.httpCode) {
+                401 -> {
+                    credentials.clear()
+                    token = registerDevice(serviceBaseUrl).token
+                    createLearningPackJob(serviceBaseUrl, token, body)
+                }
+                404, 405 -> {
+                    // Older gateways do not expose the asynchronous endpoint yet.
+                    return@withContext analyzeV2Synchronously(serviceBaseUrl, token, body, request)
+                }
+                else -> throw error
+            }
+        }
+        if (!JOB_ID_PATTERN.matches(created.jobId)) {
+            throw LearningApiException.InvalidResponse("Learning pack job", "jobId is invalid")
+        }
+
+        val deadline = System.nanoTime() + JOB_POLL_TIMEOUT_NANOS
+        var consecutiveTransientFailures = 0
+        while (System.nanoTime() < deadline) {
+            val status = try {
+                try {
+                    getLearningPackJob(serviceBaseUrl, token, created.jobId)
+                } catch (error: LearningApiException.Http) {
+                    if (error.httpCode != 401) throw error
+                    credentials.clear()
+                    token = registerDevice(serviceBaseUrl).token
+                    getLearningPackJob(serviceBaseUrl, token, created.jobId)
+                }
+            } catch (error: LearningApiException.Network) {
+                consecutiveTransientFailures += 1
+                if (consecutiveTransientFailures >= MAX_POLL_NETWORK_FAILURES) throw error
+                delay(POLL_RETRY_MILLIS)
+                continue
+            } catch (error: LearningApiException.Http) {
+                if (error.httpCode != 429 && error.httpCode !in 500..599) throw error
+                consecutiveTransientFailures += 1
+                if (consecutiveTransientFailures >= MAX_POLL_NETWORK_FAILURES) throw error
+                delay(POLL_RETRY_MILLIS)
+                continue
+            }
+            consecutiveTransientFailures = 0
+            if (status.jobId != created.jobId) {
+                throw LearningApiException.InvalidResponse("Learning pack job", "jobId mismatch")
+            }
+            when (status.status) {
+                "queued", "processing" -> delay(POLL_INTERVAL_MILLIS)
+                "succeeded" -> {
+                    val response = status.result
+                        ?: throw LearningApiException.InvalidResponse("Learning pack job", "succeeded without a result")
+                    try {
+                        response.validateV2Against(request)
+                    } catch (error: IllegalArgumentException) {
+                        throw LearningApiException.InvalidResponse(
+                            "Learning pack job",
+                            error.message ?: "validation failed",
+                            error,
+                        )
+                    }
+                    return@withContext response
+                }
+                "failed" -> throw LearningApiException.JobFailed(
+                    code = status.error?.code.orEmpty().ifBlank { "internal" },
+                    userMessage = status.error?.message.orEmpty().ifBlank {
+                        "AI 学习包生成失败，请稍后重试。"
+                    }.take(300),
+                )
+                else -> throw LearningApiException.InvalidResponse(
+                    "Learning pack job",
+                    "unknown status: ${status.status.take(40)}",
+                )
+            }
+        }
+        throw LearningApiException.JobFailed(
+            code = "timeout",
+            userMessage = "讲义分析用时较长，任务暂时未返回结果，请稍后重试。",
+        )
+    }
+
+    private fun createLearningPackJob(
+        serviceBaseUrl: String,
+        token: String,
+        body: okhttp3.RequestBody,
+    ): LearningJobCreatedDto = executeHttp(
+        Request.Builder()
+            .url(learningPackJobsUrl(serviceBaseUrl))
+            .header("Authorization", bearerToken(token))
+            .post(body)
+            .build(),
+        "Learning pack job",
+    ) { json.decodeFromString(LearningJobCreatedDto.serializer(), it) }
+
+    private fun getLearningPackJob(serviceBaseUrl: String, token: String, jobId: String): LearningJobStatusDto = executeHttp(
+        Request.Builder()
+            .url(learningPackJobUrl(serviceBaseUrl, jobId))
+            .header("Authorization", bearerToken(token))
+            .get()
+            .build(),
+        "Learning pack job status",
+    ) { json.decodeFromString(LearningJobStatusDto.serializer(), it) }
+
+    private fun analyzeV2Synchronously(
+        serviceBaseUrl: String,
+        token: String,
+        body: okhttp3.RequestBody,
+        request: LearningPackRequestV2,
+    ): AnalysisResultDto {
+        var activeToken = token
         val response = try {
-            executeHttp(
-                Request.Builder().url(learningPackV2Url(serviceBaseUrl)).header("Authorization", bearerToken(ensureDevice(serviceBaseUrl).token)).post(body).build(),
-                "Learning pack v2",
-            ) { json.decodeFromString(AnalysisResultDto.serializer(), it) }
+            requestSynchronousLearningPack(serviceBaseUrl, activeToken, body)
         } catch (error: LearningApiException.Http) {
             if (error.httpCode != 401) throw error
             credentials.clear()
-            executeHttp(
-                Request.Builder().url(learningPackV2Url(serviceBaseUrl)).header("Authorization", bearerToken(registerDevice(serviceBaseUrl).token)).post(body).build(),
-                "Learning pack v2",
-            ) { json.decodeFromString(AnalysisResultDto.serializer(), it) }
+            activeToken = registerDevice(serviceBaseUrl).token
+            requestSynchronousLearningPack(serviceBaseUrl, activeToken, body)
         }
         try {
             response.validateV2Against(request)
         } catch (error: IllegalArgumentException) {
             throw LearningApiException.InvalidResponse("Learning pack v2", error.message ?: "validation failed", error)
         }
-        response
+        return response
     }
+
+    private fun requestSynchronousLearningPack(
+        serviceBaseUrl: String,
+        token: String,
+        body: okhttp3.RequestBody,
+    ): AnalysisResultDto = executeHttp(
+        Request.Builder()
+            .url(learningPackV2Url(serviceBaseUrl))
+            .header("Authorization", bearerToken(token))
+            .post(body)
+            .build(),
+        "Learning pack v2",
+    ) { json.decodeFromString(AnalysisResultDto.serializer(), it) }
 
     suspend fun analyzeDocument(file: File, mimeType: String): DocumentAssetDto = withContext(Dispatchers.IO) {
         val serviceBaseUrl = currentBaseUrl()
@@ -215,6 +339,11 @@ class LearningApiClient(
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        val JOB_ID_PATTERN = Regex("[A-Za-z0-9-]{8,80}")
+        val JOB_POLL_TIMEOUT_NANOS = TimeUnit.MINUTES.toNanos(15)
+        const val POLL_INTERVAL_MILLIS = 2_000L
+        const val POLL_RETRY_MILLIS = 3_000L
+        const val MAX_POLL_NETWORK_FAILURES = 6
 
         fun endpoint(baseUrl: String, path: String): HttpUrl {
             val base = baseUrl.toHttpUrl()

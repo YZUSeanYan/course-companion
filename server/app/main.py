@@ -34,10 +34,10 @@ bearer_scheme = HTTPBearer(auto_error=False)
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Course Companion Learning Analysis", version="1.0.0")
-    register_v2_routes(app, settings)
-    register_document_routes(app, settings)
     app.state.settings = settings
     app.state.db = Database(settings.database_path)
+    register_v2_routes(app, settings)
+    register_document_routes(app, settings)
     from .lecsync_routes import register_lecsync_routes
     register_lecsync_routes(app, settings)
     app.state.register_limiter = SlidingWindowRateLimiter(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 from collections import OrderedDict
 
@@ -10,6 +9,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .config import Settings
 from .db import QuotaExceeded
+from .learning_jobs import (
+    LearningPackJobManager,
+    canonical_learning_pack_sha256,
+    job_response_payload,
+    recent_success_cutoff,
+)
 from .lecsync import LecsyncClient
 from .provider import ProviderConfigurationError, ProviderInvalidResponse, ProviderUnavailable
 from .rate_limit import SlidingWindowRateLimiter
@@ -17,6 +22,8 @@ from .security import token_digest
 from .v2_provider import PROMPT_VERSION_V2, SCHEMA_VERSION_V2, V2Provider
 from .provider_catalog import vision_endpoints_from_env
 from .v2_schemas import (
+    LearningPackJobCreateResponse,
+    LearningPackJobResponse,
     LearningPackRequest,
     LearningPackResponse,
     TranslateRequest,
@@ -29,6 +36,9 @@ bearer_v2 = HTTPBearer(auto_error=False)
 def register_v2_routes(app: FastAPI, settings: Settings) -> None:
     app.state.v2_provider = V2Provider(settings) if settings.provider_configured else None
     app.state.lecsync = LecsyncClient()
+    app.state.learning_jobs = LearningPackJobManager(
+        app.state.db, settings.device_daily_quota
+    )
     translation_cache: OrderedDict[tuple[str, str, str], tuple[float, str, str]] = OrderedDict()
     translation_limiter = SlidingWindowRateLimiter(settings.lecsync_rate_limit, 60)
 
@@ -102,8 +112,7 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(status_code=503, detail="AI provider is not configured")
         if payload.visual_blocks and not vision_endpoints_from_env():
             raise HTTPException(status_code=503, detail="Vision provider is not configured; OCR alone is not treated as image understanding")
-        canonical = json.dumps(payload.model_dump(by_alias=True, exclude_none=True), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        digest = canonical_learning_pack_sha256(payload)
         try:
             analysis_id = app.state.db.reserve_analysis(device, settings.device_daily_quota)
         except QuotaExceeded as exc:
@@ -135,3 +144,47 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
             model=provider.model_used,
             package=package,
         )
+
+    @app.post(
+        "/v2/learning-pack/jobs",
+        response_model=LearningPackJobCreateResponse,
+        status_code=202,
+    )
+    async def create_learning_pack_job(
+        payload: LearningPackRequest, device: str = Depends(device_id)
+    ) -> LearningPackJobCreateResponse:
+        provider: V2Provider | None = app.state.v2_provider
+        if provider is None:
+            raise HTTPException(status_code=503, detail="AI provider is not configured")
+        if payload.visual_blocks and not vision_endpoints_from_env():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Vision provider is not configured; OCR alone is not treated "
+                    "as image understanding"
+                ),
+            )
+        digest = canonical_learning_pack_sha256(payload)
+        job, created = app.state.db.create_or_get_learning_pack_job(
+            device, digest, recent_success_cutoff()
+        )
+        if created:
+            app.state.learning_jobs.schedule(
+                job["id"], device, digest, payload, provider
+            )
+        return LearningPackJobCreateResponse(
+            jobId=job["id"], status=job["status"]
+        )
+
+    @app.get(
+        "/v2/learning-pack/jobs/{job_id}",
+        response_model=LearningPackJobResponse,
+        response_model_exclude_none=True,
+    )
+    async def get_learning_pack_job(
+        job_id: str, device: str = Depends(device_id)
+    ) -> LearningPackJobResponse:
+        job = app.state.db.get_learning_pack_job(device, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Learning pack job not found")
+        return LearningPackJobResponse(**job_response_payload(job))

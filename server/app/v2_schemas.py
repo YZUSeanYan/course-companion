@@ -138,3 +138,38 @@ class LearningPackResponse(StrictV2Model):
     schema_version: str = Field(alias="schemaVersion")
     model: str
     package: LearningPackV2
+
+
+class LearningPackJobError(StrictV2Model):
+    code: Literal[
+        "quota_exceeded",
+        "provider_unavailable",
+        "invalid_response",
+        "internal",
+    ]
+    message: str = Field(min_length=1, max_length=1000)
+
+
+class LearningPackJobCreateResponse(StrictV2Model):
+    job_id: str = Field(alias="jobId")
+    status: Literal["queued", "processing", "succeeded", "failed"]
+
+
+class LearningPackJobResponse(StrictV2Model):
+    job_id: str = Field(alias="jobId")
+    status: Literal["queued", "processing", "succeeded", "failed"]
+    result: LearningPackResponse | None = None
+    error: LearningPackJobError | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome(self):
+        if self.status == "succeeded" and self.result is None:
+            raise ValueError("succeeded jobs require a result")
+        if self.status == "failed" and self.error is None:
+            raise ValueError("failed jobs require an error")
+        if self.status in {"queued", "processing"} and (
+            self.result is not None or self.error is not None
+        ):
+            raise ValueError("pending jobs cannot have a result or error")
+        return self
+

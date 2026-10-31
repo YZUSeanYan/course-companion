@@ -156,6 +156,26 @@ data class AnalysisResultDto(
 @Serializable
 data class ApiErrorResponse(val detail: JsonElement)
 
+@Serializable
+data class LearningJobCreatedDto(
+    val jobId: String,
+    val status: String,
+)
+
+@Serializable
+data class LearningJobErrorDto(
+    val code: String = "",
+    val message: String = "",
+)
+
+@Serializable
+data class LearningJobStatusDto(
+    val jobId: String,
+    val status: String,
+    val result: AnalysisResultDto? = null,
+    val error: LearningJobErrorDto? = null,
+)
+
 internal fun ApiErrorResponse.userDetail(): String = when (val value = detail) {
     is JsonPrimitive -> value.content.take(300)
     is JsonArray -> value.mapNotNull { item ->

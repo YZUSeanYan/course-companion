@@ -11,7 +11,7 @@ class QuotaExceeded(RuntimeError):
 
 
 class Database:
-    """Stores device credentials and analysis metadata, never learning content."""
+    """Stores credentials, metadata, and job outcomes, never request content."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -84,6 +84,23 @@ class Database:
                     status TEXT NOT NULL,
                     received_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS learning_pack_jobs (
+                    id TEXT PRIMARY KEY,
+                    device_id TEXT NOT NULL REFERENCES devices(id),
+                    input_sha256 TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('queued', 'processing', 'succeeded', 'failed')
+                    ),
+                    result_json TEXT,
+                    error_code TEXT,
+                    error_message TEXT,
+                    model TEXT,
+                    analysis_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS learning_pack_jobs_device_input
+                    ON learning_pack_jobs(device_id, input_sha256, status, updated_at);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -354,3 +371,174 @@ class Database:
                     now,
                 ),
             )
+
+    def create_or_get_learning_pack_job(
+        self,
+        device_id: str,
+        input_sha256: str,
+        succeeded_since: str,
+    ) -> tuple[dict, bool]:
+        """Atomically deduplicate jobs while never persisting request content."""
+        now = self._now()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT * FROM learning_pack_jobs
+                WHERE device_id = ? AND input_sha256 = ?
+                  AND status IN ('queued', 'processing')
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (device_id, input_sha256),
+            ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    """
+                    SELECT * FROM learning_pack_jobs
+                    WHERE device_id = ? AND input_sha256 = ?
+                      AND status = 'succeeded' AND updated_at >= ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (device_id, input_sha256, succeeded_since),
+                ).fetchone()
+            if row is not None:
+                connection.commit()
+                return dict(row), False
+            job_id = str(uuid.uuid4())
+            connection.execute(
+                """
+                INSERT INTO learning_pack_jobs(
+                    id, device_id, input_sha256, status, created_at, updated_at
+                ) VALUES (?, ?, ?, 'queued', ?, ?)
+                """,
+                (job_id, device_id, input_sha256, now, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM learning_pack_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            connection.commit()
+            return dict(row), True
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_learning_pack_job(self, device_id: str, job_id: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM learning_pack_jobs WHERE id = ? AND device_id = ?",
+                (job_id, device_id),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def mark_learning_pack_job_processing(self, device_id: str, job_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE learning_pack_jobs
+                SET status = 'processing', updated_at = ?
+                WHERE id = ? AND device_id = ? AND status = 'queued'
+                """,
+                (self._now(), job_id, device_id),
+            )
+
+    def set_learning_pack_job_analysis(
+        self, device_id: str, job_id: str, analysis_id: str
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE learning_pack_jobs
+                SET analysis_id = ?, updated_at = ?
+                WHERE id = ? AND device_id = ? AND status = 'processing'
+                """,
+                (analysis_id, self._now(), job_id, device_id),
+            )
+
+    def complete_learning_pack_job(
+        self,
+        device_id: str,
+        job_id: str,
+        result_json: str,
+        model: str,
+        analysis_id: str,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE learning_pack_jobs
+                SET status = 'succeeded', result_json = ?, error_code = NULL,
+                    error_message = NULL, model = ?, analysis_id = ?, updated_at = ?
+                WHERE id = ? AND device_id = ?
+                  AND status IN ('queued', 'processing')
+                """,
+                (
+                    result_json,
+                    model,
+                    analysis_id,
+                    self._now(),
+                    job_id,
+                    device_id,
+                ),
+            )
+
+    def fail_learning_pack_job(
+        self,
+        device_id: str,
+        job_id: str,
+        error_code: str,
+        error_message: str,
+        model: str | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE learning_pack_jobs
+                SET status = 'failed', result_json = NULL, error_code = ?,
+                    error_message = ?, model = ?, updated_at = ?
+                WHERE id = ? AND device_id = ?
+                  AND status IN ('queued', 'processing')
+                """,
+                (
+                    error_code,
+                    error_message,
+                    model,
+                    self._now(),
+                    job_id,
+                    device_id,
+                ),
+            )
+
+    def fail_interrupted_learning_pack_jobs(
+        self, error_code: str, error_message: str
+    ) -> list[dict]:
+        now = self._now()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                """
+                SELECT id, device_id, analysis_id FROM learning_pack_jobs
+                WHERE status IN ('queued', 'processing')
+                """
+            ).fetchall()
+            connection.execute(
+                """
+                UPDATE learning_pack_jobs
+                SET status = 'failed', result_json = NULL, error_code = ?,
+                    error_message = ?, updated_at = ?
+                WHERE status IN ('queued', 'processing')
+                """,
+                (error_code, error_message, now),
+            )
+            connection.commit()
+            return [dict(row) for row in rows]
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()

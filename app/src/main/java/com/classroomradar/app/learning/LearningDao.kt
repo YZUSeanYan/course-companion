@@ -94,6 +94,20 @@ interface LearningDao {
     @Query("SELECT * FROM analysis_runs WHERE courseId = :courseId ORDER BY createdAtMillis DESC, id DESC")
     fun observeAnalysisRuns(courseId: Long): Flow<List<AnalysisRunEntity>>
 
+    @Query(
+        "SELECT * FROM analysis_runs WHERE courseId = :courseId AND targetType = :targetType " +
+            "AND targetId = :targetId AND inputSha256 = :inputSha256 AND promptVersion = :promptVersion " +
+            "AND schemaVersion = :schemaVersion AND status = 'COMPLETED' ORDER BY id DESC LIMIT 1",
+    )
+    fun findCompletedAnalysisRun(
+        courseId: Long,
+        targetType: String,
+        targetId: Long,
+        inputSha256: String,
+        promptVersion: String,
+        schemaVersion: String,
+    ): AnalysisRunEntity?
+
     @Transaction
     fun saveLearningPackage(
         items: List<LearningItemEntity>,
