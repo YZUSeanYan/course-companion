@@ -1,0 +1,78 @@
+# Local build tools and caches
+.gradle/
+.codex-gradle-home/
+.codex-gradle-tmp/
+.kotlin/
+build/
+app/build/
+/.vendor/
+local.properties
+*.iml
+*.log
+
+# IDE
+.idea/
+.cxx/
+.externalNativeBuild/
+.codex-tmp/
+
+# Secrets and signing material
+.env
+.env.*
+!**/.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Local databases and user content
+*.db
+*.db-shm
+*.db-wal
+server/.runtime/
+server/lecsync_uploads/
+server/document_assets/
+
+# Offline models and large local test fixtures
+app/src/main/assets/models/
+app/src/debug/assets/models/
+app/src/androidTest/assets/model-fixtures/
+*.onnx
+**/bbpe.model
+
+# Only arm64 is packaged by the Android app; keep other ABI binaries local.
+app/src/main/jniLibs/x86/
+app/src/main/jniLibs/x86_64/
+app/src/main/jniLibs/armeabi-v7a/
+
+# Generated and downloaded test material
+app/src/androidTest/assets/lei-jun-test.wav
+test-data/download-inspect-*/
+test-data/*.wav
+*.tar.bz2
+zhixi-gateway-bundle.tar.gz
+
+# Android and release artifacts
+*.apk
+*.aab
+
+# Python
+server/.venv/
+server/.pytest_cache/
+server/**/__pycache__/
+__pycache__/
+*.pyc
+
+# Website
+node_modules/
+site/dist/
+site/.vite/
+site/.env
+site/.env.*
+!site/.env.example
+
+# OS files
+.DS_Store
+Thumbs.db

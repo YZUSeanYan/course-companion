@@ -1,0 +1,22 @@
+Advanced Manufacturing English — Sample Lecture
+
+This is an original synthetic teaching document for software testing. It does not contain student, teacher, or classroom data.
+
+Key vocabulary
+
+lathe: a machine tool that rotates a workpiece against a cutting tool to remove material.
+tolerance: the allowable variation in a physical dimension.
+workpiece: the object being shaped or machined.
+supervised learning: a machine learning approach that uses labeled examples.
+
+Important ideas
+
+Always secure the workpiece before starting a machine. A manufacturing process must balance precision, efficiency, and safety. Artificial intelligence can support quality inspection, but the final result still needs human verification.
+
+Useful phrase
+
+remove material: cut unwanted material from a workpiece.
+
+Review question
+
+Why is human verification still important when artificial intelligence is used for quality inspection?

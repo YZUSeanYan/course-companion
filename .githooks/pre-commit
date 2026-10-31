@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-repo.ps1
+elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -File scripts/check-repo.ps1
+else
+    echo "PowerShell is required for the repository safety check."
+    exit 1
+fi

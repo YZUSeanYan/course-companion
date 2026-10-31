@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2a1f1a"/>
+      <stop offset="1" stop-color="#0f0d0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="675" fill="url(#g)"/>
+  <!-- Radar circles -->
+  <circle cx="600" cy="340" r="120" fill="none" stroke="#FF670D" stroke-width="3" opacity=".25"/>
+  <circle cx="600" cy="340" r="200" fill="none" stroke="#FF670D" stroke-width="2.5" opacity=".18"/>
+  <circle cx="600" cy="340" r="290" fill="none" stroke="#FF670D" stroke-width="2" opacity=".12"/>
+  <circle cx="600" cy="340" r="8" fill="#FF670D"/>
+  <!-- Radar sweep -->
+  <path d="M600 340 L600 50 A290 290 0 0 1 850 180 Z" fill="#FF670D" opacity=".08"/>
+  <line x1="600" y1="340" x2="600" y2="50" stroke="#FF670D" stroke-width="2.5" opacity=".5"/>
+  <!-- Phone outline -->
+  <rect x="820" y="200" width="140" height="260" rx="18" fill="none" stroke="#e8a87c" stroke-width="3" opacity=".35"/>
+  <rect x="835" y="230" width="110" height="180" rx="4" fill="#FF670D" opacity=".12"/>
+  <!-- Signal waves from phone -->
+  <path d="M960 280 q30-20 0-40" fill="none" stroke="#e8a87c" stroke-width="2" opacity=".4"/>
+  <path d="M960 310 q40-25 0-50" fill="none" stroke="#e8a87c" stroke-width="2" opacity=".3"/>
+  <!-- Title area -->
+  <text x="120" y="260" font-family="system-ui,sans-serif" font-size="42" font-weight="800" fill="#e8a87c">水课雷达</text>
+  <text x="120" y="310" font-family="system-ui,sans-serif" font-size="22" fill="#e8a87c" opacity=".6">离线课堂提问捕捉器</text>
+  <text x="120" y="370" font-family="system-ui,sans-serif" font-size="15" fill="#e8a87c" opacity=".4">sherpa-onnx · 双通道检测 · 无网络权限</text>
+  <!-- Decorative dots -->
+  <circle cx="100" cy="120" r="4" fill="#FF670D" opacity=".3"/>
+  <circle cx="140" cy="100" r="3" fill="#FF670D" opacity=".2"/>
+  <circle cx="1100" cy="550" r="5" fill="#FF670D" opacity=".25"/>
+  <circle cx="1060" cy="580" r="3" fill="#FF670D" opacity=".15"/>
+</svg>
