@@ -11,8 +11,8 @@
 
 ## 正式部署与真实联调
 
-- 正式网关 `https://zhixi.seanyan.store/health` 返回 200 和 `providerConfigured=true`；systemd `zhixi-gateway` 为 active，后端仅绑定 `127.0.0.1:8766`。当前运行 `/opt/zhixi-gateway-20261031-r9`，R8/R7/R6/R5/R4/R3 与旧 unit 均保留用于回滚。
-- 运营后台 `https://zhixi.seanyan.store/admin/` 已上线，nginx 原有 `location /` 代理全部路径，无需新增 location。管理员密码、`ADMIN_SESSION_SECRET`、`ACCOUNT_ENCRYPTION_KEY` 只写入服务器 `/opt/zhixi-gateway/.env`（600）；登录后 `/admin/api/session` 返回 `authenticated=true`，概览、账号、设备、请求页均返回 200。页面使用 HttpOnly + Secure + SameSite=Strict 签名 cookie，写操作要求 `X-Requested-With: zhixi-admin`。
+- 正式网关 `https://zhixi.seanyan.store/health` 返回 200 和 `providerConfigured=true`；systemd `zhixi-gateway` 为 active，后端仅绑定 `127.0.0.1:8766`。当前运行 `/opt/zhixi-gateway-20261031-r10`，R9/R8/R7/R6/R5/R4/R3 与旧 unit 均保留用于回滚。
+- 运营后台 `https://zhixi.seanyan.store/admin/` 已上线，nginx 原有 `location /` 代理全部路径，无需新增 location。管理员密码、`ADMIN_SESSION_SECRET`、`ACCOUNT_ENCRYPTION_KEY` 只写入服务器 `/opt/zhixi-gateway/.env`（600）；登录后 `/admin/api/session` 返回 `authenticated=true`，概览、账号、设备、请求页均返回 200。页面使用 HttpOnly + Secure + SameSite=Strict 签名 cookie，写操作要求 `X-Requested-With: zhixi-admin`。管理员密码最小长度已按用户要求调整为 8 位（建议 12 位以上），并已轮换会话密钥使旧会话失效。
 - 生产冒烟：在运营后台创建 `139****0099` 测试账号，正式签名 V2.0.4 安装在模拟器并默认连接 `https://zhixi.seanyan.store`，在「设置 → 试用额度」成功激活并显示有效期与 0/1、0/5、0/1000、0/1 额度；后台立即显示该账号、1 台设备和脱敏请求记录。测试完成后已在后台删除该账号，删除后 App 刷新回到未激活状态。另用未激活设备请求 `/v1/analyze`，返回 403、`x-zhixi-error-code: account_required` 和中文激活指引；`/v1/accounts/me` 返回 `activated=false, required=true`。
 - Lecsync 实际文本翻译成功返回中文结果；1 秒合成音频完成 `session.ready → usage.update → session.ended`。
 - DeepSeek Flash、Kimi `k3.1-pro-highspeed`、MiMo `mimo-v2.6-flash` 均已分别生成真实学习包；Kimi 按接口要求使用 `temperature=1`。提供方字段别名、`sourceId/sourceIds` 和严格 schema 修复已验证。
