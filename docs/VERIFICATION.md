@@ -68,6 +68,13 @@
 - 生产冒烟（临时账号 139****0998，验后即删）：设备注册 201 → 激活 200 → **经 nginx TLS 的 WSS 子协议握手升级 101 → `session.ready` → `session.stop` → `session.ended`** 全链路通过；`/web/` 与资源 200；激活/WS 用的设备 token 已随临时账号删除。
 - 待办：离线识别镜像发布（上游 182MB 包在本机网络持续被截断，续传中；完成后按 `webapp/README.md` 上传 4 文件并登记 .wasm/.data 哈希）；真实浏览器（Chrome/Edge）人工验收；R14 中 PR #11 的 4012 关闭码随本次一并上线。
 
+## 离线识别镜像发布与浏览器端到端（2026-11-01）
+
+- 上游 182MB 包经断点续传下载完成，**SHA-256 与 GitHub 官方 digest 一致**（25e47ff0…）；4 个产物发布到镜像并登记哈希（PR #49，webapp r17 上线）。
+- **发现并修复真 Bug**：镜像原在 shuike 域，webapp 在 zhixi 域，运行时 190MB fetch 会被 CORS 拦截——nginx 在网关域加同源 alias（`/models/zhixi/web/` → 同磁盘目录），`DEFAULT_MODEL_BASE_URL` 改指同源地址并加回归测试锁定（PR #50，r18）。
+- **浏览器内联端到端通过**（生产 origin，绕过 IAB 麦克风限制直测引擎管线）：同源 fetch 4 产物（.data 189.8MB/472s）→ SHA-256 逐文件校验通过 → blob URL 注入 → WASM runtime 初始化 → `createOnlineRecognizer` 创建成功 → 解码循环 5 步、`getResult` 正常返回、`reset` 正常。离线识别除麦克风采集（浏览器标准能力，IAB 环境拒绝无法自动化）外全链路真实可用。
+- 现状：网页版离线模式完全激活——首次使用自动从同源镜像下载约 200MB（带进度与哈希校验，Cache API 持久化），之后免额度本地识别；云端模式与官网引导不受影响。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
