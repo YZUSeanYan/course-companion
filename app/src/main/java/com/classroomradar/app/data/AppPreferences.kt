@@ -107,6 +107,51 @@ class AppPreferences private constructor(context: Context) {
         get() = preferences.getString(KEY_CLOUD_CONTEXT, "") ?: ""
         set(value) = preferences.edit { putString(KEY_CLOUD_CONTEXT, value) }
 
+    var forceOfflineRecording: Boolean
+        get() = preferences.getBoolean(KEY_FORCE_OFFLINE, false)
+        set(value) = preferences.edit { putBoolean(KEY_FORCE_OFFLINE, value) }
+
+    var autoOfflineOnNetworkLoss: Boolean
+        get() = preferences.getBoolean(KEY_AUTO_OFFLINE, true)
+        set(value) = preferences.edit { putBoolean(KEY_AUTO_OFFLINE, value) }
+
+    var offlineFirstStart: Boolean
+        get() = preferences.getBoolean(KEY_OFFLINE_FIRST, false)
+        set(value) = preferences.edit { putBoolean(KEY_OFFLINE_FIRST, value) }
+
+    var autoCloudSync: Boolean
+        get() = preferences.getBoolean(KEY_AUTO_CLOUD_SYNC, true)
+        set(value) = preferences.edit { putBoolean(KEY_AUTO_CLOUD_SYNC, value) }
+
+    /** sessionId -> absolute WAV path waiting for cloud re-transcription. */
+    fun pendingCloudSync(): Map<Long, String> {
+        val raw = preferences.getString(KEY_PENDING_CLOUD_SYNC, "") ?: return emptyMap()
+        if (raw.isBlank()) return emptyMap()
+        return runCatching {
+            val json = org.json.JSONObject(raw)
+            json.keys().asSequence().mapNotNull { key ->
+                val sessionId = key.toLongOrNull() ?: return@mapNotNull null
+                val path = json.optString(key, "")
+                if (path.isBlank()) null else sessionId to path
+            }.toMap()
+        }.getOrDefault(emptyMap())
+    }
+
+    fun addPendingCloudSync(sessionId: Long, audioPath: String) {
+        val updated = pendingCloudSync() + (sessionId to audioPath)
+        writePendingCloudSync(updated)
+    }
+
+    fun removePendingCloudSync(sessionId: Long) {
+        writePendingCloudSync(pendingCloudSync() - sessionId)
+    }
+
+    private fun writePendingCloudSync(pending: Map<Long, String>) {
+        val json = org.json.JSONObject()
+        pending.forEach { (sessionId, path) -> runCatching { json.put(sessionId.toString(), path) } }
+        preferences.edit { putString(KEY_PENDING_CLOUD_SYNC, json.toString()) }
+    }
+
     // Read-only compatibility for the retired alert component; no new detection uses these.
     val vibrationEnabled: Boolean get() = false
     val soundEnabled: Boolean get() = false
@@ -142,6 +187,11 @@ class AppPreferences private constructor(context: Context) {
         private const val KEY_CLOUD_HOTWORDS = "cloud_hotwords"
         private const val KEY_CLOUD_PAIRS = "cloud_term_pairs"
         private const val KEY_CLOUD_CONTEXT = "cloud_context"
+        private const val KEY_FORCE_OFFLINE = "force_offline_recording"
+        private const val KEY_AUTO_OFFLINE = "auto_offline_on_network_loss"
+        private const val KEY_OFFLINE_FIRST = "offline_first_start"
+        private const val KEY_AUTO_CLOUD_SYNC = "auto_cloud_sync"
+        private const val KEY_PENDING_CLOUD_SYNC = "pending_cloud_sync"
 
         @Volatile private var instance: AppPreferences? = null
 

@@ -112,6 +112,38 @@ class LearningPresenter(private val appContext: Context) {
         }
     }
 
+    fun renameCourse(courseId: Long, name: String, courseNature: String) {
+        if (name.isBlank()) {
+            _message.value = "课程名称不能为空"
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching { repository.updateCourseMeta(courseId, name, courseNature) }
+                .onFailure { error ->
+                    withContext(Dispatchers.Main.immediate) {
+                        _message.value = error.message ?: "课程更新失败"
+                    }
+                }
+        }
+    }
+
+    fun deleteCourse(courseId: Long) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { repository.deleteCourse(courseId) }
+                .onSuccess {
+                    if (selectedCourseId == courseId) selectedCourseId = null
+                    withContext(Dispatchers.Main.immediate) {
+                        _message.value = "课程已删除"
+                    }
+                }
+                .onFailure { error ->
+                    withContext(Dispatchers.Main.immediate) {
+                        _message.value = error.message ?: "课程删除失败"
+                    }
+                }
+        }
+    }
+
     fun loadCourse(courseId: Long) {
         selectedCourseId = courseId
         detailJob?.cancel()

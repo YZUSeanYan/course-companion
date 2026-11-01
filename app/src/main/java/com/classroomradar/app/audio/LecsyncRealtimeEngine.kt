@@ -1,6 +1,7 @@
 package com.classroomradar.app.audio
 
 import android.content.Context
+import com.classroomradar.app.data.AppPreferences
 import com.classroomradar.app.data.ClassroomRepository
 import com.classroomradar.app.data.TranslationEntity
 import com.classroomradar.app.learning.api.AiServiceConfig
@@ -52,6 +53,7 @@ class LecsyncRealtimeEngine(
     }
     @Volatile private var ready = false
     @Volatile private var ended = false
+    @Volatile private var paused = false
     @Volatile private var sessionId: Long? = null
     @Volatile private var stream: LecsyncApiClient.Stream? = null
     @Volatile private var offlineFallback: TranscriptionEngine? = null
@@ -64,6 +66,7 @@ class LecsyncRealtimeEngine(
     private var reconnectAttempts = 0
     private val pending = ByteArrayOutputStream()
     private val segmentLines = ConcurrentHashMap<String, Long>()
+    private val segmentStreams = ConcurrentHashMap<String, String>()
     private val pendingTranslations = ConcurrentHashMap<String, JsonObject>()
     private val latencyTracker = RealtimeLatencyTracker()
     private var lastMetricsEmitAtMs = 0L
@@ -85,25 +88,37 @@ class LecsyncRealtimeEngine(
                 }
 
                 override fun onError(error: Throwable) {
-                    if (!stopped.get()) recover(error)
+                    if (!stopped.get() && !paused) recover(error)
                 }
 
                 override fun onClosed(code: Int, reason: String) {
                     ready = false
+                    // While paused the server closes the idle stream on purpose; stay silent
+                    // and reconnect on resume instead of looping with failure banners.
+                    if (paused) return
                     if (!stopped.get() && code in REALTIME_RECONNECT_CLOSE_CODES) {
-                        recover(IllegalStateException("连接需要重新建立"))
+                        recover(IllegalStateException(closeMessage(code)))
                     } else if (!stopped.get()) {
                         useOfflineFallback() ?: listener?.onError(IllegalStateException("云端听课已中断；已保存内容不会丢失"))
                     }
                 }
             })
         } catch (error: Exception) {
+            if (paused) return
             recover(error)
         }
     }
 
+    private fun closeMessage(code: Int): String = when (code) {
+        4013 -> "暂停时间过长，云端已断开；继续录音会自动重连"
+        4012 -> "已达单次课堂上限 4 小时，请开始新的课堂"
+        else -> "连接已中断，正在恢复；已保存的课堂不会丢失"
+    }
+
+    /** Pause-aware recovery: never reconnect, warn or fall back while the user is paused. */
     private fun recover(error: Throwable) {
-        if (stopped.get() || !reconnecting.compareAndSet(false, true)) return
+        if (stopped.get() || paused || offlineFallback != null) return
+        if (!reconnecting.compareAndSet(false, true)) return
         recoveryHandler.removeCallbacks(fallbackWatchdog)
         recoveryHandler.postDelayed(fallbackWatchdog, 8_000)
         if (reconnectAttempts >= 2) {
@@ -129,7 +144,9 @@ class LecsyncRealtimeEngine(
 
     private fun useOfflineFallback(): TranscriptionEngine? {
         recoveryHandler.removeCallbacks(fallbackWatchdog)
-        if (stopped.get() || offlineFallback != null || !modelManager.canRecognize()) return offlineFallback
+        if (stopped.get() || paused || offlineFallback != null || !modelManager.canRecognize()) return offlineFallback
+        // The user can opt out of silent switching; then the failure surfaces instead.
+        if (!AppPreferences.get(appContext).autoOfflineOnNetworkLoss) return null
         val fallback = runCatching {
             SherpaTwoPassEngine(appContext, modelManager.installedDirectory())
         }.getOrNull() ?: return null
@@ -160,11 +177,11 @@ class LecsyncRealtimeEngine(
         }
         synchronized(lock) {
             pending.write(bytes)
-            // Keep at most two seconds while connecting; never burst stale audio after a stall.
-            if (pending.size() > 64_000) {
+            // Keep at most ten seconds while connecting/resuming; never burst stale audio after a stall.
+            if (pending.size() > 160_000) {
                 val buffered = pending.toByteArray()
                 pending.reset()
-                pending.write(buffered, buffered.size - 64_000, 64_000)
+                pending.write(buffered, buffered.size - 160_000, 160_000)
             }
         }
         if (ready) drainAudio()
@@ -195,6 +212,7 @@ class LecsyncRealtimeEngine(
                 ready = true
                 recoveryHandler.removeCallbacks(fallbackWatchdog)
                 reconnectAttempts = 0
+                RecordingBus.emit(RecorderEvent.ConnectionRestored)
                 val upstreamSession = event.string("sessionId")
                 cloudTaskId = upstreamSession
                 val currentSession = sessionId
@@ -231,6 +249,9 @@ class LecsyncRealtimeEngine(
                 liveTranslation = null
                 listener.onPartialTranslation(null)
                 if (text.isEmpty() || segment == null) return
+                // Remember which stream delivered this segment: translation.final may
+                // arrive after a reconnect rotated streamId and must still find its line.
+                segmentStreams[segment] = streamId
                 latencyTracker.onFinal(segment, System.currentTimeMillis())
                 listener.onFinalSegment(
                     TranscriptSegment(
@@ -252,7 +273,8 @@ class LecsyncRealtimeEngine(
             }
             "translation.final" -> {
                 val segment = event.string("segmentId") ?: return
-                val key = "$streamId:$segment"
+                val streamOfSegment = segmentStreams[segment] ?: streamId
+                val key = "$streamOfSegment:$segment"
                 val lineId = segmentLines[key]
                 latencyTracker.onTranslationFinal(segment, System.currentTimeMillis())?.let { publishMetrics() }
                 if (lineId == null) {
@@ -368,6 +390,43 @@ class LecsyncRealtimeEngine(
         if (stopped.get() || offlineFallback != null || !ready) return
         worker.execute { runCatching { stream?.control("session.finalize") } }
     }
+
+    /**
+     * Pause/resume contract: while paused the engine stays silent (no reconnect
+     * loops or failure banners even though the server idles the stream out).
+     * Resuming reconnects a dropped stream immediately so the next sentence flows.
+     */
+    override fun setPaused(paused: Boolean) {
+        this.paused = paused
+        if (paused) {
+            finalizePending()
+            return
+        }
+        if (stopped.get() || offlineFallback != null || ready) return
+        reconnectOnResume()
+    }
+
+    private fun reconnectOnResume() {
+        if (stopped.get() || offlineFallback != null) return
+        worker.execute {
+            if (stopped.get() || offlineFallback != null || ready) return@execute
+            ready = false
+            streamOffsetMs += System.currentTimeMillis() - streamStartedAt
+            streamStartedAt = System.currentTimeMillis()
+            streamId = java.util.UUID.randomUUID().toString()
+            latencyTracker.resetStream()
+            liveTranslation = null
+            runCatching { stream?.cancel() }
+            RecordingBus.emit(RecorderEvent.Failure("正在恢复连接…"))
+            connect()
+        }
+    }
+
+    /** True once the cloud stream fell back to the on-device engine. */
+    val isOfflineFallbackActive: Boolean get() = offlineFallback != null
+
+    /** True when the realtime stream is configured and draining audio. */
+    val isReady: Boolean get() = ready
 
     private fun ByteArray.sha256(): String = java.security.MessageDigest.getInstance("SHA-256").digest(this).joinToString("") { "%02x".format(it) }
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull

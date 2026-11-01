@@ -14,6 +14,10 @@ sealed interface RecorderEvent {
     /** Live cloud latency in ms, comparable with the official 0.28s first-word and ~88ms translation figures. */
     data class CloudMetrics(val recognitionLatencyMs: Long, val translationLatencyMs: Long?) : RecorderEvent
     data class Failure(val message: String) : RecorderEvent
+    /** Emitted when a dropped cloud stream is back and healthy; clears failure banners. */
+    data object ConnectionRestored : RecorderEvent
+    /** Cloud re-transcription of an offline session replaced its transcript in place. */
+    data class CloudSyncCompleted(val sessionId: Long) : RecorderEvent
 }
 
 object RecordingBus {

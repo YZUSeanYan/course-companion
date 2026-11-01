@@ -1,13 +1,14 @@
-export const APK_SHA256 = '6e5c4710d13ec222255abdd565e57112ba87805cf51202a4499139c1fd4976bc'
+export const APK_SHA256 = '113ca867d04dc763bb5d772e29c8a1acddd1a4eb642b5ff0ecd52115c3e7e5e0'
 
 /** 网页版入口（与网关同源部署，无需配置即可使用） */
 export const WEB_APP_URL = 'https://zhixi.seanyan.store/web/'
 
 export const CURRENT_RELEASE = {
   productName: '知习',
-  version: '2.0.5',
+  version: '2.0.6',
   channel: '正式版',
-  apkUrl: '/downloads/zhixi-v2.0.5.apk',
+  // 自 2.0.6 起安装包直接走 Gitee（国内约 2MB/s，ECS 仅 3M 带宽）。
+  apkUrl: 'https://gitee.com/seanyan-dev/zhixi-apk/releases/download/v2.0.6/zhixi-v2.0.6.apk',
   minAndroid: 'Android 10（API 29）及以上',
   minAndroidShort: 'Android 10+',
   abi: 'arm64',
