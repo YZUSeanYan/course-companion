@@ -40,8 +40,10 @@ fun AccountSettingsCard(
     busy: Boolean,
     message: String?,
     codeCooldownUntilMs: Long,
+    trialMode: Boolean,
     onRequestCode: (String) -> Unit,
     onActivate: (String, String?) -> Unit,
+    onApplyTrial: (String, String, String, String) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -49,12 +51,19 @@ fun AccountSettingsCard(
     val blocked = status?.status == "disabled" || status?.status == "expired"
     var phone by remember(status?.phoneMasked) { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
+    var realName by remember { mutableStateOf("") }
+    var nickname by remember { mutableStateOf("") }
     var codeSent by remember { mutableStateOf(false) }
     var editingPhone by remember(activated, status?.status) { mutableStateOf(!activated && !blocked) }
     val normalizedPhone = phone.filter(Char::isDigit).take(11)
     val phoneValid = Regex("^1[3-9]\\d{9}$").matches(normalizedPhone)
     val normalizedCode = code.filter(Char::isDigit).take(6)
     val codeValid = normalizedCode.length == 6
+    val trialValid = realName.isNotBlank() && nickname.isNotBlank()
+    // 未开通手机号被识别后进入自助开通：显示姓名/昵称输入与「开通并激活」。
+    LaunchedEffect(trialMode) {
+        if (trialMode) codeSent = false
+    }
 
     // 验证码发送成功（进入冷却）即推进到第二步输入验证码；激活成功后退出第二步。
     LaunchedEffect(codeCooldownUntilMs) {
@@ -170,7 +179,11 @@ fun AccountSettingsCard(
                 }
             } else {
                 Text(
-                    "AI 学习包、翻译、云端听课和文档解析需要先激活试用额度。手机号由管理员在后台添加，一人在多台设备上共用同一份额度。",
+                    if (trialMode) {
+                        "该手机号尚未开通试用额度。短信验证通过后可直接自助开通，无需联系管理员；一人在多台设备上共用同一份额度。"
+                    } else {
+                        "AI 学习包、翻译、云端听课和文档解析需要先激活试用额度；没有账号时输入手机号获取验证码即可自助开通。一人在多台设备上共用同一份额度。"
+                    },
                     color = LiquidTextSecondary,
                 )
             }
@@ -203,12 +216,37 @@ fun AccountSettingsCard(
                         enabled = !busy,
                         keyboardType = KeyboardType.NumberPassword,
                     )
+                    if (trialMode) {
+                        GlassTextInput(
+                            value = realName,
+                            onValueChange = { realName = it.take(30) },
+                            label = "姓名",
+                            enabled = !busy,
+                        )
+                        GlassTextInput(
+                            value = nickname,
+                            onValueChange = { nickname = it.take(30) },
+                            label = "昵称",
+                            enabled = !busy,
+                        )
+                    }
                     GlassTextAction(
-                        label = if (busy) "正在激活…" else "激活试用额度",
-                        onClick = { onActivate(normalizedPhone, normalizedCode) },
+                        label = when {
+                            busy && trialMode -> "正在开通…"
+                            busy -> "正在激活…"
+                            trialMode -> "开通并激活"
+                            else -> "激活试用额度"
+                        },
+                        onClick = {
+                            if (trialMode) {
+                                onApplyTrial(normalizedPhone, normalizedCode, realName, nickname)
+                            } else {
+                                onActivate(normalizedPhone, normalizedCode)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         tone = GlassTone.Success,
-                        enabled = phoneValid && codeValid && !busy,
+                        enabled = phoneValid && codeValid && !busy && (!trialMode || trialValid),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         GlassTextAction(

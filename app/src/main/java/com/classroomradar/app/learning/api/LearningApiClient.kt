@@ -47,6 +47,8 @@ class LearningApiClient(
     private fun accountActivateUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/accounts/activate")
     private fun accountRequestCodeUrl(serviceBaseUrl: String) =
         endpoint(serviceBaseUrl, "v1/accounts/activate/request-code")
+    private fun trialCodeUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/trial/request-code")
+    private fun trialApplyUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/trial/apply")
     private fun appConfigUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/app-config")
 
     suspend fun health(): HealthResponse = withContext(Dispatchers.IO) {
@@ -355,6 +357,95 @@ class LearningApiClient(
             executeHttp(request(credential.token), "Activation code") {
                 json.decodeFromString(ActivationCodeResponse.serializer(), it)
             }
+        }
+    }
+
+    suspend fun requestTrialCode(phone: String): TrialCodeResponse = withContext(Dispatchers.IO) {
+        val serviceBaseUrl = currentBaseUrl()
+        var credential = ensureDevice(serviceBaseUrl)
+        val normalizedPhone = normalizeAccountPhone(phone) ?: phone
+        val body = json
+            .encodeToString(TrialCodeRequest.serializer(), TrialCodeRequest(normalizedPhone))
+            .toRequestBody(JSON_MEDIA_TYPE)
+        fun request(token: String) = Request.Builder()
+            .url(trialCodeUrl(serviceBaseUrl))
+            .header("Authorization", bearerToken(token))
+            .post(body)
+            .build()
+        try {
+            executeHttp(request(credential.token), "Trial code") {
+                json.decodeFromString(TrialCodeResponse.serializer(), it)
+            }
+        } catch (error: LearningApiException.Http) {
+            if (error.httpCode != 401) throw error
+            credentials.clear()
+            credential = ensureDevice(serviceBaseUrl)
+            executeHttp(request(credential.token), "Trial code") {
+                json.decodeFromString(TrialCodeResponse.serializer(), it)
+            }
+        }
+    }
+
+    suspend fun applyTrial(phone: String, code: String, name: String, nickname: String): TrialApplicationResponse =
+        withContext(Dispatchers.IO) {
+            val serviceBaseUrl = currentBaseUrl()
+            var credential = ensureDevice(serviceBaseUrl)
+            val normalizedPhone = normalizeAccountPhone(phone) ?: phone
+            val body = json
+                .encodeToString(
+                    TrialApplicationRequest.serializer(),
+                    TrialApplicationRequest(normalizedPhone, code, name.trim(), nickname.trim()),
+                )
+                .toRequestBody(JSON_MEDIA_TYPE)
+            fun request(token: String) = Request.Builder()
+                .url(trialApplyUrl(serviceBaseUrl))
+                .header("Authorization", bearerToken(token))
+                .post(body)
+                .build()
+            try {
+                executeHttp(request(credential.token), "Trial apply") {
+                    json.decodeFromString(TrialApplicationResponse.serializer(), it)
+                }
+            } catch (error: LearningApiException.Http) {
+                if (error.httpCode != 401) throw error
+                credentials.clear()
+                credential = ensureDevice(serviceBaseUrl)
+                executeHttp(request(credential.token), "Trial apply") {
+                    json.decodeFromString(TrialApplicationResponse.serializer(), it)
+                }
+            }
+        }
+
+    suspend fun syncPush(changes: List<SyncChange>): SyncPushResponse = withContext(Dispatchers.IO) {
+        syncRequest("v1/sync/push", SyncPushRequest.serializer(), SyncPushRequest(changes), SyncPushResponse.serializer(), "Sync push")
+    }
+
+    suspend fun syncPull(entities: List<String> = emptyList()): SyncPullResponse = withContext(Dispatchers.IO) {
+        syncRequest("v1/sync/pull", SyncPullRequest.serializer(), SyncPullRequest(entities), SyncPullResponse.serializer(), "Sync pull")
+    }
+
+    private suspend fun <Req, Resp> syncRequest(
+        path: String,
+        requestSerializer: kotlinx.serialization.KSerializer<Req>,
+        payload: Req,
+        responseSerializer: kotlinx.serialization.KSerializer<Resp>,
+        operation: String,
+    ): Resp {
+        val serviceBaseUrl = currentBaseUrl()
+        var credential = ensureDevice(serviceBaseUrl)
+        val body = json.encodeToString(requestSerializer, payload).toRequestBody(JSON_MEDIA_TYPE)
+        fun request(token: String) = Request.Builder()
+            .url(endpoint(serviceBaseUrl, path))
+            .header("Authorization", bearerToken(token))
+            .post(body)
+            .build()
+        return try {
+            executeHttp(request(credential.token), operation) { json.decodeFromString(responseSerializer, it) }
+        } catch (error: LearningApiException.Http) {
+            if (error.httpCode != 401) throw error
+            credentials.clear()
+            credential = ensureDevice(serviceBaseUrl)
+            executeHttp(request(credential.token), operation) { json.decodeFromString(responseSerializer, it) }
         }
     }
 

@@ -191,8 +191,10 @@ interface ClassroomDao {
         TranslationEntity::class,
         LiveMinutesEntity::class,
         CloudTaskEntity::class,
+        SyncEntityRow::class,
+        SyncStateRow::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class ClassroomDatabase : RoomDatabase() {
@@ -200,6 +202,7 @@ abstract class ClassroomDatabase : RoomDatabase() {
     abstract fun learningDao(): LearningDao
     abstract fun doubtDao(): DoubtDao
     abstract fun cloudDao(): CloudDao
+    abstract fun syncDao(): SyncDao
 
     companion object {
         private const val DATABASE_NAME = "water_class_radar.db"
@@ -392,13 +395,34 @@ abstract class ClassroomDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 云空间同步：uid 映射与同步状态，不改动既有业务表结构。
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS sync_entities (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        entity TEXT NOT NULL,
+                        uid TEXT NOT NULL,
+                        localId INTEGER NOT NULL,
+                        updatedAtMillis INTEGER NOT NULL)""".trimIndent(),
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sync_entities_entity_uid ON sync_entities(entity, uid)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sync_entities_entity_localId ON sync_entities(entity, localId)")
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS sync_state (
+                        key TEXT PRIMARY KEY NOT NULL,
+                        value TEXT NOT NULL)""".trimIndent(),
+                )
+            }
+        }
+
         fun get(context: Context): ClassroomDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClassroomDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .build()
                 .also { instance = it }
         }

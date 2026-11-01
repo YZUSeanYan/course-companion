@@ -32,6 +32,38 @@ data class ActivationCodeResponse(
     val cooldownSeconds: Int = 60,
 )
 
+/** 未开通手机号的自助申请：短信验证通过后自动开卡并绑定当前设备。 */
+@Serializable
+data class TrialCodeRequest(
+    val phone: String,
+)
+
+@Serializable
+data class TrialCodeResponse(
+    val sent: Boolean = false,
+    val expiresInSeconds: Int = 0,
+    val resendAfterSeconds: Int = 60,
+    val phoneMasked: String = "",
+)
+
+@Serializable
+data class TrialApplicationRequest(
+    val phone: String,
+    val code: String,
+    val name: String,
+    val nickname: String,
+    val consent: Boolean = true,
+)
+
+@Serializable
+data class TrialApplicationResponse(
+    val applied: Boolean = false,
+    val phoneMasked: String = "",
+    val validUntil: String = "",
+    val message: String = "",
+    val deviceBound: Boolean = false,
+)
+
 @Serializable
 data class AccountLimitsDto(
     val aiPacksPerDay: Int = 0,
@@ -74,6 +106,46 @@ data class AppConfigDto(
     val announcement: AnnouncementDto = AnnouncementDto(),
     val taglines: List<String> = emptyList(),
     val updatedAt: String? = null,
+)
+
+// ---- 云空间同步（与服务端 /v1/sync/* 契约一致） ----
+@Serializable
+data class SyncChange(
+    val entity: String,
+    val clientUid: String,
+    val payload: JsonObject,
+    val updatedAt: Long,
+    val deleted: Boolean = false,
+)
+
+@Serializable
+data class SyncPushRequest(val changes: List<SyncChange>)
+
+@Serializable
+data class SyncPushResult(val clientUid: String = "", val status: String = "")
+
+@Serializable
+data class SyncPushResponse(
+    val results: List<SyncPushResult> = emptyList(),
+    val serverTime: Long = 0,
+)
+
+@Serializable
+data class SyncPullRequest(val entities: List<String> = emptyList())
+
+@Serializable
+data class SyncRecordDto(
+    val entity: String = "",
+    val clientUid: String = "",
+    val payload: JsonObject = JsonObject(emptyMap()),
+    val updatedAt: Long = 0,
+    val deleted: Boolean = false,
+)
+
+@Serializable
+data class SyncPullResponse(
+    val records: List<SyncRecordDto> = emptyList(),
+    val serverTime: Long = 0,
 )
 
 @Serializable

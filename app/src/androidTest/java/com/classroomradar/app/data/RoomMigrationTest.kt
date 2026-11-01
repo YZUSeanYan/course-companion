@@ -164,6 +164,31 @@ class RoomMigrationTest {
         }
     }
 
+    @Test
+    fun migration9To10AddsSyncTablesAndKeepsData() {
+        helper.createDatabase(TEST_DATABASE, 9).apply {
+            execSQL("INSERT INTO sessions (id, startedAtMillis, title) VALUES (9, 123456, '保留的课堂')")
+            close()
+        }
+        helper.runMigrationsAndValidate(TEST_DATABASE, 10, true, ClassroomDatabase.MIGRATION_9_10).apply {
+            execSQL(
+                "INSERT INTO sync_entities (entity, uid, localId, updatedAtMillis) " +
+                    "VALUES ('sessions', '11111111-2222-3333-4444-555555555555', 9, 123456)",
+            )
+            query("SELECT uid, localId FROM sync_entities WHERE entity = 'sessions'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.getString(0).startsWith("11111111"))
+                assertTrue(cursor.getLong(1) == 9L)
+            }
+            execSQL("INSERT INTO sync_state (key, value) VALUES ('last_sync_at', '123')")
+            query("SELECT title FROM sessions WHERE id = 9").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.getString(0) == "保留的课堂")
+            }
+            close()
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "course-companion-migration-test"
     }

@@ -86,6 +86,9 @@ class LearningPresenter(private val appContext: Context) {
     val isAccountBusy: StateFlow<Boolean> = _isAccountBusy.asStateFlow()
     private val _codeCooldownUntilMs = MutableStateFlow(0L)
     val codeCooldownUntilMs: StateFlow<Long> = _codeCooldownUntilMs.asStateFlow()
+    /** True when the entered phone has no account yet: request a trial code and self-apply. */
+    private val _accountTrialMode = MutableStateFlow(false)
+    val accountTrialMode: StateFlow<Boolean> = _accountTrialMode.asStateFlow()
     private val _appConfig = MutableStateFlow<AppConfigDto?>(null)
     val appConfig: StateFlow<AppConfigDto?> = _appConfig.asStateFlow()
     private var appConfigJob: Job? = null
@@ -487,6 +490,7 @@ class LearningPresenter(private val appContext: Context) {
                 completedAtMillis = now,
             ),
         )
+        SyncManager.get(appContext).syncInBackground(silent = true)
         return items.size
     }
 
@@ -568,10 +572,69 @@ class LearningPresenter(private val appContext: Context) {
         _accountMessage.value = null
         scope.launch {
             try {
-                val response = learningApi.requestActivationCode(phone)
-                _codeCooldownUntilMs.value = System.currentTimeMillis() +
-                    maxOf(response.cooldownSeconds, 1) * 1000L
-                _accountMessage.value = "验证码已发送至 ${response.phoneMasked}，请查收短信"
+                if (_accountTrialMode.value) {
+                    // 未开通手机号：走自助申请验证码，验证通过后可自助开卡。
+                    val response = learningApi.requestTrialCode(phone)
+                    _codeCooldownUntilMs.value = System.currentTimeMillis() +
+                        maxOf(response.resendAfterSeconds, 1) * 1000L
+                    _accountMessage.value = "验证码已发送至 ${response.phoneMasked}；填写姓名和昵称即可开通"
+                } else {
+                    val response = learningApi.requestActivationCode(phone)
+                    _codeCooldownUntilMs.value = System.currentTimeMillis() +
+                        maxOf(response.cooldownSeconds, 1) * 1000L
+                    _accountMessage.value = "验证码已发送至 ${response.phoneMasked}，请查收短信"
+                }
+            } catch (error: Exception) {
+                val http = error as? LearningApiException.Http
+                if (http?.errorCode == "account_not_found" && !_accountTrialMode.value) {
+                    // 该手机号未在后台开户：切到自助开通，提示重新获取验证码。
+                    _accountTrialMode.value = true
+                    _accountMessage.value = "该手机号尚未开通试用额度：填写姓名和昵称后可直接开通并激活"
+                } else if (http?.errorCode == "phone_registered" && _accountTrialMode.value) {
+                    _accountTrialMode.value = false
+                    _accountMessage.value = "该手机号已在试用名单中，请直接获取激活验证码"
+                } else {
+                    _accountMessage.value = accountErrorMessage(error)
+                }
+            } finally {
+                _isAccountBusy.value = false
+            }
+        }
+    }
+
+    fun applyTrial(rawPhone: String, code: String, name: String, nickname: String) {
+        val phone = normalizeAccountPhone(rawPhone)
+        if (phone == null) {
+            _accountMessage.value = "请输入 11 位中国大陆手机号"
+            return
+        }
+        if (name.isBlank() || nickname.isBlank()) {
+            _accountMessage.value = "请填写姓名和昵称"
+            return
+        }
+        if (code.length != 6) {
+            _accountMessage.value = "请输入 6 位短信验证码"
+            return
+        }
+        if (_isAccountBusy.value) return
+        _isAccountBusy.value = true
+        _accountMessage.value = null
+        scope.launch {
+            try {
+                val applied = learningApi.applyTrial(phone, code, name, nickname)
+                if (!applied.applied) {
+                    _accountMessage.value = applied.message.ifBlank { "自助开通失败，请稍后重试" }
+                    return@launch
+                }
+                // 开卡成功后立即拉取账号状态（apply 已绑定当前设备）。
+                val status = learningApi.accountStatus()
+                accountStatusStore.save(status)
+                _accountStatus.value = status
+                _accountSupported.value = true
+                _accountTrialMode.value = false
+                _codeCooldownUntilMs.value = 0L
+                _accountMessage.value = "已开通并激活 ${status.phoneMasked}，有效期至 ${applied.validUntil}"
+                SyncManager.get(appContext).syncInBackground(silent = true)
             } catch (error: Exception) {
                 _accountMessage.value = accountErrorMessage(error)
             } finally {
@@ -595,8 +658,10 @@ class LearningPresenter(private val appContext: Context) {
                 accountStatusStore.save(status)
                 _accountStatus.value = status
                 _accountSupported.value = true
+                _accountTrialMode.value = false
                 _codeCooldownUntilMs.value = 0L
                 _accountMessage.value = "已激活 ${status.phoneMasked}，今日额度已同步"
+                SyncManager.get(appContext).syncInBackground(silent = true)
             } catch (error: Exception) {
                 _accountMessage.value = accountErrorMessage(error)
             } finally {
