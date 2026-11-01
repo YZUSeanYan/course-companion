@@ -114,6 +114,20 @@
 - **线上核对**：`zhixi.seanyan.store/v1/accounts/me`（新设备）返回 `activated:false`；`/v2/learning-pack/jobs` 与 `/v2/documents/analyze` 对未激活设备返回 `需要先激活试用额度：在「设置 → 试用额度」用手机号激活即可`（403，不再提 App）；`shuike.seanyan.store` 已切到新 bundle，`screenshots/app-live-class.png` 200（356,786 字节），`downloads/` 373M 与 `models/` 298M 未受影响。
 - **未做真机短信验证**：`/v1/trial/request-code` 会真实发短信，本轮只用已注册设备覆盖了 404/403/422 分支，未向任何手机号发送验证码。
 
+## 官网艺术化重做：纸与声（2026-11-02，PR #70）
+
+- **目标**：上一轮解决了「风格统一」，但页面仍是干净模板，缺少美术表达与动效语言。本轮在**不改主题色 `#ff670d`** 的前提下加一层艺术处理，并把全站动效收敛为一条语法。
+- **视觉层**：全站极淡纸纹（SVG `feTurbulence`，`multiply` 混合、不拦截指针）；首屏两团缓慢漂移的暖光（径向渐变 + `transform`，刻意不用 `filter: blur` 以免整页重绘）；分区标题改为「大号描边编号 + 眉毛标签」同基线的编辑式脚标；页脚收描边大字 `ZHIXI`，列表链接改细下划线生长；行动区底部压三条同一振幅包络的声波线。
+- **动效层**：统一曲线 `--ease-out = cubic-bezier(0.16, 1, 0.3, 1)`，元素只「升起并停稳」，不做回弹。新增 `Reveal` 的 `mask`（遮罩揭开）与 `scale`（放大落定）变体、顶部 2px 阅读进度线、实测数字计数、深色分区指针聚光（仅 `hover: hover` 精细指针）、卡片光扫、原则行下划线、慢速词汇丝带（悬停暂停）。
+- **过程中修掉的三个真实缺陷**：
+  1. `clip-path` 加在被 `IntersectionObserver` 观察的元素自身时，浏览器算出 0 交叉比、动画永不触发，首屏标题会整块消失。改为遮罩放内层、外层保持正常几何，并对首屏元素在挂载后直接播放。
+  2. `requestAnimationFrame` 在后台标签页/低电量模式下被节流，计数可能停在 0。初值改为目标值，仅确认元素在视口内才从 0 开始，并加定时器兜底。
+  3. `kimi-plugin-inspect-react` 一直在生产包里，给每个元素加 `code-path` 并注入悬浮头像。改为仅 `vite serve` 启用，生产 JS 364.85 KB → 328.36 KB。
+- **无障碍**：`prefers-reduced-motion: reduce` 下极光、丝带、扫描线静止；`reveal-mask-inner` 一并还原（只还原外层仍会把标题裁掉）；逐页复核隐藏元素数为 0。
+- **验证**：`tsc` + `npm run build` 通过；`npx eslint src` 对改动文件零问题（剩余 8 条来自既有 `components/ui/*` 模板）。真实浏览器（CDP）在 390 / 768 / 1440 三档宽度下逐页测量：六页均无横向溢出（`scrollWidth == clientWidth`），`reveal` 元素全部落地，`h1` 均可见。
+- **发布**：tar overlay 到 `/opt/shuike-site`（发布前备份 `index.html.bak-20261102-023235`，未使用 `--delete`）。线上 `index.html` 已指向 `index-BRb99OMG.js` / `index-DBlDJXUL.css`；公网复测首页与六个路由渲染正常，`downloads/` 373M、`models/` 298M 与全部 APK 未受影响，`zhixi.seanyan.store/health` 与 `/web/` 均 200。
+- **边界**：本轮只改视觉与动效，未改任何文案、链接与产品行为；未做 iPhone Safari 真机目视验收；Mimosa 深度安全审计仍未完成，不得据此声称项目通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
