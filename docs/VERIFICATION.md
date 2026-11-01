@@ -170,6 +170,7 @@
 - **发布前又补的回归测试**：`translate-queue.test.ts`（5 项，锁住 `zh`/`zh-CN` 口径与去重）、`review-queue.test.ts`（4 项，锁住快照推进不跳卡）。
 - **验证**：`tsc --noEmit` 通过；`vitest run` 78 项通过（12 文件）；`vite build` 通过。CDP 真实浏览器逐项实测：七个路由全部正常渲染且零未捕获错误；`#/learning/course/abc` 与 `999999` 均落到「课程不存在」兜底（不再白屏）；详情页加载态不再闪现误报；`saveAudio` 默认 `false` 且开关可持久化；复习三张卡依次 alpha→beta→gamma 无跳过、写 3 条日志、进入完成态；键盘长按 5 次只记 1 条日志；点按钮后键盘仍可用；译文 `targetLang="zh"` 的行能正确显示中文。390 / 820 / 1440 三档无横向溢出。
 - **图标**：品牌标与站点图标改用 App 最新启动图标 `app/src/main/res/drawable-nodpi/ic_brand_square.png`（512×512，Z + 声波）。资源放在 `webapp/src/assets/`，由 Vite 生成带哈希的 URL；因为 `base: './'` 且产物挂在 `/web/` 子路径，favicon 与 `apple-touch-icon` 在运行时由 `main.tsx` 用该 URL 注入，写死在 `index.html` 里会在子路径下 404。
+- **发布**：网页版发布到 `/opt/zhixi-webapp/r24`，`current` 软链从 `r23` 切到 `r24`（`r23` 保留回滚）。公网 `/web/` 200、`index-DeIYitxV.js` 482,235 字节、`index-DkPgPdZU.css` 20,876 字节、`app-icon-DnJRG8jj.png` 72,614 字节均 200；`zhixi.seanyan.store/health` 200。**回滚 = `ln -sfn /opt/zhixi-webapp/r23 /opt/zhixi-webapp/current`**。线上实机核对：桌面 1440 左栏宽 244、底栏 `display:none`；手机 390 左栏隐藏、底栏 `display:grid`；两档均 `scrollWidth === clientWidth`；品牌标与 favicon 均指向 `app-icon-DnJRG8jj.png` 且 `naturalWidth=512`。
 - **边界**：本轮只改 UI 与上述三处产品行为修正，未改接口、同步协议与额度逻辑；课程详情与复习会话未做端到端真实数据流程验收（本地无生产账号）；Mimosa 深度安全审计仍未完成，不得据此声称项目通过安全审计。
 
 ## 运营后台账号化与历史数据清理（2026-11-02，网关 r18）
