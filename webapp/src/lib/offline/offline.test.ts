@@ -26,6 +26,8 @@ describe("resolveModelBaseUrl（设置页回归：禁止递归爆栈）", () => 
   it("无覆盖时返回默认镜像常量（不递归）", () => {
     expect(resolveModelBaseUrl()).toBe(DEFAULT_MODEL_BASE_URL);
     expect(OFFLINE_ASR_MODEL.baseUrl).toBe(DEFAULT_MODEL_BASE_URL);
+    // 镜像必须与 webapp 同源（zhixi 域），否则跨源 fetch 会被 CORS 拦截。
+    expect(DEFAULT_MODEL_BASE_URL).toMatch(/^https:\/\/zhixi\.seanyan\.store\//);
   });
 
   it("有覆盖时返回覆盖值（保留尾部斜杠）", () => {
