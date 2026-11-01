@@ -434,7 +434,7 @@ internal fun GlassConfirmDialog(
     title: String,
     message: String,
     confirmLabel: String,
-    dismissLabel: String,
+    dismissLabel: String?,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     tone: GlassTone = GlassTone.Accent,
@@ -465,7 +465,9 @@ internal fun GlassConfirmDialog(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                     ) {
-                        GlassTextAction(dismissLabel, onDismiss)
+                        if (dismissLabel != null) {
+                            GlassTextAction(dismissLabel, onDismiss)
+                        }
                         GlassTextAction(confirmLabel, onConfirm, tone = tone)
                     }
                 }

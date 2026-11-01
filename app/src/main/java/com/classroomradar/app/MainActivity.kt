@@ -247,6 +247,8 @@ class MainActivity : ComponentActivity() {
                 val accountSupported by rememberState(learningPresenter.accountSupported)
                 val accountMessage by rememberState(learningPresenter.accountMessage)
                 val isAccountBusy by rememberState(learningPresenter.isAccountBusy)
+                val accountCodeCooldownUntilMs by rememberState(learningPresenter.codeCooldownUntilMs)
+                val appConfig by rememberState(learningPresenter.appConfig)
                 val cloudTasks by rememberState(cloudAudioPresenter.tasks)
                 val cloudAudioBusy by rememberState(cloudAudioPresenter.busy)
                 val cloudAudioMessage by rememberState(cloudAudioPresenter.message)
@@ -263,6 +265,7 @@ class MainActivity : ComponentActivity() {
                 var pendingVoiceToggle by remember { mutableStateOf(false) }
                 var showAccountNotice by remember { mutableStateOf(false) }
                 var pendingAccountPhone by remember { mutableStateOf("") }
+                var showAnnouncement by remember { mutableStateOf(false) }
                 var selectedCourseId by remember { mutableStateOf<Long?>(null) }
                 var learningCategoryType by remember { mutableStateOf<String?>(null) }
                 var reviewCategoryType by remember { mutableStateOf<String?>(null) }
@@ -350,6 +353,18 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(pendingExport?.fileName) {
                     pendingExport?.let { exportLauncher.launch(it.fileName) }
+                }
+
+                // 每次冷启动联网拉取公告与首页标语；失败静默，离线走内置默认。
+                LaunchedEffect(Unit) {
+                    learningPresenter.fetchAppConfig()
+                }
+
+                LaunchedEffect(appConfig) {
+                    val announcement = appConfig?.announcement
+                    if (announcement?.enabled == true && announcement.body.isNotBlank()) {
+                        showAnnouncement = true
+                    }
                 }
 
                 // Leaving the history page always drops the multi-selection session.
@@ -473,20 +488,32 @@ class MainActivity : ComponentActivity() {
 
                 if (showAccountNotice) {
                     GlassConfirmDialog(
-                        title = "激活试用额度？",
-                        message = "手机号仅用于试用额度管理，不用于登录或营销。号码会发送到当前 AI 服务并由服务端加密保存；课堂内容不会随手机号上传。请确认管理员已经添加你的手机号。",
-                        confirmLabel = "同意并激活",
+                        title = "获取短信验证码？",
+                        message = "手机号仅用于试用额度管理，不用于登录或营销。号码会发送到当前 AI 服务并由服务端加密保存；激活需要输入短信验证码。请确认管理员已经添加你的手机号。",
+                        confirmLabel = "同意并发送",
                         dismissLabel = "取消",
                         onConfirm = {
                             appPreferences.accountNoticeAccepted = true
                             showAccountNotice = false
-                            learningPresenter.activateAccount(pendingAccountPhone)
+                            learningPresenter.requestCode(pendingAccountPhone)
                             pendingAccountPhone = ""
                         },
                         onDismiss = {
                             showAccountNotice = false
                             pendingAccountPhone = ""
                         },
+                    )
+                }
+
+                if (showAnnouncement && !showUsageNotice) {
+                    val announcement = appConfig?.announcement
+                    GlassConfirmDialog(
+                        title = announcement?.title?.takeIf { it.isNotBlank() } ?: "公告",
+                        message = announcement?.body.orEmpty(),
+                        confirmLabel = "我知道了",
+                        dismissLabel = null,
+                        onConfirm = { showAnnouncement = false },
+                        onDismiss = { showAnnouncement = false },
                     )
                 }
 
@@ -559,6 +586,7 @@ class MainActivity : ComponentActivity() {
                     title = pageTitle,
                     onPageChange = { page = it },
                     onBack = { page = backTarget(page) },
+                    taglines = appConfig?.taglines.orEmpty(),
                     bottomOverlay = when {
                         page == AppPage.Home -> {
                             {
@@ -743,15 +771,19 @@ class MainActivity : ComponentActivity() {
                             accountSupported = accountSupported,
                             accountBusy = isAccountBusy,
                             accountMessage = accountMessage,
-                            onRefreshAccount = { learningPresenter.refreshAccount() },
-                            onActivateAccount = { phone ->
+                            accountCodeCooldownUntilMs = accountCodeCooldownUntilMs,
+                            onRequestCode = { phone ->
                                 if (!appPreferences.accountNoticeAccepted) {
                                     pendingAccountPhone = phone
                                     showAccountNotice = true
                                 } else {
-                                    learningPresenter.activateAccount(phone)
+                                    learningPresenter.requestCode(phone)
                                 }
                             },
+                            onActivateAccount = { phone, code ->
+                                learningPresenter.activateAccount(phone, code)
+                            },
+                            onRefreshAccount = { learningPresenter.refreshAccount() },
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -1302,6 +1334,7 @@ private fun AppScaffold(
     onPageChange: (AppPage) -> Unit,
     onBack: () -> Unit,
     bottomOverlay: (@Composable () -> Unit)? = null,
+    taglines: List<String> = emptyList(),
     content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
 ) {
     val rootPage = page in RootPageOrder
@@ -1315,15 +1348,17 @@ private fun AppScaffold(
     val railInset = if (useRail) 112.dp else 0.dp
     val contentCap = if (useRail) 840.dp else Int.MAX_VALUE.dp
     val chromeCap = if (useRail) 952.dp else Int.MAX_VALUE.dp
-    var mottoIndex by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
+    // 首页轮播标语：后台可远控；未配置或拉取失败回退内置默认两句。
+    val mottos = taglines.filter { it.isNotBlank() }.ifEmpty { listOf("知行合一", "学而时习之，不亦说乎") }
+    var mottoIndex by remember(mottos) { mutableStateOf(0) }
+    LaunchedEffect(mottos) {
         while (true) {
             kotlinx.coroutines.delay(5_000)
-            mottoIndex = (mottoIndex + 1) % 2
+            mottoIndex = (mottoIndex + 1) % mottos.size
         }
     }
     val subtitle = if (page == AppPage.Home) {
-        if (mottoIndex == 0) "知行合一" else "学而时习之，不亦说乎"
+        mottos[mottoIndex % mottos.size]
     } else "知习"
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -2520,8 +2555,10 @@ private fun SettingsScreen(
     accountSupported: Boolean,
     accountBusy: Boolean,
     accountMessage: String?,
+    accountCodeCooldownUntilMs: Long,
+    onRequestCode: (String) -> Unit,
+    onActivateAccount: (String, String?) -> Unit,
     onRefreshAccount: () -> Unit,
-    onActivateAccount: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -2594,6 +2631,8 @@ private fun SettingsScreen(
                 supported = accountSupported,
                 busy = accountBusy,
                 message = accountMessage,
+                codeCooldownUntilMs = accountCodeCooldownUntilMs,
+                onRequestCode = onRequestCode,
                 onActivate = onActivateAccount,
                 onRefresh = onRefreshAccount,
             )
