@@ -194,6 +194,15 @@
 - **发布**：网页版发布到 `/opt/zhixi-webapp/r25`，`current` 从 `r24` 切到 `r25`（`r23`/`r24` 保留）。公网 `index-CjI9Zx__.js`（482,570 字节）与本地验证产物 SHA-256 完全一致；线上包内 worklet 源码实测 5 秒 48kHz 输入产出 4.8 秒音频、零错误。**回滚 = `ln -sfn /opt/zhixi-webapp/r24 /opt/zhixi-webapp/current`**。
 - **边界**：未改协议与网关；停止时缓冲中不足一帧（≤0.2 秒）的音频不 flush，属可接受损失。Mimosa 深度审计仍未完成，不得据此声称通过安全审计。
 
+## 官网下架自助申请试用页（2026-11-02，已发布）
+
+- **前提核实**：下架前先确认两端都能自己开通试用额度。网页版「设置 → 试用额度」在手机号未开通时自动转自助申请（姓名/昵称/同意条款 → 6 位验证码 → 开卡并绑定当前浏览器）；App 自 **V2.0.6** 起同样支持（`LearningPresenter.requestCode` 捕获 `account_not_found` 后切 trial 模式，界面出现姓名/昵称与「开通并激活」）。线上核对：`POST /v1/trial/request-code` 对非法手机号返回 422（路由开放、无需设备令牌）、`/v1/trial/status` 返回 `smsConfigured=true`；线上分发的 APK 为 V2.0.7。
+- **改动**：删除 `site/src/pages/Apply.tsx` 与 `/apply` 路由、导航项、页脚两处入口；Home/Download 中指向 `/apply` 的链接改为「打开网页版」「下载 App」；Download 的额度说明改写为「App 与网页版都能自己开通」并补一条通往隐私政策额度章节的链接；Privacy 删除「或在官网申请页…」表述（其余隐私承诺原样保留）；README 两处说明同步改写。已删除的 `/#/apply` 落到首页兜底路由。
+- **顺带修正版本号漂移**：线上官网本来就是 V2.0.7，而 main 源码 `release.ts` 仍是 2.0.6（并行会话改完部署后未把版本号提交回仓库）。本次一并升到 2.0.7，SHA-256 `2d5121e22216a612193dabe6589d672c7d44985eb05662f3eb002fb20fdb2035` 与服务器 `/downloads/zhixi-v2.0.7.apk` 实测一致，Gitee 直链 HEAD 200。**若不做这一步，从 main 重新构建发布会把下载页降级回 2.0.6。**
+- **验证**：`tsc --noEmit`、`vite build` 通过；构建产物中 `2.0.6` 与「申请试用」均为 0 处；浏览器逐页核对导航（首页/功能/下载/反馈）、页脚与额度文案，1440 与 390 两档无横向溢出。
+- **发布**：overlay 到 `/opt/shuike-site`（发布前备份 `index.html.bak-20261102-063055`，未使用 `--delete`）。线上 `index.html` 已指向 `index-B4TgGr84.js`（317,241 字节）/`index-D8kWGp15.css`（102,166 字节），旧 bundle `index-LIWFeimc.js` 不再被引用；`downloads/` 470M、`models/` 298M 未受影响，`/downloads/zhixi-v2.0.7.apk`、`/models/zhixi/web/asr-zh-en-v1/sherpa-onnx-wasm-main-asr.js` 均 200；`zhixi.seanyan.store/web/` 与 `/health` 均 200。**回滚 = 还原 `index.html.bak-20261102-063055` 与对应 assets。**
+- **边界**：装在手机上的是 V2.0.5 及更早版本时 App 内没有自助开通入口，需走网页版；官网下载页始终给最新版，新装用户不受影响。App 的自助开通只做了代码路径与线上接口核对，未走真实短信端到端。nginx 的 `/api/trial/*` 片段已无调用方，属无害残留，未改动生产配置。Mimosa 深度审计仍未完成，不得据此声称通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
