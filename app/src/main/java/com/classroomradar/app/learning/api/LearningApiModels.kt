@@ -73,6 +73,7 @@ data class AnnouncementDto(
 data class AppConfigDto(
     val announcement: AnnouncementDto = AnnouncementDto(),
     val taglines: List<String> = emptyList(),
+    val updatedAt: String? = null,
 )
 
 @Serializable

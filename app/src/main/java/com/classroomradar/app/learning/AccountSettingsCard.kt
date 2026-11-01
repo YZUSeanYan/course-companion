@@ -56,6 +56,21 @@ fun AccountSettingsCard(
     val normalizedCode = code.filter(Char::isDigit).take(6)
     val codeValid = normalizedCode.length == 6
 
+    // 验证码发送成功（进入冷却）即推进到第二步输入验证码；激活成功后退出第二步。
+    LaunchedEffect(codeCooldownUntilMs) {
+        if (codeCooldownUntilMs > System.currentTimeMillis() + 900_000L) {
+            // 超长冷却视作异常值，忽略。
+        } else if (codeCooldownUntilMs > System.currentTimeMillis()) {
+            codeSent = true
+        }
+    }
+    LaunchedEffect(activated) {
+        if (activated) {
+            codeSent = false
+            code = ""
+        }
+    }
+
     var cooldownNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(codeCooldownUntilMs) {
         while (System.currentTimeMillis() < codeCooldownUntilMs) {
