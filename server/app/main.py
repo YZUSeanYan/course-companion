@@ -93,6 +93,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_trial_routes(app, settings)
     register_activation_routes(app, settings)
     register_sync_routes(app, settings)
+    from .app_config import register_app_config_routes
+    register_app_config_routes(app, settings)
     app.state.register_limiter = SlidingWindowRateLimiter(
         settings.register_rate_limit, settings.register_rate_window_seconds
     )

@@ -68,4 +68,59 @@ class AccountModelsTest {
         assertNull(normalizeAccountPhone("23900000001"))
         assertNull(normalizeAccountPhone(""))
     }
+
+    @Test
+    fun decodesActivationCodeResponse() {
+        val response = json.decodeFromString(
+            ActivationCodeResponse.serializer(),
+            """{"sent":true,"phoneMasked":"139****0001","cooldownSeconds":60}""",
+        )
+        assertTrue(response.sent)
+        assertEquals("139****0001", response.phoneMasked)
+        assertEquals(60, response.cooldownSeconds)
+        val fallback = json.decodeFromString(
+            ActivationCodeResponse.serializer(),
+            """{"sent":false,"phoneMasked":"","cooldownSeconds":30}""",
+        )
+        assertFalse(fallback.sent)
+        assertEquals(30, fallback.cooldownSeconds)
+    }
+
+    @Test
+    fun activateRequestOmitsNullCode() {
+        val wire = Json { explicitNulls = false; encodeDefaults = true }
+        assertEquals(
+            """{"phone":"13900000001"}""",
+            wire.encodeToString(AccountActivateRequest.serializer(), AccountActivateRequest("13900000001")),
+        )
+        assertEquals(
+            """{"phone":"13900000001","code":"246810"}""",
+            wire.encodeToString(
+                AccountActivateRequest.serializer(),
+                AccountActivateRequest("13900000001", "246810"),
+            ),
+        )
+    }
+
+    @Test
+    fun decodesAppConfigWithAnnouncementAndTaglines() {
+        val config = json.decodeFromString(
+            AppConfigDto.serializer(),
+            """
+            {
+              "announcement": {"enabled": true, "title": "新版发布", "body": "知习 V2.0.5 上线"},
+              "taglines": ["知行合一", "学而时习之，不亦说乎"]
+            }
+            """.trimIndent(),
+        )
+        assertTrue(config.announcement.enabled)
+        assertEquals("新版发布", config.announcement.title)
+        assertEquals(2, config.taglines.size)
+        val empty = json.decodeFromString(
+            AppConfigDto.serializer(),
+            """{"announcement":{"enabled":false,"title":"","body":""},"taglines":[]}""",
+        )
+        assertFalse(empty.announcement.enabled)
+        assertTrue(empty.taglines.isEmpty())
+    }
 }

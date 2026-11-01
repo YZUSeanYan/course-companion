@@ -10,6 +10,7 @@ import com.classroomradar.app.learning.api.AccountStatusStore
 import com.classroomradar.app.learning.api.AnalysisChunkInput
 import com.classroomradar.app.learning.api.AnalysisRequest
 import com.classroomradar.app.learning.api.AnalysisResultDto
+import com.classroomradar.app.learning.api.AppConfigDto
 import com.classroomradar.app.learning.api.DocumentAssetDto
 import com.classroomradar.app.learning.api.LearningApiClient
 import com.classroomradar.app.learning.api.LearningApiException
@@ -83,6 +84,11 @@ class LearningPresenter(private val appContext: Context) {
     val accountMessage: StateFlow<String?> = _accountMessage.asStateFlow()
     private val _isAccountBusy = MutableStateFlow(false)
     val isAccountBusy: StateFlow<Boolean> = _isAccountBusy.asStateFlow()
+    private val _codeCooldownUntilMs = MutableStateFlow(0L)
+    val codeCooldownUntilMs: StateFlow<Long> = _codeCooldownUntilMs.asStateFlow()
+    private val _appConfig = MutableStateFlow<AppConfigDto?>(null)
+    val appConfig: StateFlow<AppConfigDto?> = _appConfig.asStateFlow()
+    private var appConfigJob: Job? = null
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -518,7 +524,31 @@ class LearningPresenter(private val appContext: Context) {
         }
     }
 
-    fun activateAccount(rawPhone: String) {
+    fun requestCode(rawPhone: String) {
+        val phone = normalizeAccountPhone(rawPhone)
+        if (phone == null) {
+            _accountMessage.value = "请输入 11 位中国大陆手机号"
+            return
+        }
+        if (_isAccountBusy.value) return
+        if (System.currentTimeMillis() < _codeCooldownUntilMs.value) return
+        _isAccountBusy.value = true
+        _accountMessage.value = null
+        scope.launch {
+            try {
+                val response = learningApi.requestActivationCode(phone)
+                _codeCooldownUntilMs.value = System.currentTimeMillis() +
+                    maxOf(response.cooldownSeconds, 1) * 1000L
+                _accountMessage.value = "验证码已发送至 ${response.phoneMasked}，请查收短信"
+            } catch (error: Exception) {
+                _accountMessage.value = accountErrorMessage(error)
+            } finally {
+                _isAccountBusy.value = false
+            }
+        }
+    }
+
+    fun activateAccount(rawPhone: String, code: String? = null) {
         val phone = normalizeAccountPhone(rawPhone)
         if (phone == null) {
             _accountMessage.value = "请输入 11 位中国大陆手机号"
@@ -529,15 +559,27 @@ class LearningPresenter(private val appContext: Context) {
         _accountMessage.value = null
         scope.launch {
             try {
-                val status = learningApi.activateAccount(phone)
+                val status = learningApi.activateAccount(phone, code)
                 accountStatusStore.save(status)
                 _accountStatus.value = status
                 _accountSupported.value = true
+                _codeCooldownUntilMs.value = 0L
                 _accountMessage.value = "已激活 ${status.phoneMasked}，今日额度已同步"
             } catch (error: Exception) {
                 _accountMessage.value = accountErrorMessage(error)
             } finally {
                 _isAccountBusy.value = false
+            }
+        }
+    }
+
+    fun fetchAppConfig() {
+        if (appConfigJob?.isActive == true) return
+        appConfigJob = scope.launch {
+            try {
+                _appConfig.value = learningApi.appConfig()
+            } catch (error: Exception) {
+                // 公告与标语是增强体验：拉取失败静默保留默认值，不打扰用户。
             }
         }
     }
@@ -553,7 +595,9 @@ class LearningPresenter(private val appContext: Context) {
             "account_expired" -> error.detail
             "device_limit_reached" -> error.detail
             "device_bound_elsewhere" -> error.detail
+            "activation_code_required" -> "该账号已启用验证码保护，请先获取短信验证码"
             else -> when (error.httpCode) {
+                400 -> error.detail.ifBlank { "请求参数不正确，请检查后重试" }
                 401 -> "设备凭据失效，请重新保存服务地址后再试"
                 403 -> error.detail.ifBlank { "当前设备没有试用额度，请联系管理员" }
                 404, 405 -> "当前 AI 服务未启用手机号额度"

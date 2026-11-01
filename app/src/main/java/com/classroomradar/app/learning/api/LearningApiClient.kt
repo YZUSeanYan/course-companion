@@ -45,6 +45,9 @@ class LearningApiClient(
     private fun documentAnalyzeUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v2/documents/analyze")
     private fun accountMeUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/accounts/me")
     private fun accountActivateUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/accounts/activate")
+    private fun accountRequestCodeUrl(serviceBaseUrl: String) =
+        endpoint(serviceBaseUrl, "v1/accounts/activate/request-code")
+    private fun appConfigUrl(serviceBaseUrl: String) = endpoint(serviceBaseUrl, "v1/app-config")
 
     suspend fun health(): HealthResponse = withContext(Dispatchers.IO) {
         executeHttp(Request.Builder().url(healthUrl()).get().build(), "Health") {
@@ -303,12 +306,12 @@ class LearningApiClient(
         }
     }
 
-    suspend fun activateAccount(phone: String): AccountStatusDto = withContext(Dispatchers.IO) {
+    suspend fun activateAccount(phone: String, code: String? = null): AccountStatusDto = withContext(Dispatchers.IO) {
         val serviceBaseUrl = currentBaseUrl()
         var credential = ensureDevice(serviceBaseUrl)
         val normalizedPhone = normalizeAccountPhone(phone) ?: phone
         val body = json
-            .encodeToString(AccountActivateRequest.serializer(), AccountActivateRequest(normalizedPhone))
+            .encodeToString(AccountActivateRequest.serializer(), AccountActivateRequest(normalizedPhone, code))
             .toRequestBody(JSON_MEDIA_TYPE)
         fun request(token: String) = Request.Builder()
             .url(accountActivateUrl(serviceBaseUrl))
@@ -325,6 +328,54 @@ class LearningApiClient(
             credential = ensureDevice(serviceBaseUrl)
             executeHttp(request(credential.token), "Account activation") {
                 json.decodeFromString(AccountStatusDto.serializer(), it)
+            }
+        }
+    }
+
+    suspend fun requestActivationCode(phone: String): ActivationCodeResponse = withContext(Dispatchers.IO) {
+        val serviceBaseUrl = currentBaseUrl()
+        var credential = ensureDevice(serviceBaseUrl)
+        val normalizedPhone = normalizeAccountPhone(phone) ?: phone
+        val body = json
+            .encodeToString(ActivationCodeRequest.serializer(), ActivationCodeRequest(normalizedPhone))
+            .toRequestBody(JSON_MEDIA_TYPE)
+        fun request(token: String) = Request.Builder()
+            .url(accountRequestCodeUrl(serviceBaseUrl))
+            .header("Authorization", bearerToken(token))
+            .post(body)
+            .build()
+        try {
+            executeHttp(request(credential.token), "Activation code") {
+                json.decodeFromString(ActivationCodeResponse.serializer(), it)
+            }
+        } catch (error: LearningApiException.Http) {
+            if (error.httpCode != 401) throw error
+            credentials.clear()
+            credential = ensureDevice(serviceBaseUrl)
+            executeHttp(request(credential.token), "Activation code") {
+                json.decodeFromString(ActivationCodeResponse.serializer(), it)
+            }
+        }
+    }
+
+    suspend fun appConfig(): AppConfigDto = withContext(Dispatchers.IO) {
+        val serviceBaseUrl = currentBaseUrl()
+        var credential = ensureDevice(serviceBaseUrl)
+        fun request(token: String) = Request.Builder()
+            .url(appConfigUrl(serviceBaseUrl))
+            .header("Authorization", bearerToken(token))
+            .get()
+            .build()
+        try {
+            executeHttp(request(credential.token), "App config") {
+                json.decodeFromString(AppConfigDto.serializer(), it)
+            }
+        } catch (error: LearningApiException.Http) {
+            if (error.httpCode != 401) throw error
+            credentials.clear()
+            credential = ensureDevice(serviceBaseUrl)
+            executeHttp(request(credential.token), "App config") {
+                json.decodeFromString(AppConfigDto.serializer(), it)
             }
         }
     }

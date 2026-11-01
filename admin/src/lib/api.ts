@@ -1,6 +1,7 @@
 import type {
   Account,
   AccountWrite,
+  AppConfig,
   Device,
   Overview,
   RequestRow,
@@ -82,4 +83,15 @@ export const api = {
     request<{ items: RequestRow[]; total: number }>(
       `/requests?limit=300${errorsOnly ? '&errorsOnly=true' : ''}`,
     ),
+  appConfig: () => request<AppConfig>('/app-config'),
+  updateAppConfig: (payload: {
+    announcementEnabled: boolean
+    announcementTitle: string
+    announcementBody: string
+    taglines: string[]
+  }) =>
+    request<AppConfig>('/app-config', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
 }

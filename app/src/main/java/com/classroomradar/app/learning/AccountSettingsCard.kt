@@ -10,7 +10,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,6 +30,7 @@ import com.classroomradar.app.LiquidTextPrimary
 import com.classroomradar.app.LiquidTextSecondary
 import com.classroomradar.app.RadarBrandDeep
 import com.classroomradar.app.learning.api.AccountStatusDto
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 @Composable
@@ -36,16 +39,47 @@ fun AccountSettingsCard(
     supported: Boolean,
     busy: Boolean,
     message: String?,
-    onActivate: (String) -> Unit,
+    codeCooldownUntilMs: Long,
+    onRequestCode: (String) -> Unit,
+    onActivate: (String, String?) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val activated = status?.activated == true
     val blocked = status?.status == "disabled" || status?.status == "expired"
     var phone by remember(status?.phoneMasked) { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var codeSent by remember { mutableStateOf(false) }
     var editingPhone by remember(activated, status?.status) { mutableStateOf(!activated && !blocked) }
     val normalizedPhone = phone.filter(Char::isDigit).take(11)
     val phoneValid = Regex("^1[3-9]\\d{9}$").matches(normalizedPhone)
+    val normalizedCode = code.filter(Char::isDigit).take(6)
+    val codeValid = normalizedCode.length == 6
+
+    // 验证码发送成功（进入冷却）即推进到第二步输入验证码；激活成功后退出第二步。
+    LaunchedEffect(codeCooldownUntilMs) {
+        if (codeCooldownUntilMs > System.currentTimeMillis() + 900_000L) {
+            // 超长冷却视作异常值，忽略。
+        } else if (codeCooldownUntilMs > System.currentTimeMillis()) {
+            codeSent = true
+        }
+    }
+    LaunchedEffect(activated) {
+        if (activated) {
+            codeSent = false
+            code = ""
+        }
+    }
+
+    var cooldownNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(codeCooldownUntilMs) {
+        while (System.currentTimeMillis() < codeCooldownUntilMs) {
+            cooldownNowMs = System.currentTimeMillis()
+            delay(500)
+        }
+        cooldownNowMs = System.currentTimeMillis()
+    }
+    val cooldownSeconds = ((codeCooldownUntilMs - cooldownNowMs) / 1000L).coerceAtLeast(0L).toInt()
 
     GlassPanel(
         modifier = modifier.fillMaxWidth(),
@@ -149,13 +183,48 @@ fun AccountSettingsCard(
                     enabled = !busy,
                     keyboardType = KeyboardType.Phone,
                 )
-                GlassTextAction(
-                    label = if (busy) "正在激活…" else "激活试用额度",
-                    onClick = { onActivate(normalizedPhone) },
-                    modifier = Modifier.fillMaxWidth(),
-                    tone = GlassTone.Success,
-                    enabled = phoneValid && !busy,
-                )
+                if (!codeSent) {
+                    GlassTextAction(
+                        label = when {
+                            busy -> "发送中…"
+                            cooldownSeconds > 0 -> "获取验证码（${cooldownSeconds}s）"
+                            else -> "获取验证码"
+                        },
+                        onClick = { onRequestCode(normalizedPhone) },
+                        modifier = Modifier.fillMaxWidth(),
+                        tone = GlassTone.Accent,
+                        enabled = phoneValid && !busy && cooldownSeconds <= 0,
+                    )
+                } else {
+                    GlassTextInput(
+                        value = code,
+                        onValueChange = { code = it.filter(Char::isDigit).take(6) },
+                        label = "短信验证码",
+                        enabled = !busy,
+                        keyboardType = KeyboardType.NumberPassword,
+                    )
+                    GlassTextAction(
+                        label = if (busy) "正在激活…" else "激活试用额度",
+                        onClick = { onActivate(normalizedPhone, normalizedCode) },
+                        modifier = Modifier.fillMaxWidth(),
+                        tone = GlassTone.Success,
+                        enabled = phoneValid && codeValid && !busy,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        GlassTextAction(
+                            label = if (cooldownSeconds > 0) "重新发送（${cooldownSeconds}s）" else "重新发送验证码",
+                            onClick = { onRequestCode(normalizedPhone) },
+                            modifier = Modifier.weight(1f),
+                            enabled = !busy && cooldownSeconds <= 0,
+                        )
+                        GlassTextAction(
+                            label = "更换手机号",
+                            onClick = { codeSent = false; code = "" },
+                            modifier = Modifier.weight(1f),
+                            enabled = !busy,
+                        )
+                    }
+                }
                 Text(
                     "手机号仅用于试用额度管理，不用于登录、营销或课堂数据。服务端加密保存，可联系管理员删除。",
                     style = MaterialTheme.typography.bodySmall,
@@ -164,7 +233,7 @@ fun AccountSettingsCard(
                 if (activated) {
                     GlassTextAction(
                         label = "取消更换",
-                        onClick = { editingPhone = false; phone = "" },
+                        onClick = { editingPhone = false; phone = ""; codeSent = false; code = "" },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !busy,
                     )

@@ -6,6 +6,7 @@ const NAV = [
   { to: '/accounts', label: '试用账号' },
   { to: '/devices', label: '设备' },
   { to: '/requests', label: '请求记录' },
+  { to: '/app-config', label: '公告与标语' },
 ]
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
@@ -13,6 +14,7 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   '/accounts': { title: '试用账号', subtitle: '添加手机号、配置每日额度与有效期' },
   '/devices': { title: '设备', subtitle: '已注册设备与绑定的试用账号' },
   '/requests': { title: '请求记录', subtitle: '接口调用、状态码与耗时，不记录请求正文' },
+  '/app-config': { title: '公告与标语', subtitle: '配置 App 启动公告与首页轮播标语，保存后下次启动生效' },
 }
 
 export default function Shell({ onLogout }: { onLogout: () => void }) {

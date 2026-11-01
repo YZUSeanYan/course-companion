@@ -17,6 +17,19 @@ data class DeviceRegistration(
 @Serializable
 data class AccountActivateRequest(
     val phone: String,
+    val code: String? = null,
+)
+
+@Serializable
+data class ActivationCodeRequest(
+    val phone: String,
+)
+
+@Serializable
+data class ActivationCodeResponse(
+    val sent: Boolean = false,
+    val phoneMasked: String = "",
+    val cooldownSeconds: Int = 60,
 )
 
 @Serializable
@@ -47,6 +60,20 @@ data class AccountStatusDto(
     val validUntil: String? = null,
     val limits: AccountLimitsDto = AccountLimitsDto(),
     val usage: AccountUsageDto = AccountUsageDto(),
+)
+
+@Serializable
+data class AnnouncementDto(
+    val enabled: Boolean = false,
+    val title: String = "",
+    val body: String = "",
+)
+
+@Serializable
+data class AppConfigDto(
+    val announcement: AnnouncementDto = AnnouncementDto(),
+    val taglines: List<String> = emptyList(),
+    val updatedAt: String? = null,
 )
 
 @Serializable
