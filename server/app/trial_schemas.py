@@ -48,3 +48,8 @@ class TrialApplicationResponse(StrictModel):
     valid_until: str = Field(alias="validUntil")
     limits: TrialLimitsResponse
     message: str = ""
+
+
+class TrialStatusResponse(StrictModel):
+    sms_configured: bool = Field(alias="smsConfigured")
+    defaults: TrialLimitsResponse

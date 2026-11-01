@@ -19,6 +19,11 @@ type TrialResult = {
   message: string
 }
 
+type TrialStatus = {
+  smsConfigured: boolean
+  defaults: TrialLimits
+}
+
 const RULES = [
   {
     t: '默认额度',
@@ -58,6 +63,14 @@ export default function Apply() {
   const [smsUnavailable, setSmsUnavailable] = useState(false)
   const [alreadyRegistered, setAlreadyRegistered] = useState(false)
   const [result, setResult] = useState<TrialResult | null>(null)
+  const [status, setStatus] = useState<TrialStatus | null>(null)
+
+  useEffect(() => {
+    fetch('/api/trial/status')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setStatus(data))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (countdown <= 0) return
@@ -70,8 +83,10 @@ export default function Apply() {
   const normalizedPhone = phone.replace(/\D/g, '').slice(0, 11)
   const phoneValid = /^1[3-9]\d{9}$/.test(normalizedPhone)
   const codeValid = /^\d{6}$/.test(code)
-  const canSend = phoneValid && countdown === 0 && !sending
+  const smsReady = status?.smsConfigured ?? true
+  const canSend = smsReady && phoneValid && countdown === 0 && !sending
   const canSubmit =
+    smsReady &&
     phoneValid &&
     codeValid &&
     name.trim().length > 0 &&
@@ -229,6 +244,13 @@ export default function Apply() {
                   <p className="body-2 mt-2" style={{ fontSize: 13 }}>
                     预计 1 分钟完成。验证码只发送一次，请确认手机号填写正确。
                   </p>
+                  {status && !status.smsConfigured ? (
+                    <div className="mt-4 rounded-2xl px-4 py-3" style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}>
+                      <p style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--brand-deep)', lineHeight: 1.8 }}>
+                        自助申请通道正在配置短信服务，暂时请联系管理员添加手机号；已有手机号可直接在 App 的「设置 → 试用额度」激活。
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="mt-5 grid gap-4">
                     <div className="grid sm:grid-cols-2 gap-3">
                       <label>
@@ -283,7 +305,7 @@ export default function Apply() {
                           disabled={!canSend}
                           style={{ whiteSpace: 'nowrap', padding: '12px 14px', opacity: canSend ? 1 : 0.55 }}
                         >
-                          {countdown > 0 ? `${countdown}s` : sending ? '发送中…' : '获取验证码'}
+                          {countdown > 0 ? `${countdown}s` : sending ? '发送中…' : smsReady ? '获取验证码' : '通道配置中'}
                         </button>
                       </div>
                     </label>
@@ -318,7 +340,7 @@ export default function Apply() {
                       disabled={!canSubmit}
                       style={{ opacity: canSubmit ? 1 : 0.55 }}
                     >
-                      {submitting ? '提交中…' : '提交申请'}
+                      {submitting ? '提交中…' : smsReady ? '提交申请' : '短信通道配置中'}
                     </button>
                     <p className="text-center" style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
                       提交即表示你同意将手机号、姓名和昵称用于试用额度管理。
