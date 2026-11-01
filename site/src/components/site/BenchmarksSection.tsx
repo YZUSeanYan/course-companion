@@ -1,5 +1,6 @@
 import Reveal from './Reveal'
 import SectionHead from './SectionHead'
+import DarkBand from './DarkBand'
 
 // 云端引擎（LecSync）官方基准与质量评测数据。
 // 数字与口径来自上游引擎的公开基准页；知习经自有网关接入，客户端不内嵌任何密钥。
@@ -46,7 +47,7 @@ const WIN_RATE_ROWS = [
 /** 功能页完整评测区：转写性能 + 翻译质量评测（含方法论与口径说明）。 */
 export function BenchmarksSection() {
   return (
-    <section id="benchmarks" className="band band--dark radar-bg-dark">
+    <DarkBand id="benchmarks" className="radar-bg-dark">
       <div className="container-x section">
         <SectionHead
           eyebrow="BENCHMARKS"
@@ -125,7 +126,7 @@ export function BenchmarksSection() {
           </p>
         </Reveal>
       </div>
-    </section>
+    </DarkBand>
   )
 }
 

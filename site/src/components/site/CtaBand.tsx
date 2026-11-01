@@ -1,11 +1,13 @@
 import { Link } from 'react-router'
 import type { ReactNode } from 'react'
 import Reveal from './Reveal'
+import WaveField from './WaveField'
 import { CURRENT_RELEASE, WEB_APP_URL } from '../../lib/release'
 
 /**
  * 页面收尾的统一行动区。默认给出「网页版（免安装）」与「下载 App」两条路径，
  * 网页版对 iPhone / iPad 同样可用，不依赖 Android 安装包。
+ * 背景是一组细声波，呼应「把课听成文字」这件事。
  */
 export default function CtaBand({
   eyebrow = 'START NOW',
@@ -20,7 +22,8 @@ export default function CtaBand({
 }) {
   return (
     <section className="cta-band">
-      <div className="container-x section--tight relative text-center" style={{ zIndex: 1 }}>
+      <WaveField />
+      <div className="container-x cta-inner" style={{ zIndex: 1 }}>
         <Reveal>
           <p className="eyebrow eyebrow--plain justify-center">{eyebrow}</p>
           <h2 className="display mt-4">{title}</h2>

@@ -4,9 +4,14 @@ import { defineConfig } from "vite"
 import { inspectAttr } from 'kimi-plugin-inspect-react'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: './',
-  plugins: [inspectAttr(), react()],
+  plugins: [
+    // 检查插件只在本地开发时启用：它会给元素加 code-path 属性并注入调试浮层，
+    // 不该出现在线上页面里。
+    ...(command === 'serve' ? [inspectAttr()] : []),
+    react(),
+  ],
   server: {
     port: 3000,
     proxy: {
@@ -22,4 +27,4 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-});
+}));

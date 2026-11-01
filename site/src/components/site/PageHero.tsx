@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
 import Reveal from './Reveal'
+import Aurora from './Aurora'
 
 /**
  * 全站统一的首屏结构：小标签 + 标题 + 说明 + 行动按钮，可选配图或居中排版。
- * 所有页面共用同一套留白与字号刻度，避免每页各写一套。
+ * 标题用遮罩揭开，其余元素依次升起；背景是缓慢漂移的暖光。
  */
 export default function PageHero({
   eyebrow,
@@ -28,7 +29,8 @@ export default function PageHero({
   const centered = align === 'center'
 
   return (
-    <section className="page-hero radar-bg">
+    <section className={`page-hero radar-bg${centered ? ' page-hero--center' : ''}`}>
+      <Aurora />
       <div className="container-x hero-inner">
         <div
           className={
@@ -40,13 +42,13 @@ export default function PageHero({
           }
         >
           <div>
-            {top ? <Reveal className={centered ? 'flex justify-center' : ''}>{top}</Reveal> : null}
+            {top ? <Reveal className={centered ? 'flex justify-center' : ''} variant="scale">{top}</Reveal> : null}
             <Reveal delay={0.04}>
               <p className={`eyebrow eyebrow--brand ${centered ? 'eyebrow--plain justify-center mt-7' : ''}`}>
                 {eyebrow}
               </p>
             </Reveal>
-            <Reveal delay={0.08}>
+            <Reveal delay={0.08} variant="mask">
               <h1 className="display mt-5">{title}</h1>
             </Reveal>
             {lead ? (
@@ -55,7 +57,7 @@ export default function PageHero({
               </Reveal>
             ) : null}
             {actions ? (
-              <Reveal delay={0.18}>
+              <Reveal delay={0.2}>
                 <div className={`mt-8 flex flex-wrap items-center gap-3 ${centered ? 'justify-center' : ''}`}>
                   {actions}
                 </div>
@@ -64,7 +66,7 @@ export default function PageHero({
             {children}
           </div>
           {media ? (
-            <Reveal delay={0.16} className="flex justify-center lg:justify-end">
+            <Reveal delay={0.16} variant="scale" className="flex justify-center lg:justify-end">
               {media}
             </Reveal>
           ) : null}

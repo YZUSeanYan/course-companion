@@ -80,6 +80,7 @@ export default function Download() {
           <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
             <Reveal>
               <SectionHead
+                index="01"
                 eyebrow="ANDROID APP"
                 title={`知习 App v${CURRENT_RELEASE.version}`}
                 lead="需要离线听课、课堂录音与本地识别时使用 App；模型按需下载，识别在设备端完成。"
@@ -119,7 +120,7 @@ export default function Download() {
             </Reveal>
 
             <Reveal delay={0.08}>
-              <SectionHead eyebrow="SPECIFICATIONS" title="安装须知" />
+              <SectionHead index="02" eyebrow="SPECIFICATIONS" title="安装须知" />
               <div className="rows mt-8">
                 {SPECS.map((s) => (
                   <div key={s.k} className="rows__row">
@@ -138,7 +139,7 @@ export default function Download() {
         <div className="container-x section">
           <div className="grid gap-10 lg:grid-cols-2 lg:gap-16">
             <Reveal>
-              <SectionHead eyebrow="WHERE TO GET IT" title="获取渠道" />
+              <SectionHead index="03" eyebrow="WHERE TO GET IT" title="获取渠道" />
               <div className="mt-8 flex flex-col gap-3">
                 {STORES.map((s) => (
                   <div key={s.name} className="card flex flex-wrap items-center gap-4" style={{ padding: '16px 20px' }}>
@@ -157,7 +158,7 @@ export default function Download() {
             </Reveal>
 
             <Reveal delay={0.08}>
-              <SectionHead eyebrow="LEGACY" title={`前代「${LEGACY_RELEASE.productName}」`} />
+              <SectionHead index="04" eyebrow="LEGACY" title={`前代「${LEGACY_RELEASE.productName}」`} />
               <div className="card mt-8">
                 <p className="body-2" style={{ fontSize: 14 }}>
                   前代纯离线版：内置离线模型，只做课堂转写与提问捕捉，不申请网络权限。
