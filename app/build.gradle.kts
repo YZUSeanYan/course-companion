@@ -85,7 +85,7 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     implementation("io.github.open-spaced-repetition:fsrs:1.0.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
     compileOnly("org.projectlombok:lombok:1.18.42")
