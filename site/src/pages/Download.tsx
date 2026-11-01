@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
 import LogoMark from '../components/site/LogoMark'
-import { APK_SHA256, CURRENT_RELEASE, LEGACY_RELEASE } from '../lib/release'
+import { APK_SHA256, CURRENT_RELEASE, LEGACY_RELEASE, WEB_APP_URL } from '../lib/release'
 
 const LEGACY_COUNT_URL = '/api/downloads/count'
 const LEGACY_INCREMENT_URL = '/api/downloads/increment'
@@ -93,6 +93,11 @@ export default function Download() {
               <p className="mt-3" style={{ fontSize: 13, fontWeight: 600 }}>
                 还没有试用额度？
                 <Link to="/apply" style={{ color: 'var(--brand-deep)', fontWeight: 800 }}>申请试用 →</Link>
+              </p>
+              <p className="mt-2" style={{ fontSize: 13, fontWeight: 600 }}>
+                不想安装 App？
+                <a href={WEB_APP_URL} style={{ color: 'var(--brand-deep)', fontWeight: 800 }}>直接打开网页版 →</a>
+                <span className="body-2" style={{ fontSize: 12, color: 'var(--ink-3)' }}>（电脑/手机浏览器免安装，同一手机号共用额度）</span>
               </p>
             </div>
 

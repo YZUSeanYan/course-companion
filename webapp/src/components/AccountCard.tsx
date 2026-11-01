@@ -67,7 +67,11 @@ export default function AccountCard({ onChanged }: { onChanged?: (status: Accoun
       </div>
       {!activated && (
         <>
-          <p className="card-desc">手机号仅用于额度管理，不用于登录或营销；离线功能无需激活。管理员添加后即可激活。</p>
+          <p className="card-desc">
+            手机号仅用于额度管理，不用于登录或营销；离线功能无需激活。管理员添加后即可激活。
+            <br />
+            还没有名额？<a href="https://shuike.seanyan.store/#/apply" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-deep)', fontWeight: 700 }}>去官网申请试用 →</a>
+          </p>
           <input
             className="text-input"
             inputMode="numeric"

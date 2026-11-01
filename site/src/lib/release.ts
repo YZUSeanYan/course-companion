@@ -1,5 +1,8 @@
 export const APK_SHA256 = 'c908bdc68b0f17238b9d05381a2e94b04425c61a3ee21654e755fad8f184ed92'
 
+/** 网页版入口（与网关同源部署，无需配置即可使用） */
+export const WEB_APP_URL = 'https://zhixi.seanyan.store/web/'
+
 export const CURRENT_RELEASE = {
   productName: '知习',
   version: '2.0.4',
