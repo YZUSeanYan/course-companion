@@ -86,6 +86,7 @@ describe("summarizeReviewCategories", () => {
   const now = 1_000_000;
   function card(partial: Partial<ReviewCardRecord> & { id: number }): ReviewCardRecord {
     return {
+      uid: `uid-${partial.id}`,
       learningItemId: partial.id,
       itemType: "VOCABULARY",
       courseId: 1,

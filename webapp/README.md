@@ -9,9 +9,10 @@
 - **AI 学习包**：课堂转写或讲义文本经 `/v2/learning-pack/jobs`（202 + 轮询，360s 超时）生成纪要/疑问解答/重点/词汇/短语/自测/练习，按固定分类展示；同内容本地查重不重复计费。
 - **讲义**：PDF/PNG/JPG 上传至 `/v2/documents/analyze`（≤50MB），页面文本进入 MATERIAL 学习包。
 - **复习**：ts-fsrs（官方 FSRS 参数、关闭 fuzz，与 Android `openspacedrepetition` 同源）；词汇/短语/问答/练习自动成卡；分类总览、翻面评分、跨分类连续复习、朗读。
-- **账号**：匿名设备注册 + 手机号激活试用额度；额度/用量展示与错误引导解析 `X-Zhixi-Error-Code`。
+- **账号**：匿名设备注册 + 手机号两步验证码激活（发送验证码 → 60 秒重发倒计时 → 6 位验证码激活）；额度/用量展示与错误引导解析 `X-Zhixi-Error-Code`。
+- **云空间同步**：`/v1/sync/push`、`/v1/sync/pull`（账号级、LWW 合并，见 `src/lib/sync/sync.ts`）；设置页可手动同步，激活成功与学习包落库后自动触发；仅同步学习元数据与文本，**不包含课堂音频与任何密钥**。
 - **导出**：课程 Markdown、课堂转写 Markdown 下载。
-- **隐私**：正文只存本浏览器 IndexedDB；服务端只存设备 token 与手机号的 HMAC 摘要/密文。
+- **隐私**：正文只存本浏览器 IndexedDB；同步云端的数据不含音频；服务端只存设备 token 与手机号的 HMAC 摘要/密文。
 
 **二期功能**：实时纪要（digest）、WAV 本地存档 + 云端补转写、CET6 词库导入、**浏览器离线识别**（sherpa-onnx WASM，见下）。
 
@@ -55,5 +56,6 @@ npm run build      # tsc --noEmit && vite build
 | 学习包落库 | `src/lib/pack.ts`、`src/lib/generate.ts` | `learning/LearningPresenter.kt` |
 | 复习调度 | `src/lib/fsrs/scheduler.ts` | `learning/review/ReviewScheduler.kt` |
 | 分类 | `src/lib/pack.ts`（`LEARNING_CATEGORIES`） | `learning/LearningCategories.kt` |
+| 云空间同步 | `src/lib/sync/sync.ts`（uid + LWW，分批 ≤400 条） | 同一 `/v1/sync` 网关契约，各端独立实现 |
 
 一期不实现：锁屏/后台录音、桌面小组件、系统通知、浏览器离线识别。
