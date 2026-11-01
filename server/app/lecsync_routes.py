@@ -376,6 +376,14 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
 
     async def proxy_socket(socket: WebSocket, kind: str):
         scheme, _, token = (socket.headers.get("authorization") or "").partition(" ")
+        ws_subprotocol: str | None = None
+        if scheme.lower() != "bearer":
+            # 浏览器无法为 WebSocket 设置 Authorization 头；允许客户端以
+            # Sec-WebSocket-Protocol: bearer, <token> 的形式携带，成功后回显 bearer。
+            protocols = [p.strip() for p in (socket.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
+            if len(protocols) == 2 and protocols[0].lower() == "bearer":
+                scheme, token = "bearer", protocols[1]
+                ws_subprotocol = "bearer"
         if scheme.lower() != "bearer":
             await socket.close(code=4401, reason="Authentication required")
             return
@@ -400,7 +408,7 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         except (HTTPException, LecsyncError) as auth_error:
             await socket.close(code=4401 if isinstance(auth_error, HTTPException) else 4429)
             return
-        await socket.accept()
+        await socket.accept(subprotocol=ws_subprotocol)
         accepted = True
         request_started = started
         started = time.monotonic()
@@ -460,7 +468,8 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
                         return
                     if message.get("bytes") is not None:
                         if time.monotonic() - started > 14400:
-                            await socket.close(code=4408, reason="Please start a new class")
+                            # Official max-duration close code: the client opens a new stream.
+                            await socket.close(code=4012, reason="Please start a new class")
                             return
                         if audio_queue.full():
                             audio_queue.get_nowait()

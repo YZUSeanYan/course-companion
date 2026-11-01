@@ -37,6 +37,7 @@ data class CloudTaskEntity(
     val resultText: String = "",
     val resultJson: String = "",
     val effectiveSeconds: Double = 0.0,
+    val discardedSeconds: Double = 0.0,
     val accruedCents: Double? = null,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,

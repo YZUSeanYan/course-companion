@@ -21,6 +21,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 import android.os.Handler
 import android.os.Looper
 
+/**
+ * Close codes that mean "open a new stream": the official Lecsync retryable set
+ * (4001 token, 4004 node, 4010 balance, 4011 concurrency, 1012 gateway restart,
+ * plus 4012 max duration, 4013 idle and 4016 slow reader) merged with this
+ * gateway's own contract codes (4401 auth; legacy 4408 class boundary).
+ */
+internal val REALTIME_RECONNECT_CLOSE_CODES = setOf(
+    4001, 4004, 4010, 4011, 4012, 4013, 4016, 1012, 4401, 4408,
+)
+
 /** Device audio goes only to our gateway, which owns all upstream credentials. */
 class LecsyncRealtimeEngine(
     private val appContext: Context,
@@ -54,6 +64,9 @@ class LecsyncRealtimeEngine(
     private val pending = ByteArrayOutputStream()
     private val segmentLines = ConcurrentHashMap<String, Long>()
     private val pendingTranslations = ConcurrentHashMap<String, JsonObject>()
+    private val latencyTracker = RealtimeLatencyTracker()
+    private var lastMetricsEmitAtMs = 0L
+    private var lastEmittedRecognitionMs = 0L
     private val lock = Any()
 
     override fun start(listener: TranscriptionEngine.Listener) {
@@ -75,7 +88,7 @@ class LecsyncRealtimeEngine(
 
                 override fun onClosed(code: Int, reason: String) {
                     ready = false
-                    if (!stopped.get() && code in setOf(4001, 4004, 4012, 4013, 1012, 4401, 4408)) {
+                    if (!stopped.get() && code in REALTIME_RECONNECT_CLOSE_CODES) {
                         recover(IllegalStateException("连接需要重新建立"))
                     } else if (!stopped.get()) {
                         useOfflineFallback() ?: listener?.onError(IllegalStateException("云端听课已中断；已保存内容不会丢失"))
@@ -103,6 +116,7 @@ class LecsyncRealtimeEngine(
             streamOffsetMs += System.currentTimeMillis() - streamStartedAt
             streamStartedAt = System.currentTimeMillis()
             streamId = java.util.UUID.randomUUID().toString()
+            latencyTracker.resetStream()
             runCatching { stream?.cancel() }
             RecordingBus.emit(RecorderEvent.Failure("连接已中断，正在恢复；已保存的课堂不会丢失"))
             connect()
@@ -163,7 +177,7 @@ class LecsyncRealtimeEngine(
                 if (all.size > count) pending.write(all, count, all.size - count)
                 all.copyOf(count)
             }
-            if (stream?.sendPcm(frame) != true) return
+            if (stream?.sendPcm(frame) == true) latencyTracker.onAudioSent(System.currentTimeMillis()) else return
         }
     }
 
@@ -199,11 +213,15 @@ class LecsyncRealtimeEngine(
                 }
                 drainAudio()
             }
-            "transcript.partial" -> event.string("text")?.takeIf(String::isNotBlank)?.let(listener::onPartialText)
+            "transcript.partial" -> {
+                latencyTracker.onPartial(System.currentTimeMillis())?.let { publishMetrics() }
+                event.string("text")?.takeIf(String::isNotBlank)?.let(listener::onPartialText)
+            }
             "transcript.final" -> {
                 val text = event.string("text").orEmpty().trim()
                 val segment = event.string("segmentId")
                 if (text.isEmpty() || segment == null) return
+                latencyTracker.onFinal(segment, System.currentTimeMillis())
                 listener.onFinalSegment(
                     TranscriptSegment(
                         text = text,
@@ -215,10 +233,14 @@ class LecsyncRealtimeEngine(
                     ),
                 )
             }
+            "translation.partial" -> {
+                latencyTracker.onTranslationPartial(System.currentTimeMillis())?.let { publishMetrics() }
+            }
             "translation.final" -> {
                 val segment = event.string("segmentId") ?: return
                 val key = "$streamId:$segment"
                 val lineId = segmentLines[key]
+                latencyTracker.onTranslationFinal(segment, System.currentTimeMillis())?.let { publishMetrics() }
                 if (lineId == null) {
                     pendingTranslations[key] = event
                 } else {
@@ -243,7 +265,12 @@ class LecsyncRealtimeEngine(
             "usage.update" -> {
                 val currentSession = sessionId ?: return
                 runBlocking {
-                    repository.saveLiveUsage(currentSession, event.double("effectiveSeconds") ?: 0.0, event.double("accruedCents"))
+                    repository.saveLiveUsage(
+                        currentSession,
+                        event.double("effectiveSeconds") ?: 0.0,
+                        event.double("accruedCents"),
+                        event.double("discardedSeconds") ?: 0.0,
+                    )
                 }
             }
             "session.error" -> {
@@ -257,6 +284,18 @@ class LecsyncRealtimeEngine(
         if (segmentKey == null || lineId <= 0) return
         segmentLines[segmentKey] = lineId
         pendingTranslations.remove(segmentKey)?.let { translation -> saveTranslation(lineId, translation) }
+    }
+
+    /** Publishes live latency at most twice a second and only when the value moved. */
+    private fun publishMetrics() {
+        val now = System.currentTimeMillis()
+        val recognition = latencyTracker.recognitionLatencyMs
+        if (now - lastMetricsEmitAtMs < 500 || recognition == lastEmittedRecognitionMs) return
+        lastMetricsEmitAtMs = now
+        lastEmittedRecognitionMs = recognition
+        RecordingBus.emit(
+            RecorderEvent.CloudMetrics(recognition, latencyTracker.translationLatencyMs.takeIf { it > 0 }),
+        )
     }
 
     private fun saveTranslation(lineId: Long, event: JsonObject) {
@@ -290,6 +329,7 @@ class LecsyncRealtimeEngine(
             return
         }
         worker.execute {
+            runCatching { stream?.control("session.finalize") }
             runCatching { stream?.control("session.stop") }
             val deadline = System.currentTimeMillis() + 3000
             while (!ended && System.currentTimeMillis() < deadline) Thread.sleep(50)
@@ -302,6 +342,16 @@ class LecsyncRealtimeEngine(
 
     fun attachSession(sessionId: Long) {
         this.sessionId = sessionId
+    }
+
+    /**
+     * Asks the upstream to finalize the sentence in progress, mirroring the
+     * official `session.finalize` control message, so pause/stop keeps the last
+     * partial and its translation instead of dropping it at the idle timeout.
+     */
+    override fun finalizePending() {
+        if (stopped.get() || offlineFallback != null || !ready) return
+        worker.execute { runCatching { stream?.control("session.finalize") } }
     }
 
     private fun ByteArray.sha256(): String = java.security.MessageDigest.getInstance("SHA-256").digest(this).joinToString("") { "%02x".format(it) }

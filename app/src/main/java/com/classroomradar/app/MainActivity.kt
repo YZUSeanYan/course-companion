@@ -865,6 +865,11 @@ private fun backTarget(page: AppPage): AppPage = when (page) {
     else -> AppPage.Home
 }
 
+private data class RecorderDashboardMetrics(
+    val recognitionLatencyMs: Long,
+    val translationLatencyMs: Long? = null,
+)
+
 private data class DashboardState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
@@ -876,6 +881,7 @@ private data class DashboardState(
     val failureMessage: String? = null,
     val doubts: List<DoubtEventEntity> = emptyList(),
     val liveMinutes: String? = null,
+    val cloudMetrics: RecorderDashboardMetrics? = null,
 )
 
 private data class SessionDetailState(
@@ -933,6 +939,7 @@ private class ClassroomPresenter(private val appContext: Context) {
                         isPaused = event.isPaused,
                         elapsedSeconds = event.elapsedSeconds,
                         liveTranscript = if (event.isRecording) _dashboard.value.liveTranscript else "",
+                        cloudMetrics = if (event.isRecording) _dashboard.value.cloudMetrics else null,
                     )
                     is RecorderEvent.PartialTranscript -> _dashboard.value = _dashboard.value.copy(liveTranscript = event.text, failureMessage = null)
                     is RecorderEvent.Transcript -> _dashboard.value = _dashboard.value.copy(
@@ -940,6 +947,9 @@ private class ClassroomPresenter(private val appContext: Context) {
                         failureMessage = null,
                     )
                     is RecorderEvent.LiveMinutes -> _dashboard.value = _dashboard.value.copy(liveMinutes = event.contentJson)
+                    is RecorderEvent.CloudMetrics -> _dashboard.value = _dashboard.value.copy(
+                        cloudMetrics = RecorderDashboardMetrics(event.recognitionLatencyMs, event.translationLatencyMs),
+                    )
                     is RecorderEvent.Failure -> _dashboard.value = _dashboard.value.copy(failureMessage = event.message, liveTranscript = "")
                 }
             }
@@ -1692,6 +1702,7 @@ private fun HomeScreen(
                 liveTranscript = state.liveTranscript,
                 failureMessage = state.failureMessage,
                 translations = state.translations,
+                cloudMetrics = state.cloudMetrics,
             )
         }
         item { QuestionSectionHeader(state, onOpenTimeline) }
@@ -1929,6 +1940,7 @@ private fun TranscriptCard(
     translations: Map<Long, TranslationEntity>,
     liveTranscript: String,
     failureMessage: String?,
+    cloudMetrics: RecorderDashboardMetrics? = null,
 ) {
     GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1936,6 +1948,22 @@ private fun TranscriptCard(
                 Icon(Icons.Outlined.Mic, null, modifier = Modifier.size(20.dp), tint = RadarBrand)
                 Spacer(Modifier.width(8.dp))
                 Text("实时课堂记录", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                cloudMetrics?.let { metrics ->
+                    Spacer(Modifier.weight(1f))
+                    // Same figures the official client quotes: ~0.28s first word, ~88ms behind for translation.
+                    Text(
+                        buildString {
+                            append("首字 ~")
+                            append(String.format(java.util.Locale.US, "%.2fs", metrics.recognitionLatencyMs / 1000.0))
+                            metrics.translationLatencyMs?.let {
+                                append(" · 译 ~")
+                                append(String.format(java.util.Locale.US, "%.2fs", it / 1000.0))
+                            }
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = LiquidTextSecondary,
+                    )
+                }
             }
             // Fixed-height scrollable region: new text sticks to the bottom, the user can
             // scroll up to read earlier lines without the card growing taller.

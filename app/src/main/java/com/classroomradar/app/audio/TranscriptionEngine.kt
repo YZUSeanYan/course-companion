@@ -20,6 +20,8 @@ interface TranscriptionEngine : AutoCloseable {
 
     fun start(listener: Listener)
     fun acceptPcm(samples: ShortArray, count: Int)
+    /** Cloud engines flush the sentence in progress; offline engines ignore this. */
+    fun finalizePending() = Unit
     /** Invokes [onComplete] after all queued final recognition work has drained. */
     fun stop(onComplete: () -> Unit = {})
     override fun close() = stop()
