@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
 import Waveform from '../components/site/Waveform'
-import PhoneMockup from '../components/site/PhoneMockup'
+import AppScreenshot from '../components/site/AppScreenshot'
 import ClassroomDemo from '../components/site/ClassroomDemo'
 import { LatencyStrip } from '../components/site/BenchmarksSection'
 import { CURRENT_RELEASE, WEB_APP_URL } from '../lib/release'
@@ -128,19 +128,19 @@ export default function Home() {
 
           <Reveal delay={0.18} className="relative flex justify-center">
             <div className="relative">
-              <PhoneMockup screen="live" />
+              <AppScreenshot screenshot="live-class" />
               {/* 浮动徽章 */}
               <div className="float-chip hidden sm:block" style={{ top: -16, left: -132, ['--chip-rot' as string]: '-4deg', padding: '12px 16px', maxWidth: 210 }}>
                 <div className="flex items-center gap-2">
                   <Waveform />
-                  <p style={{ fontSize: 11, fontWeight: 800 }}>知习 · 课堂有疑问</p>
+                  <p style={{ fontSize: 11, fontWeight: 800 }}>知习 · AI 课堂纪要</p>
                 </div>
-                <p style={{ fontSize: 12.5, fontWeight: 700, marginTop: 5 }}>位移电流是什么意思？</p>
+                <p style={{ fontSize: 12.5, fontWeight: 700, marginTop: 5 }}>时域到频域 · 采样定理</p>
               </div>
               <div className="float-chip hidden sm:flex items-center gap-2" style={{ bottom: 96, right: -72, ['--chip-rot' as string]: '3deg', padding: '10px 14px', animationDelay: '1.2s' }}>
                 <span className="rec-dot" />
                 <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--alert)' }}>正在录音</span>
-                <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>00:23</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>00:18</span>
               </div>
               <div className="float-chip hidden sm:flex items-center gap-2" style={{ bottom: 24, left: -64, ['--chip-rot' as string]: '-2deg', padding: '10px 14px', animationDelay: '2.1s' }}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="var(--ok)" strokeWidth="1.6"><circle cx="7" cy="7" r="5.5"/><path d="M4.5 7.2 6.3 9l3.2-3.6"/></svg>
@@ -297,16 +297,20 @@ export default function Home() {
             <div className="h-scroll mt-12">
               <div className="flex gap-8 px-6 pb-6" style={{ width: 'max-content' }}>
                 <div className="flex flex-col items-center gap-4">
-                  <PhoneMockup screen="live" width={264} shadow={false} />
+                  <AppScreenshot screenshot="live-class" width={264} shadow={false} />
                   <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>实时听课 · 转写与翻译</p>
                 </div>
                 <div className="flex flex-col items-center gap-4 pt-10">
-                  <PhoneMockup screen="timeline" width={264} shadow={false} />
+                  <AppScreenshot screenshot="course-detail" width={264} shadow={false} />
                   <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>学习纪要与疑问</p>
                 </div>
                 <div className="flex flex-col items-center gap-4">
-                  <PhoneMockup screen="history" width={264} shadow={false} />
-                  <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>历史记录与导出</p>
+                  <AppScreenshot screenshot="vocab" width={264} shadow={false} />
+                  <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>词汇与短语学习</p>
+                </div>
+                <div className="flex flex-col items-center gap-4 pt-10">
+                  <AppScreenshot screenshot="review-card" width={264} shadow={false} />
+                  <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>间隔复习</p>
                 </div>
               </div>
             </div>

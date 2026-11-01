@@ -57,14 +57,14 @@ function LiveScreen() {
       {recCapsule}
       <div className="px-5 mt-3">
         <p style={{ fontSize: 12, lineHeight: 1.65, fontWeight: 600 }}>
-          Alright, let's continue. Who can explain what
+          Remember,
           <mark style={{ background: 'var(--warn-soft)', color: 'var(--brand-deep)', borderRadius: 3, padding: '0 2px' }}>
-            {' '}displacement current{' '}
+            {' '}convolution in time{' '}
           </mark>
-          means?
+          becomes multiplication in frequency.
         </p>
         <p style={{ fontSize: 11.5, lineHeight: 1.65, fontWeight: 600, color: '#3d6fa8', marginTop: 4 }}>
-          好的我们继续，谁能解释一下「位移电流」是什么意思？
+          记住，时域卷积对应频域相乘。
         </p>
         {onDeviceTag}
       </div>
@@ -72,19 +72,22 @@ function LiveScreen() {
       <div className="mx-4 mt-3 rounded-2xl p-3.5" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
         <p className="flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 800 }}>
           <svg width="13" height="13" viewBox="0 0 16 16" fill="var(--brand)"><path d="M8 1.5a3.5 3.5 0 0 1 3.5 3.5c0 1.5-.8 2.4-1.5 3.2-.5.6-.8 1-.8 1.8H6.8c0-.8-.3-1.2-.8-1.8C5.3 7.4 4.5 6.5 4.5 5A3.5 3.5 0 0 1 8 1.5Z"/><path d="M6.6 11.5h2.8v.8a1.4 1.4 0 1 1-2.8 0v-.8Z"/></svg>
-          标记疑问
+          AI 课堂纪要
         </p>
-        <div className="mt-2.5 rounded-xl px-3 py-2.5" style={{ background: 'var(--warn-soft)' }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#8a5a00' }}>
-            ❓ [16:10:52] 位移电流是什么意思？
+        <div className="mt-2.5 rounded-xl px-3 py-2.5" style={{ background: 'rgba(229,72,77,.08)', border: '1px dashed rgba(229,72,77,.4)' }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--alert)' }}>
+            ✦ 时域到频域
           </p>
-          <p style={{ fontSize: 10, fontWeight: 600, color: '#8a5a00', opacity: .8, marginTop: 2 }}>
-            已附课堂原文与 AI 译文
+          <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--alert)', opacity: .75, marginTop: 2 }}>
+            傅里叶变换揭示信号的频率成分
           </p>
         </div>
         <div className="mt-2 rounded-xl px-3 py-2.5" style={{ background: 'rgba(229,72,77,.08)', border: '1px dashed rgba(229,72,77,.4)' }}>
           <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--alert)' }}>
-            ✦ [16:12:08] AI 纪要：重难点 + 3 张自测卡已生成
+            ✦ 采样定理
+          </p>
+          <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--alert)', opacity: .75, marginTop: 2 }}>
+            采样率需高于最高频率的两倍
           </p>
         </div>
       </div>
@@ -109,10 +112,10 @@ function LiveScreen() {
 
 function TimelineScreen() {
   const items = [
-    { t: '16:12', n: '位移电流 · 定义与物理意义', tag: '疑问 · 已附参考解答', hot: true },
-    { t: '16:24', n: 'Maxwell 方程组 · 自测卡 ×5', tag: '纪要', hot: false },
-    { t: '16:38', n: '边界条件 · 易错点提醒', tag: '纪要', hot: false },
-    { t: '16:47', n: '双语对照 · 本节课 42 段', tag: '翻译', hot: false },
+    { t: '09:50', n: '第 7 讲 · 傅里叶变换', tag: '课堂纪要', hot: false },
+    { t: '10:05', n: 'convolution · 卷积', tag: '词汇 · 5 项', hot: false },
+    { t: '10:12', n: '混叠为什么会让高频变成低频？', tag: '我的疑问 · 已附参考解答', hot: true },
+    { t: '10:28', n: '自测问答 · 2 题', tag: '练习', hot: false },
   ]
   return (
     <>
@@ -120,7 +123,7 @@ function TimelineScreen() {
       <div className="px-5 pt-4 pb-1 flex items-end justify-between">
         <div>
           <p style={{ fontSize: 15, fontWeight: 800 }}>学习纪要与疑问</p>
-          <p style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2 }}>电磁场与波 · 本节课 1 个疑问 · 4 项产出</p>
+          <p style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2 }}>信号与系统 · 本节课 1 个疑问 · 4 项产出</p>
         </div>
         <span className="rounded-full px-2.5 py-1" style={{ fontSize: 10, fontWeight: 800, background: 'var(--brand-soft)', color: 'var(--brand-deep)' }}>
           学习包
@@ -158,9 +161,9 @@ function TimelineScreen() {
 
 function HistoryScreen() {
   const rows = [
-    { d: '10-29 周四', n: '电磁场与波', q: 1, len: '90 分钟' },
-    { d: '10-28 周三', n: '大学英语（外教）', q: 3, len: '45 分钟' },
-    { d: '10-27 周二', n: '六级备考 · 真题讲义', q: 2, len: '学习包' },
+    { d: '10-30 周三', n: '信号与系统 · 第 7 讲', q: 1, len: '90 分钟' },
+    { d: '10-25 周五', n: '信号与系统 · 第 6 讲', q: 0, len: '45 分钟' },
+    { d: '10-19 周六', n: '六级备考 · 真题讲义', q: 2, len: '学习包' },
   ]
   return (
     <>
