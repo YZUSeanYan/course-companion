@@ -34,8 +34,8 @@ export const OFFLINE_ASR_MODEL: OfflineModelSpec = {
   get baseUrl(): string {
     return resolveModelBaseUrl();
   },
-  // 哈希/字节数取自上游 v1.13.7 发布物（sha256sum 实测）；.wasm/.data 在完整包
-  // 下载完成后登记。JS 胶水来自同一发布物的 shell 包，与 loader 版本锁定。
+  // 哈希/字节数取自上游 v1.13.7 发布物（sha256sum 实测，官方 digest 一致性已验证）。
+  // JS 胶水来自同一发布物，与 loader 版本锁定。
   assets: [
     {
       name: "sherpa-onnx-asr.js",
@@ -48,15 +48,14 @@ export const OFFLINE_ASR_MODEL: OfflineModelSpec = {
       size: 82690,
     },
     {
-      // 以下两项在完整发布包下载完成后登记（下载进行中，见 webapp/README.md）。
       name: "sherpa-onnx-wasm-main-asr.wasm",
-      sha256: "",
-      size: 0,
+      sha256: "d0c15c3042fd61ca2a158a1eeb8b8c2099201f7580945efc8f729d2830cf746d",
+      size: 13150239,
     },
     {
       name: "sherpa-onnx-wasm-main-asr.data",
-      sha256: "",
-      size: 0,
+      sha256: "90b04a9403e4bae9b23a0a3c00dbac8603e183361105a52cc03f053217490863",
+      size: 199059238,
     },
   ],
 };
