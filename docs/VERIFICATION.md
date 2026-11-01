@@ -75,6 +75,16 @@
 - **浏览器内联端到端通过**（生产 origin，绕过 IAB 麦克风限制直测引擎管线）：同源 fetch 4 产物（.data 189.8MB/472s）→ SHA-256 逐文件校验通过 → blob URL 注入 → WASM runtime 初始化 → `createOnlineRecognizer` 创建成功 → 解码循环 5 步、`getResult` 正常返回、`reset` 正常。离线识别除麦克风采集（浏览器标准能力，IAB 环境拒绝无法自动化）外全链路真实可用。
 - 现状：网页版离线模式完全激活——首次使用自动从同源镜像下载约 200MB（带进度与哈希校验，Cache API 持久化），之后免额度本地识别；云端模式与官网引导不受影响。
 
+## 白屏热修与账号体系升级（2026-11-01）
+
+- **白屏根因与修复**（PR #54，r19）：课堂页 `where('targetLang')` 与译文队列 `where('status')` 查询了 Dexie 未索引字段，SchemaError 在 useLiveQuery 渲染期抛出并卸载整棵 React 树（授予录音权限后立刻白屏）。线上 origin 用假麦克风流复现 → Dexie 升 v2 补索引 → 回归测试覆盖全部 where 字段 → 线上复测进入「听课中」、停止优雅结束、额度耗尽提示路径同时验证。
+- **账号体系升级**（子代理并行实现 + 集成，PR #55/#56/#57，网关 R15 + webapp r20）：
+  - 激活需验证码：`POST /v1/accounts/activate/request-code`（PNVS 发送、HMAC 摘要存 activation_codes、60s 冷却/TTL 5 分钟/错 5 次/三层限流）；activate 支持可选 code，`REQUIRE_ACTIVATION_CODE=true` 时缺码 403 activation_code_required（生产已开启）。
+  - 云空间同步：`/v1/sync/push` + `/v1/sync/pull`（8 类实体、账号级 last-write-wins、墓碑删除、单批 ≤500、payload ≤128KB、UUID 白名单），新表 sync_records；webapp 端 8 张表加 uid（Dexie v3）、设置页「云空间同步」卡、激活后与生成学习包后自动同步。
+  - 测试：服务端 **135 pytest**（基线 111 + 激活码 15 + 同步 9）；网页端 **59 vitest**（uid 生命周期 + 同步客户端 + 索引回归）。
+- **生产 E2E 全通过**（临时账号 139\*\*\*\*0996，验后即删）：缺码激活 403 activation_code_required → 服务端按 request-code 同一存储原语 mint 码 → 带码激活 200 activated → 同步 push 3 条全 accepted → pull 读回一致 → LWW 改名生效 → 墓碑删除标记正确。
+- 兼容性说明：`REQUIRE_ACTIVATION_CODE=true` 后，**未升级的 Android 客户端激活会收到 403 + 中文提示**（需要验证码），需 Android 端跟进支持；网页版与官网申请流程不受影响。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
