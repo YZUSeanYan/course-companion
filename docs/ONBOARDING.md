@@ -28,10 +28,9 @@ Windows 推荐安装：
 
 ## 3. 获取代码
 
-1. 把自己的 GitHub 用户名发给项目负责人，接受私有仓库邀请。
-2. 打开 GitHub Desktop，登录自己的账号。
-3. `File → Clone repository → URL`，输入项目负责人提供的仓库地址。
-4. 默认分支选择 `main`。
+1. 打开 GitHub Desktop，登录自己的账号。
+2. `File → Clone repository → URL`，输入 `https://github.com/YZUSeanYan/course-companion`（仓库为公开，可直接克隆）。
+3. 默认分支选择 `main`。
 
 在终端进入仓库后先确认：
 
