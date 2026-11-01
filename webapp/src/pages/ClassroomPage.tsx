@@ -63,6 +63,7 @@ export default function ClassroomPage() {
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [liveMinutes, setLiveMinutes] = useState(false);
+  const [mode, setMode] = useState<"cloud" | "offline">("cloud");
   const [digestJson, setDigestJson] = useState("");
   const [retranscribing, setRetranscribing] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -108,7 +109,7 @@ export default function ClassroomPage() {
   const start = async () => {
     setGenerateStatus(null);
     setDigestJson("");
-    if (!loadGatewayUrl()) {
+    if (mode === "cloud" && !loadGatewayUrl()) {
       setGenerateStatus("请先在设置中配置网关地址");
       return;
     }
@@ -121,6 +122,7 @@ export default function ClassroomPage() {
         speakerAttribution: false,
         glossaryTerms: [],
         liveMinutes,
+        mode,
       });
     } catch {
       // 错误已通过 snapshot.statusMessage 呈现。
@@ -245,8 +247,18 @@ export default function ClassroomPage() {
               </option>
             ))}
           </select>
+          <label className="field-label">识别模式</label>
+          <select className="text-input" value={mode} onChange={(event) => setMode(event.target.value as "cloud" | "offline")}>
+            <option value="cloud">云端实时（转写+翻译+纪要，需额度）</option>
+            <option value="offline">浏览器离线（无需额度，首次需下载模型约 200MB）</option>
+          </select>
           <label className="field-label">实时纪要（AI 课堂小结，额外消耗云端音频时长）</label>
-          <select className="text-input" value={liveMinutes ? "on" : "off"} onChange={(event) => setLiveMinutes(event.target.value === "on")}>
+          <select
+            className="text-input"
+            value={liveMinutes ? "on" : "off"}
+            onChange={(event) => setLiveMinutes(event.target.value === "on")}
+            disabled={mode === "offline"}
+          >
             <option value="off">关闭</option>
             <option value="on">开启</option>
           </select>

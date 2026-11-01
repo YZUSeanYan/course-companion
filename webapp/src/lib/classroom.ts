@@ -6,6 +6,7 @@ import { zhixi } from "./api/client";
 import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason } from "./audio/realtime";
 import { encodeWav } from "./audio/wav";
+import { getOfflineEngine, type OfflineCallbacks, type OfflineSegment } from "./offline/engine";
 import type { RealtimeConfig, RealtimeEvent } from "./api/types";
 import type { TranslationRecord } from "./db/db";
 
@@ -37,6 +38,8 @@ export interface ClassroomStartOptions {
   speakerAttribution: boolean;
   glossaryTerms: string[];
   liveMinutes: boolean;
+  /** 识别模式：云端实时（默认）或浏览器离线（sherpa-onnx WASM）。 */
+  mode: "cloud" | "offline";
 }
 
 function defaultConfig(options: ClassroomStartOptions): RealtimeConfig {
@@ -76,6 +79,9 @@ export class ClassroomController {
   private ticker: number | null = null;
   private callbacks: ClassroomCallbacks | null = null;
   private digestJson = "";
+  private mode: "cloud" | "offline" = "cloud";
+  private offlineCallbacks: OfflineCallbacks | null = null;
+  private offlineSessionId: number | null = null;
 
   subscribe(callbacks: ClassroomCallbacks): ClassroomSnapshot {
     this.callbacks = callbacks;
@@ -94,14 +100,23 @@ export class ClassroomController {
 
   async start(options: ClassroomStartOptions): Promise<void> {
     if (this.snapshot.phase !== "idle" && this.snapshot.phase !== "ended") return;
-    this.emit({ phase: "connecting", statusMessage: "正在连接云端课堂…", partialText: "", usageSeconds: 0 });
+    this.emit({
+      phase: "connecting",
+      statusMessage: options.mode === "offline" ? "正在准备离线识别引擎…" : "正在连接云端课堂…",
+      partialText: "",
+      usageSeconds: 0,
+    });
     try {
-      // 先注册设备并确认账号可用：未激活/过期时网关会在 WS 握手阶段直接拒绝，
-      // 提前检查可以给出可执行的引导，而不是让连接悄悄挂起。
-      const token = await zhixi.deviceToken();
-      const account = await zhixi.accountStatus();
-      if (!account.activated) {
-        throw new Error("请先在设置中激活试用额度，再开始云端听课。");
+      this.mode = options.mode;
+      let token: string | null = null;
+      if (options.mode === "cloud") {
+        // 云端：先注册设备并确认账号可用；未激活/过期时网关会在 WS 握手阶段直接拒绝，
+        // 提前检查可以给出可执行的引导，而不是让连接悄悄挂起。
+        token = await zhixi.deviceToken();
+        const account = await zhixi.accountStatus();
+        if (!account.activated) {
+          throw new Error("请先在设置中激活试用额度，再开始云端听课。");
+        }
       }
       this.stream = await requestMicrophone();
       const sessionId = await db.sessions.add({
@@ -121,17 +136,19 @@ export class ClassroomController {
       this.accumulatedMs = 0;
       this.pauseStartedAt = null;
       this.startedAt = Date.now();
-      this.realtime = new RealtimeSession(zhixi.realtimeUrl(), token, defaultConfig(options), {
-        onEvent: (event) => void this.handleEvent(sessionId, event),
-        onClose: (code, reason) => void this.handleClose(sessionId, code, reason),
-        onError: (error) => this.emit({ statusMessage: error.message }),
-      });
-      this.realtime.connect();
+      if (options.mode === "offline") {
+        await this.startOffline(sessionId, options);
+      } else {
+        this.startCloud(sessionId, options, token!);
+      }
       this.capture = await startPcmCapture(this.stream, {
         onFrame: (frame) => {
           // 原地累积 PCM 用于 WAV 存档（暂停时 worklet 不产帧，存档与转写时间轴一致）。
           this.pcmFrames.push(frame);
           if (this.realtime?.isActive) this.realtime.sendPcm(frame);
+          if (this.mode === "offline" && this.offlineCallbacks) {
+            getOfflineEngine().feed(frame, this.offlineCallbacks);
+          }
         },
         onError: (error) => this.emit({ statusMessage: error.message }),
       });
@@ -148,6 +165,46 @@ export class ClassroomController {
       this.emit({ phase: "idle", statusMessage: message });
       throw error;
     }
+  }
+
+  private startCloud(sessionId: number, options: ClassroomStartOptions, token: string): void {
+    this.realtime = new RealtimeSession(zhixi.realtimeUrl(), token, defaultConfig(options), {
+      onEvent: (event) => void this.handleEvent(sessionId, event),
+      onClose: (code, reason) => void this.handleClose(sessionId, code, reason),
+      onError: (error) => this.emit({ statusMessage: error.message }),
+    });
+    this.realtime.connect();
+  }
+
+  private async startOffline(sessionId: number, _options: ClassroomStartOptions): Promise<void> {
+    // 离线模式：无账号/额度要求；识别失败可随时在课堂设置切回云端。
+    const engine = getOfflineEngine();
+    if (!engine.isReady) {
+      await engine.ensureReady((message) => this.emit({ statusMessage: message }));
+    }
+    engine.start();
+    this.offlineSessionId = sessionId;
+    this.offlineCallbacks = {
+      onPartial: (text) => this.emit({ partialText: text }),
+      onFinal: (segment) => void this.persistOfflineFinal(this.offlineSessionId, segment),
+    };
+  }
+
+  /** 离线定稿与云端 transcript.final 走同一落库口径。 */
+  private async persistOfflineFinal(sessionId: number | null, segment: OfflineSegment): Promise<void> {
+    if (sessionId == null) return;
+    const now = Date.now();
+    const lineId = await db.transcriptLines.add({
+      sessionId,
+      timestampMillis: now,
+      text: segment.text,
+      segmentKey: segment.segmentId,
+      speaker: null,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      language: null,
+    });
+    this.callbacks?.onLineSaved?.(lineId);
   }
 
   async pause(): Promise<void> {
@@ -195,6 +252,13 @@ export class ClassroomController {
       await this.realtime?.stop();
     } catch {
       // ignore
+    }
+    if (this.mode === "offline" && this.offlineCallbacks) {
+      // 结束离线识别：未触发端点的余句作为最后一行落库。
+      const remaining = getOfflineEngine().stop(this.offlineCallbacks);
+      if (remaining) await this.persistOfflineFinal(this.offlineSessionId, remaining);
+      this.offlineCallbacks = null;
+      this.offlineSessionId = null;
     }
     await this.finishSession();
   }
