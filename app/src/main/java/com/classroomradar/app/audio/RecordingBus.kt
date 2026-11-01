@@ -7,6 +7,8 @@ sealed interface RecorderEvent {
     data class SessionStarted(val sessionId: Long, val startedAtMillis: Long) : RecorderEvent
     data class Status(val isRecording: Boolean, val elapsedSeconds: Long, val isPaused: Boolean = false) : RecorderEvent
     data class PartialTranscript(val text: String) : RecorderEvent
+    /** Streaming translation preview; null clears it. */
+    data class PartialTranslation(val text: String?) : RecorderEvent
     data class Transcript(val lineId: Long, val text: String, val timestampMillis: Long) : RecorderEvent
     data class LiveMinutes(val contentJson: String) : RecorderEvent
     /** Live cloud latency in ms, comparable with the official 0.28s first-word and ~88ms translation figures. */

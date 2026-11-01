@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { zhixi, loadGatewayUrl, saveGatewayUrl, loadDeviceCredential, clearDeviceCredential } from "../lib/api/client";
+import { resolveModelBaseUrl, saveModelBaseUrlOverride } from "../lib/offline/model-manager";
 import AccountCard from "../components/AccountCard";
 
 export default function SettingsPage() {
   const [gateway, setGateway] = useState(loadGatewayUrl());
   const [health, setHealth] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [modelBase, setModelBase] = useState(resolveModelBaseUrl());
 
   useEffect(() => {
     setDeviceId(loadDeviceCredential()?.deviceId ?? null);
@@ -52,6 +54,28 @@ export default function SettingsPage() {
       </div>
 
       <AccountCard />
+
+      <div className="glass-card">
+        <div className="card-title">离线识别模型镜像</div>
+        <p className="card-desc">浏览器离线识别的 WASM 产物（约 200MB，一次性下载后缓存）。本地联调或内网镜像可在此覆盖根地址。</p>
+        <input
+          className="text-input"
+          value={modelBase}
+          onChange={(event) => setModelBase(event.target.value)}
+          placeholder="https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/"
+        />
+        <div className="btn-row">
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => {
+              saveModelBaseUrlOverride(modelBase);
+              setHealth("模型镜像地址已保存");
+            }}
+          >
+            保存镜像地址
+          </button>
+        </div>
+      </div>
 
       <div className="glass-card">
         <div className="card-title">设备身份</div>

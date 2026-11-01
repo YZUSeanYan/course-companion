@@ -10,12 +10,17 @@
 | 翻译首 token 额外延迟 | 约 88 毫秒 | 以"最近一条转录事件 → `translation.partial` 到达"测量（2 秒窗口），同样 EMA 平滑显示（译 ~x.xxs） |
 | 服务端音频积压上限 | 2 秒，超出直接丢弃 | 客户端连接期同样只保留约 2 秒（64 KiB）待发音频，慢连接丢最旧帧；`usage.update.discardedSeconds` 已随用量落库（Room 9 新增列） |
 | 断线后回到当前语句 | 约 1 秒 | 断线按官方重连码集合新开流（4001/4004/4010/4011/4012/4013/4016/1012 + 网关 4401），重传配置不盲目补发旧音频 |
+| 分段参数语义 | `sentence` 模式忽略 `segmentation`（英文原文核实），`short/balanced/complete` 只作用于 `classic` | 现有实现正确：`sentence` 时不下发 `segmentation`，经典模式才下发用户选择 |
 | usage 推送 | 每 15 秒一次，结束再推一次 | 网关原样转发 `usage.update` 全部官方字段（effective/discarded seconds、priceCentsPerHour、accruedCents 等） |
 | 计费 | $0.006/音频分钟，按秒比例，会话冻结单价 | 网关按实际收流秒数结算自有配额，`accruedCents` 落库供后台统计 |
 | 会话上限 | 4 小时边界；60 秒无音频空闲（ping 不计入） | 网关在 4 小时边界以官方 4012 关闭（客户端自动开新流），60 秒空闲以官方 4013 语义发送 `session.error` 后关闭 |
 | 控制消息 | `session.finalize` / `session.stop` / `session.ping` | 网关白名单透传；App 在暂停与停止时先发 `session.finalize`，保住最后半句及其译文 |
+| 双语字幕 | 译文与转录同步流式输出，不等整句结束 | `transcript.partial.tailTranslation` 与 `translation.partial` 驱动 Dock 的"译 …"实时预览，定稿译文照旧落库 |
+| 说话人显示 | 定稿段落带 speaker 标签 | 定稿行显示说话人；sentence 模式 `paragraphs[].speaker` 透传保留 |
+| 实时纪要 | `digest.update` 区分已确认与进行中 | 纪要卡片对未确认 section 显示"整理中"，确认后自动消失 |
+| 采集节奏 | 持续推流，服务端积压 2 秒上限 | 麦克风采集块 200ms → 100ms，降低首字延迟的排队分量 |
 
-测量口径说明：官方"首字延迟"从开口起算，含端点检测；本地读数从最新音频帧发出起算（不含麦克风采集的 ≤200 ms 分块），因此读数应略低于官方口径。真实网络下的数值以 App 内实时显示为准，官方数值是它们的目标带。
+测量口径说明：官方"首字延迟"从开口起算，含端点检测；本地读数从最新音频帧发出起算（不含麦克风采集的 ≤100 ms 分块），因此读数应略低于官方口径。真实网络下的数值以 App 内实时显示为准，官方数值是它们的目标带。
 
 ## 统一安全边界
 

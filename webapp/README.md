@@ -13,7 +13,19 @@
 - **导出**：课程 Markdown、课堂转写 Markdown 下载。
 - **隐私**：正文只存本浏览器 IndexedDB；服务端只存设备 token 与手机号的 HMAC 摘要/密文。
 
-**二期规划**：sherpa-onnx WASM 浏览器离线识别、CET6 词库导入、实时纪要（digest）、云端音频任务补转写。
+**二期功能**：实时纪要（digest）、WAV 本地存档 + 云端补转写、CET6 词库导入、**浏览器离线识别**（sherpa-onnx WASM，见下）。
+
+## 浏览器离线识别（二期）
+
+- 模型：`sherpa-onnx-wasm-simd-v1.13.7-zh-en-asr-zipformer`（流式中英 Zipformer，SIMD，Apache-2.0），上游 <https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.7>；产物 js/wasm/data 全部在运行时从镜像下载、SHA-256 锚定校验后存 Cache API，仓库不提交任何模型/二进制。
+- 镜像发布步骤（与 Android 模型镜像同域）：
+  1. 下载上游 `sherpa-onnx-wasm-simd-v1.13.7-zh-en-asr-zipformer.tar.bz2`（完整包，含 .wasm 与带模型的 .data）；
+  2. 解压，把 `sherpa-onnx-asr.js`、`sherpa-onnx-wasm-main-asr.js`、`sherpa-onnx-wasm-main-asr.wasm`、`sherpa-onnx-wasm-main-asr.data` 四个文件上传到 `https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/`；
+  3. `sha256sum` 四个文件，把哈希与字节数登记到 `src/lib/offline/model-manager.ts` 的 `OFFLINE_ASR_MODEL.assets`（JS 两项已登记；wasm/data 待登记处有注释标记）；
+  4. 本地联调：设置页「离线识别模型镜像」可覆盖根地址（如 `http://127.0.0.1:8901/`）。
+- 离线模式不消耗账号额度；识别失败或需要翻译/纪要时在课堂设置切回云端。设置页可随时覆盖镜像地址。
+
+**一期不实现（浏览器限制）**：锁屏/后台录音、桌面小组件、系统通知。
 
 ## 浏览器要求
 
