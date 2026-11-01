@@ -4,7 +4,7 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from app.provider import ProviderConfigurationError, validate_provider_url
+from app.provider import ProviderConfigurationError, resolve_global_address, validate_provider_url
 from conftest import auth_headers, chat_response, make_client, valid_package
 
 
@@ -120,3 +120,19 @@ def test_ssrf_rejection_happens_before_any_http_request(settings, payload):
     assert response.status_code == 503
     assert "forbidden address" in response.json()["detail"]
     assert calls == 0
+
+
+def test_resolve_global_address_accepts_public_literals():
+    assert resolve_global_address("1.1.1.1", 443) == "1.1.1.1"
+    assert resolve_global_address("2606:4700:4700::1111", 443) == "2606:4700:4700::1111"
+
+
+def test_resolve_global_address_rejects_non_global_literals():
+    for literal in ("127.0.0.1", "10.1.2.3", "169.254.1.1", "192.168.0.5", "::1", "224.0.0.1", "0.0.0.0"):
+        with pytest.raises(ProviderConfigurationError):
+            resolve_global_address(literal, 443)
+
+
+def test_resolve_global_address_requires_hostname():
+    with pytest.raises(ProviderConfigurationError):
+        resolve_global_address("", 443)

@@ -70,9 +70,15 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
     def page_image(
         document_id: str, filename: str, _: str = Depends(activated_device)
     ) -> FileResponse:
-        if not re.fullmatch(r"[0-9a-f]{24}", document_id) or not re.fullmatch(r"page-\d{4}\.jpg", filename):
+        document_match = re.fullmatch(r"([0-9a-f]{24})", document_id)
+        page_match = re.fullmatch(r"page-(\d{4})\.jpg", filename)
+        if document_match is None or page_match is None:
             raise HTTPException(status_code=404, detail="Page not found")
-        path = (root / document_id / "pages" / filename).resolve()
+        # Rebuild both components from parsed integers so the path can only
+        # contain characters produced by this formatting, never raw input.
+        document_key = f"{int(document_match.group(1), 16):024x}"
+        safe_filename = f"page-{int(page_match.group(1)):04d}.jpg"
+        path = (root / document_key / "pages" / safe_filename).resolve()
         path.relative_to(root)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Page not found")

@@ -63,19 +63,53 @@ def validate_provider_url(base_url: str) -> str:
             address = ipaddress.ip_address(raw_address)
         except ValueError as exc:
             raise ProviderConfigurationError("AI provider resolved address is invalid") from exc
-        if (
-            address.is_loopback
-            or address.is_private
-            or address.is_reserved
-            or address.is_link_local
-            or address.is_multicast
-            or address.is_unspecified
-            or not address.is_global
-        ):
-            raise ProviderConfigurationError(
-                "AI provider URL resolves to a forbidden address"
-            )
+        assert_global_address(address)
     return base_url.rstrip("/") + "/chat/completions"
+
+
+def assert_global_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+    """Reject loopback, private, reserved, link-local, multicast and unspecified addresses."""
+    if (
+        address.is_loopback
+        or address.is_private
+        or address.is_reserved
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or not address.is_global
+    ):
+        raise ProviderConfigurationError("AI provider URL resolves to a forbidden address")
+
+
+def resolve_global_address(hostname: str, port: int) -> str:
+    """Resolve `hostname` to one validated global literal address.
+
+    Complements validate_provider_url: callers connect to the returned literal
+    address (with the original hostname as SNI/Host) so a second DNS lookup
+    inside the HTTP client cannot re-point the connection to another host.
+    """
+    hostname = (hostname or "").rstrip(".").lower()
+    if not hostname:
+        raise ProviderConfigurationError("Hostname is required")
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        assert_global_address(literal)
+        return str(literal)
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ProviderConfigurationError("Host could not be resolved") from exc
+    for info in infos:
+        try:
+            address = ipaddress.ip_address(info[4][0])
+        except ValueError as exc:
+            raise ProviderConfigurationError("Resolved address is invalid") from exc
+        assert_global_address(address)
+        return str(address)
+    raise ProviderConfigurationError("Host did not resolve to an address")
 
 
 class AIProvider:

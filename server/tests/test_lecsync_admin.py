@@ -81,6 +81,51 @@ def test_public_audio_url_rejects_private_target(settings):
     assert response.status_code == 422
 
 
+def test_public_audio_url_fetch_is_ip_pinned(settings, monkeypatch):
+    import httpx as httpx_module
+
+    captured = {}
+
+    class FakeStreamResponse:
+        status_code = 200
+
+        async def aiter_bytes(self):
+            yield b"RIFF"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def stream(self, method, url, headers=None, extensions=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["extensions"] = extensions
+            return FakeStreamResponse()
+
+    monkeypatch.setattr("app.lecsync_routes.validate_provider_url", lambda url: url)
+    monkeypatch.setattr("app.lecsync_routes.resolve_global_address", lambda host, port: "93.184.216.34")
+    monkeypatch.setattr(httpx_module, "AsyncClient", FakeClient)
+    client = make_client(settings, lambda request: httpx.Response(502, json={"error": "UPSTREAM_DOWN", "request_id": "req-x"}))
+    response = client.post("/v2/lecsync/audio/jobs/url", headers=auth_headers(client), json={"fileUrl": "https://Audio.Example.com:8443/talk.wav", "options": {}})
+    assert captured["url"] == "https://93.184.216.34:8443/talk.wav"
+    assert captured["extensions"]["sni_hostname"] == "audio.example.com"
+    assert captured["headers"]["Host"] == "Audio.Example.com:8443"
+    assert captured["client_kwargs"]["follow_redirects"] is False
+    assert captured["client_kwargs"]["trust_env"] is False
+
+
 def test_upstream_unauthorized_is_not_device_unauthorized(settings, monkeypatch):
     monkeypatch.setenv("LECSYNC_API_KEY", "test-only-lecsync")
     monkeypatch.setattr("app.lecsync.validate_provider_url", lambda url: url + "/chat/completions")

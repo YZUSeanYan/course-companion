@@ -23,7 +23,7 @@ from .lecsync_gateway_schemas import (
     AudioUrlJobRequest, camel_fields, snake_fields,
 )
 from .lecsync_realtime import LecsyncRealtimeConnection, StreamLimiter
-from .provider import ProviderConfigurationError, ProviderInvalidResponse, validate_provider_url
+from .provider import ProviderConfigurationError, ProviderInvalidResponse, resolve_global_address, validate_provider_url
 from .rate_limit import SlidingWindowRateLimiter
 from .security import token_digest
 
@@ -276,7 +276,12 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(422, {"code": "INVALID_INPUT", "message": "音频处理选项不正确"}) from exc
         data, seconds = await read_audio(file, 200 * 1024 * 1024, 7200, device)
         identifier = uuid.uuid4().hex
-        path = upload_root / f"{device}-{identifier}"
+        try:
+            # Parsed so the staging filename can only contain UUID characters.
+            device_key = uuid.UUID(device)
+        except ValueError as exc:
+            raise HTTPException(401, {"code": "INVALID_TOKEN", "message": "设备身份无效"}) from exc
+        path = upload_root / f"{device_key}-{identifier}"
         path.write_bytes(data)
         try:
             upload = await call(client().create_audio_upload, len(data), hashlib.sha256(data).hexdigest())
@@ -297,15 +302,31 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
     async def create_url_job(payload: AudioUrlJobRequest, device: str = Depends(authenticated)):
         check_rate(device)
         from io import BytesIO
-        from urllib.parse import urlsplit
+        from urllib.parse import urlsplit, urlunsplit
         import httpx
         try:
             await asyncio.to_thread(validate_provider_url, payload.fileUrl)
         except ProviderConfigurationError as exc:
             raise HTTPException(422, {"code": "INVALID_INPUT", "message": "音频地址不安全或不受支持"}) from exc
+        # Pin the connection to an address validated at this moment: the HTTP
+        # client connects to the literal IP while TLS and the Host header keep
+        # identifying the original hostname, so a second DNS lookup inside the
+        # client can never re-point the request at an internal address.
+        parts = urlsplit(payload.fileUrl)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        hostname = (parts.hostname or "").rstrip(".").lower()
         try:
-            async with httpx.AsyncClient(timeout=30, follow_redirects=False) as remote:
-                async with remote.stream("GET", payload.fileUrl) as response:
+            address = await asyncio.to_thread(resolve_global_address, hostname, port)
+        except ProviderConfigurationError as exc:
+            raise HTTPException(422, {"code": "INVALID_INPUT", "message": "音频地址不安全或不受支持"}) from exc
+        default_port = port in (80, 443)
+        netloc = f"[{address}]" if ":" in address else address
+        if not default_port:
+            netloc = f"{netloc}:{port}"
+        pinned_url = urlunsplit((parts.scheme, netloc, parts.path or "/", "", ""))
+        try:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as remote:
+                async with remote.stream("GET", pinned_url, headers={"Host": parts.netloc}, extensions={"sni_hostname": hostname}) as response:
                     if response.status_code != 200:
                         raise HTTPException(422, {"code": "INVALID_INPUT", "message": "无法读取音频地址"})
                     content = bytearray()
@@ -315,7 +336,7 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
                             raise HTTPException(413, {"code": "BODY_TOO_LARGE", "message": "音频超过上传大小限制"})
         except httpx.TransportError as exc:
             raise HTTPException(422, {"code": "INVALID_INPUT", "message": "无法读取音频地址"}) from exc
-        name = Path(urlsplit(payload.fileUrl).path).name or "audio.wav"
+        name = Path(parts.path).name or "audio.wav"
         return await create_job(UploadFile(file=BytesIO(content), filename=name), options=json.dumps(payload.options.model_dump()), device=device)
 
     @app.get("/v2/lecsync/audio/jobs/{job_id}")
