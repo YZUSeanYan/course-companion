@@ -2674,24 +2674,28 @@ private fun SettingsScreen(
                 onRefresh = onRefreshAccount,
             )
         }
-        item { Text("AI 服务连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = LiquidTextPrimary) }
-        item {
-            GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
-                var editedUrl by remember(aiServiceUrl) { mutableStateOf(aiServiceUrl) }
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GlassTextInput(editedUrl, { editedUrl = it }, "AI 服务地址")
-                    Text(
-                        if (BuildConfig.DEBUG) {
-                            "电脑模拟器填 http://10.0.2.2:8765；真机填电脑局域网地址或已部署的 HTTPS 地址。"
-                        } else {
-                            "正式版本仅允许 HTTPS。地址不能包含账号、密码或查询参数。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LiquidTextSecondary,
-                    )
-                    GlassTextAction("保存地址并检查", { onSaveAiServiceUrl(editedUrl) }, Modifier.fillMaxWidth(), Icons.Outlined.Settings)
-                    GlassTextAction("重新检查后端状态", onCheckAiService, Modifier.fillMaxWidth(), Icons.Outlined.Lightbulb)
-                    Text(aiServiceStatus, color = LiquidTextSecondary)
+        // 正式版地址由 BuildConfig 注入生产网关，普通用户无需也不应改地址；
+        // 仅 debug 构建保留调试入口（本地假网关联调用）。
+        if (BuildConfig.DEBUG) {
+            item { Text("AI 服务连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = LiquidTextPrimary) }
+            item {
+                GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+                    var editedUrl by remember(aiServiceUrl) { mutableStateOf(aiServiceUrl) }
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        GlassTextInput(editedUrl, { editedUrl = it }, "AI 服务地址")
+                        Text(
+                            if (BuildConfig.DEBUG) {
+                                "电脑模拟器填 http://10.0.2.2:8765；真机填电脑局域网地址或已部署的 HTTPS 地址。"
+                            } else {
+                                "正式版本仅允许 HTTPS。地址不能包含账号、密码或查询参数。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LiquidTextSecondary,
+                        )
+                        GlassTextAction("保存地址并检查", { onSaveAiServiceUrl(editedUrl) }, Modifier.fillMaxWidth(), Icons.Outlined.Settings)
+                        GlassTextAction("重新检查后端状态", onCheckAiService, Modifier.fillMaxWidth(), Icons.Outlined.Lightbulb)
+                        Text(aiServiceStatus, color = LiquidTextSecondary)
+                    }
                 }
             }
         }
