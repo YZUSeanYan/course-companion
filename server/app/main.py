@@ -76,6 +76,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_lecsync_routes(app, settings)
     from .admin_routes import register_admin_routes
     register_admin_routes(app, settings)
+    from .trial_routes import register_trial_routes
+    register_trial_routes(app, settings)
     app.state.register_limiter = SlidingWindowRateLimiter(
         settings.register_rate_limit, settings.register_rate_window_seconds
     )

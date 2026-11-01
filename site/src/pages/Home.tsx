@@ -233,6 +233,9 @@ export default function Home() {
               <p style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)', lineHeight: 1.8 }}>
                 <strong>试用说明：</strong>离线听课不需要注册账号；AI 学习包、翻译、云端听课和文档解析需要在「设置 → 试用额度」激活管理员发放的手机号。额度按每日次数/时长和有效期管理，多台设备共用，离线功能不受影响。
               </p>
+              <Link to="/apply" className="inline-block mt-2" style={{ fontSize: 13, fontWeight: 800, color: 'var(--brand-deep)' }}>
+                没有试用名额？申请试用 →
+              </Link>
             </div>
           </Reveal>
         </div>

@@ -73,6 +73,20 @@ class Settings:
     admin_session_hours: int = 12
     admin_cookie_secure: bool = True
     admin_dist_dir: str | None = None
+    aliyun_sms_access_key_id: str | None = None
+    aliyun_sms_access_key_secret: str | None = None
+    aliyun_sms_sign_name: str | None = None
+    aliyun_sms_template_code: str | None = None
+    aliyun_sms_region: str = "cn-hangzhou"
+    trial_default_ai_packs: int = 5
+    trial_default_audio_minutes: int = 30
+    trial_default_valid_months: int = 2
+    trial_code_ttl_seconds: int = 300
+    trial_code_max_attempts: int = 5
+    trial_code_resend_seconds: int = 60
+    trial_code_per_phone_hour: int = 5
+    trial_code_per_ip_hour: int = 10
+    trial_apply_per_ip_hour: int = 20
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -135,6 +149,29 @@ class Settings:
             admin_session_hours=_int_env("ADMIN_SESSION_HOURS", 12, 1, 168),
             admin_cookie_secure=_bool_env("ADMIN_COOKIE_SECURE", True),
             admin_dist_dir=os.getenv("ADMIN_DIST_DIR") or None,
+            aliyun_sms_access_key_id=os.getenv("ALIYUN_SMS_ACCESS_KEY_ID") or None,
+            aliyun_sms_access_key_secret=os.getenv("ALIYUN_SMS_ACCESS_KEY_SECRET") or None,
+            aliyun_sms_sign_name=os.getenv("ALIYUN_SMS_SIGN_NAME") or None,
+            aliyun_sms_template_code=os.getenv("ALIYUN_SMS_TEMPLATE_CODE") or None,
+            aliyun_sms_region=os.getenv("ALIYUN_SMS_REGION", "cn-hangzhou"),
+            trial_default_ai_packs=_int_env("TRIAL_DEFAULT_AI_PACKS", 5, 1, 10000),
+            trial_default_audio_minutes=_int_env("TRIAL_DEFAULT_AUDIO_MINUTES", 30, 1, 100000),
+            trial_default_valid_months=_int_env("TRIAL_DEFAULT_VALID_MONTHS", 2, 1, 24),
+            trial_code_ttl_seconds=_int_env("TRIAL_CODE_TTL_SECONDS", 300, 60, 1800),
+            trial_code_max_attempts=_int_env("TRIAL_CODE_MAX_ATTEMPTS", 5, 1, 20),
+            trial_code_resend_seconds=_int_env("TRIAL_CODE_RESEND_SECONDS", 60, 10, 3600),
+            trial_code_per_phone_hour=_int_env("TRIAL_CODE_PER_PHONE_HOUR", 5, 1, 100),
+            trial_code_per_ip_hour=_int_env("TRIAL_CODE_PER_IP_HOUR", 10, 1, 1000),
+            trial_apply_per_ip_hour=_int_env("TRIAL_APPLY_PER_IP_HOUR", 20, 1, 1000),
+        )
+
+    @property
+    def sms_configured(self) -> bool:
+        return bool(
+            self.aliyun_sms_access_key_id
+            and self.aliyun_sms_access_key_secret
+            and self.aliyun_sms_sign_name
+            and self.aliyun_sms_template_code
         )
 
     @property

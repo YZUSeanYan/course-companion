@@ -5,6 +5,7 @@ import SiteFooter from './components/site/SiteFooter'
 import Home from './pages/Home'
 import Features from './pages/Features'
 import Download from './pages/Download'
+import Apply from './pages/Apply'
 import Feedback from './pages/Feedback'
 import Privacy from './pages/Privacy'
 
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/features" element={<Features />} />
           <Route path="/download" element={<Download />} />
+          <Route path="/apply" element={<Apply />} />
           <Route path="/feedback" element={<Feedback />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="*" element={<Home />} />

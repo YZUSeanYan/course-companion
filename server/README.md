@@ -42,6 +42,15 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - 每个 `/v1/*`、`/v2/*` 请求会写入 `api_requests`（设备、账号、方法、路由模板、状态码、耗时、时间），不含 query 明文或请求正文；`/health`、`/admin/*` 不计入服务用量。WebSocket 在关闭时单独记录。
 - 手机号、管理员密码、会话密钥、加密密钥只能来自服务器环境变量；不要写入源码、示例、测试、APK 或前端 bundle。
 
+## 官网试用申请
+
+- `POST /v1/trial/request-code` 接收手机号，校验格式、是否已注册、手机号/IP 限流和 60 秒重发冷却后，通过阿里云短信发送 6 位验证码。
+- `POST /v1/trial/apply` 校验验证码、姓名、昵称和同意标记，成功后自动创建账号：默认每天 5 个 AI 学习包、30 分钟云端音频，翻译字符/文档解析/设备数沿用 `ACCOUNT_DEFAULT_*`，有效期按北京时间自然月 +2 个月。姓名写入账号备注，昵称写入显示名，管理后台立即可见。
+- 验证码 5 分钟有效、最多错误 5 次，单次使用；数据库只保存 HMAC 摘要，不保存明文。手机号仍使用 Fernet 密文保存。
+- 阿里云短信配置：`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`、`ALIYUN_SMS_REGION`（默认 `cn-hangzhou`）。模板变量名必须是 `code`，例如“您的验证码是 ${code}，5 分钟内有效”。AccessKey 只需 `dysms:SendSms` 权限。
+- 未配置短信时接口返回 503 `sms_not_configured`，官网申请页会明确提示；后台手动添加手机号不受影响。官网 `shuike.seanyan.store/api/trial/*` 由 nginx 反代到 `/v1/trial/*`，保持同源，不需要 CORS。
+- 可调参数：`TRIAL_DEFAULT_AI_PACKS`、`TRIAL_DEFAULT_AUDIO_MINUTES`、`TRIAL_DEFAULT_VALID_MONTHS`、`TRIAL_CODE_TTL_SECONDS`、`TRIAL_CODE_MAX_ATTEMPTS`、`TRIAL_CODE_RESEND_SECONDS`、`TRIAL_CODE_PER_PHONE_HOUR`、`TRIAL_CODE_PER_IP_HOUR`、`TRIAL_APPLY_PER_IP_HOUR`。
+
 ## Lecsync 全功能统一网关
 
 `LECSYNC_API_KEY` 仅由服务端环境变量/密钥服务提供，不进入 APK。所有官方 REST、Realtime 和 Voice Typing WebSocket 都经 `/v2/lecsync/*` 转发，APP 只使用匿名设备 token，不获得上游 key、一次性 socket token、上传/录音签名 URL 或 Webhook secret。

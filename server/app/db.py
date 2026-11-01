@@ -215,6 +215,27 @@ class Database:
                 CREATE INDEX IF NOT EXISTS api_requests_created ON api_requests(created_at);
                 CREATE INDEX IF NOT EXISTS api_requests_account ON api_requests(account_id, created_at);
                 CREATE INDEX IF NOT EXISTS api_requests_device ON api_requests(device_id, created_at);
+                CREATE TABLE IF NOT EXISTS sms_verification_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    phone_hash TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+                    consumed_at TEXT,
+                    request_ip_hash TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS sms_verification_codes_phone
+                    ON sms_verification_codes(phone_hash, created_at);
+                CREATE TABLE IF NOT EXISTS trial_applications (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    phone_hash TEXT NOT NULL,
+                    request_ip_hash TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS trial_applications_phone
+                    ON trial_applications(phone_hash, created_at);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -898,6 +919,116 @@ class Database:
             "textCharacters": 0 if lecsync is None else int(lecsync["text_characters"]),
             "audioMinutes": 0.0 if lecsync is None else round(float(lecsync["audio_seconds"]) / 60.0, 1),
         }
+
+    def create_sms_code(
+        self,
+        phone_hash: str,
+        code_hash: str,
+        expires_at: str,
+        request_ip_hash: str | None,
+    ) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO sms_verification_codes(
+                    phone_hash, code_hash, expires_at, request_ip_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (phone_hash, code_hash, expires_at, request_ip_hash, self._now()),
+            )
+            return int(cursor.lastrowid)
+
+    def last_sms_code_created_at(self, phone_hash: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT created_at FROM sms_verification_codes "
+                "WHERE phone_hash = ? ORDER BY id DESC LIMIT 1",
+                (phone_hash,),
+            ).fetchone()
+        return None if row is None else str(row["created_at"])
+
+    def check_sms_code(
+        self,
+        phone_hash: str,
+        code_hash: str,
+        max_attempts: int,
+    ) -> tuple[str, dict | None]:
+        """Atomically consume a matching code and count failed attempts."""
+        import hmac
+
+        now = self._now()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT * FROM sms_verification_codes
+                WHERE phone_hash = ? ORDER BY id DESC LIMIT 1
+                """,
+                (phone_hash,),
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return "not_found", None
+            current = dict(row)
+            if current["consumed_at"] is not None:
+                connection.commit()
+                return "consumed", current
+            if str(current["expires_at"]) < now:
+                connection.commit()
+                return "expired", current
+            if int(current["attempts"]) >= max_attempts:
+                connection.commit()
+                return "attempts_exhausted", current
+            if not hmac.compare_digest(str(current["code_hash"]), code_hash):
+                connection.execute(
+                    "UPDATE sms_verification_codes SET attempts = attempts + 1 WHERE id = ?",
+                    (current["id"],),
+                )
+                connection.commit()
+                return "mismatch", current
+            connection.execute(
+                "UPDATE sms_verification_codes SET consumed_at = ? WHERE id = ?",
+                (now, current["id"]),
+            )
+            connection.commit()
+            return "ok", current
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def invalidate_sms_code(self, code_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE sms_verification_codes SET consumed_at = ? "
+                "WHERE id = ? AND consumed_at IS NULL",
+                (self._now(), code_id),
+            )
+
+    def record_trial_application(
+        self,
+        application_id: str,
+        account_id: str,
+        phone_hash: str,
+        request_ip_hash: str | None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO trial_applications(
+                    id, account_id, phone_hash, request_ip_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    application_id,
+                    account_id,
+                    phone_hash,
+                    request_ip_hash,
+                    self._now(),
+                ),
+            )
 
     def list_accounts(self) -> list[dict]:
         today = self.today()
