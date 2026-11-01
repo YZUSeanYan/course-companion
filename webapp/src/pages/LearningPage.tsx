@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "../lib/db/db";
+import { db, newUid } from "../lib/db/db";
 
 export default function LearningPage() {
   const courses = useLiveQuery(() => db.courses.orderBy("createdAtMillis").reverse().toArray(), []);
@@ -29,6 +29,7 @@ export default function LearningPage() {
         return definition ? { term: term.trim(), definition: definition.trim() } : { term: term.trim() };
       });
     await db.courses.add({
+      uid: newUid(),
       name: name.trim(),
       teacher: teacher.trim(),
       language: "中英双语",

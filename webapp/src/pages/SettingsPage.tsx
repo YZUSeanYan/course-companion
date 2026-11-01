@@ -5,6 +5,8 @@ import { Link } from "react-router-dom";
 import { zhixi, loadGatewayUrl, saveGatewayUrl, loadDeviceCredential, clearDeviceCredential } from "../lib/api/client";
 import { resolveModelBaseUrl, saveModelBaseUrlOverride } from "../lib/offline/model-manager";
 import AccountCard from "../components/AccountCard";
+import SyncCard from "../components/SyncCard";
+import { fullSync } from "../lib/sync/sync";
 
 export default function SettingsPage() {
   const [gateway, setGateway] = useState(loadGatewayUrl());
@@ -53,7 +55,10 @@ export default function SettingsPage() {
         {health && <p className="muted" style={{ marginBottom: 0 }}>{health}</p>}
       </div>
 
-      <AccountCard />
+      {/* 激活成功后自动完整同步一次（fire-and-forget），结果由 SyncCard 展示。 */}
+      <AccountCard onActivated={() => void fullSync()} />
+
+      <SyncCard />
 
       <div className="glass-card">
         <div className="card-title">离线识别模型镜像</div>

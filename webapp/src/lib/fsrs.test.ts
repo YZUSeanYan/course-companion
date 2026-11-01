@@ -7,6 +7,7 @@ function record(): ReviewCardRecord {
   const now = 1_700_000_000_000;
   return {
     id: 1,
+    uid: "test-uid",
     learningItemId: 10,
     itemType: "VOCABULARY",
     courseId: 1,

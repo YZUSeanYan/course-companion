@@ -1,7 +1,7 @@
 // CET6 词表导入：解析规则与 Android GlossaryImporter.kt 逐条对齐。
 // CSV（逗号，limit 2）或 TSV；表头 term/word/单词/词汇 跳过；小写去重；≤5000 词条。
 
-import { db, type LearningItemRecord } from "./db/db";
+import { db, newUid, type LearningItemRecord } from "./db/db";
 import { newCardSchedule } from "./fsrs/scheduler";
 import { sha256Hex } from "./api/client";
 
@@ -61,6 +61,7 @@ export async function importCet6Csv(courseId: number, text: string): Promise<num
   const items: LearningItemRecord[] = entries
     .filter((entry) => !existing.has(entry.term.toLowerCase()))
     .map((entry) => ({
+      uid: newUid(),
       courseId,
       type: "VOCABULARY",
       title: entry.term,
@@ -74,6 +75,7 @@ export async function importCet6Csv(courseId: number, text: string): Promise<num
     }));
   const itemIds = await db.learningItems.bulkAdd(items, { allKeys: true });
   const cards = items.map((item, index) => ({
+    uid: newUid(),
     learningItemId: itemIds[index] as number,
     itemType: "VOCABULARY",
     courseId,
