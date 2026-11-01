@@ -88,6 +88,10 @@ class RecordingService : Service() {
         // Multiple UI/widget start intents are harmless. In particular, never turn an active
         // recording into a service stop just because a stale start PendingIntent was tapped.
         if (recording || finishingRecording) return
+        // startForegroundService 要求 5 秒内进入前台；放在所有可能提前返回的检查之前，
+        // 否则缺少模型/权限等快速失败路径会触发 ForegroundServiceDidNotStartInTime。
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, foregroundNotification(0))
         if (!modelManager.canRecognize() && !preferences.cloudListeningEnabled) {
             RecordingBus.emit(RecorderEvent.Failure("未安装离线识别模型，请下载模型或开启云端听课"))
             stopSelf()
@@ -114,8 +118,6 @@ class RecordingService : Service() {
                 isPaused = false,
             )
         }
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, foregroundNotification(0))
         acquireWakeLock()
         WaterClassWidgetProvider.refresh(this, isRecording = true)
         RecordingBus.emit(RecorderEvent.Status(isRecording = true, elapsedSeconds = 0))
