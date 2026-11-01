@@ -8,6 +8,7 @@ import OverviewPage from './pages/OverviewPage'
 import AccountsPage from './pages/AccountsPage'
 import DevicesPage from './pages/DevicesPage'
 import RequestsPage from './pages/RequestsPage'
+import AppConfigPage from './pages/AppConfigPage'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -67,6 +68,7 @@ export default function App() {
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="devices" element={<DevicesPage />} />
           <Route path="requests" element={<RequestsPage />} />
+          <Route path="app-config" element={<AppConfigPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

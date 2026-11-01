@@ -108,3 +108,11 @@ export type Overview = {
     databaseSizeBytes: number
   }
 }
+
+export type AppConfig = {
+  announcementEnabled: boolean
+  announcementTitle: string
+  announcementBody: string
+  taglines: string[]
+  updatedAt: string | null
+}
