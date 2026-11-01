@@ -98,6 +98,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -171,6 +172,7 @@ import com.classroomradar.app.learning.CloudAudioScreen
 import com.classroomradar.app.learning.CloudListeningSettingsScreen
 import com.classroomradar.app.learning.CourseEntity
 import com.classroomradar.app.learning.OfflineSyncManager
+import com.classroomradar.app.learning.SyncManager
 import com.classroomradar.app.learning.AccountSettingsCard
 import com.classroomradar.app.learning.api.AccountStatusDto
 import com.classroomradar.app.learning.LiveMinutesCard
@@ -252,12 +254,19 @@ class MainActivity : ComponentActivity() {
                 val accountMessage by rememberState(learningPresenter.accountMessage)
                 val isAccountBusy by rememberState(learningPresenter.isAccountBusy)
                 val accountCodeCooldownUntilMs by rememberState(learningPresenter.codeCooldownUntilMs)
+                val accountTrialMode by rememberState(learningPresenter.accountTrialMode)
+                val syncManager = remember { SyncManager.get(context.applicationContext) }
+                val syncBusy by rememberState(syncManager.isSyncing)
+                val syncStatusText by rememberState(syncManager.status)
+                val syncLastAt by rememberState(syncManager.lastSyncAt)
                 val appConfig by rememberState(learningPresenter.appConfig)
                 val cloudTasks by rememberState(cloudAudioPresenter.tasks)
                 val cloudAudioBusy by rememberState(cloudAudioPresenter.busy)
                 val cloudAudioMessage by rememberState(cloudAudioPresenter.message)
                 val voiceListening by rememberState(cloudAudioPresenter.voiceListening)
                 val appPreferences = remember { AppPreferences.get(context) }
+                // 切换页面时保留各页（含二级页）的滚动位置与 rememberSaveable 状态。
+                val pageStateHolder = rememberSaveableStateHolder()
                 var page by remember { mutableStateOf(AppPage.Home) }
                 var pendingAnalysisId by remember { mutableStateOf<Long?>(null) }
                 var showDoubtEditor by remember { mutableStateOf(false) }
@@ -367,6 +376,11 @@ class MainActivity : ComponentActivity() {
                 // 离线课堂的云端补转写：启动时重试上次因配额/网络失败的队列。
                 LaunchedEffect(Unit) {
                     OfflineSyncManager.get(context.applicationContext).retryPending()
+                }
+
+                // 云空间同步：启动时静默同步一次（未激活时服务端会返回 403，静默失败）。
+                LaunchedEffect(Unit) {
+                    syncManager.syncInBackground(silent = true)
                 }
 
                 LaunchedEffect(appConfig) {
@@ -641,6 +655,9 @@ class MainActivity : ComponentActivity() {
                         transitionSpec = { pageTransition() },
                         label = "pageTransition",
                     ) { targetPage ->
+                    // SaveableStateProvider 按页面名保存 LazyColumn 滚动位置：
+                    // 进入二级页再返回时，原页面停在原来的位置而不是顶部。
+                    pageStateHolder.SaveableStateProvider(targetPage.name) {
                     when (targetPage) {
                         AppPage.Home -> HomeScreen(
                             state = dashboard,
@@ -787,6 +804,7 @@ class MainActivity : ComponentActivity() {
                             accountBusy = isAccountBusy,
                             accountMessage = accountMessage,
                             accountCodeCooldownUntilMs = accountCodeCooldownUntilMs,
+                            accountTrialMode = accountTrialMode,
                             onRequestCode = { phone ->
                                 if (!appPreferences.accountNoticeAccepted) {
                                     pendingAccountPhone = phone
@@ -798,7 +816,14 @@ class MainActivity : ComponentActivity() {
                             onActivateAccount = { phone, code ->
                                 learningPresenter.activateAccount(phone, code)
                             },
+                            onApplyTrial = { phone, code, name, nickname ->
+                                learningPresenter.applyTrial(phone, code, name, nickname)
+                            },
                             onRefreshAccount = { learningPresenter.refreshAccount() },
+                            syncBusy = syncBusy,
+                            syncStatus = syncStatusText,
+                            syncLastAt = syncLastAt,
+                            onSyncNow = { syncManager.syncInBackground(silent = false) },
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -877,6 +902,7 @@ class MainActivity : ComponentActivity() {
                             },
                             modifier = Modifier.padding(innerPadding),
                         )
+                    }
                     }
                     }
                 }
@@ -2650,9 +2676,15 @@ private fun SettingsScreen(
     accountBusy: Boolean,
     accountMessage: String?,
     accountCodeCooldownUntilMs: Long,
+    accountTrialMode: Boolean,
     onRequestCode: (String) -> Unit,
     onActivateAccount: (String, String?) -> Unit,
+    onApplyTrial: (String, String, String, String) -> Unit,
     onRefreshAccount: () -> Unit,
+    syncBusy: Boolean,
+    syncStatus: String?,
+    syncLastAt: Long?,
+    onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -2669,9 +2701,19 @@ private fun SettingsScreen(
                 busy = accountBusy,
                 message = accountMessage,
                 codeCooldownUntilMs = accountCodeCooldownUntilMs,
+                trialMode = accountTrialMode,
                 onRequestCode = onRequestCode,
                 onActivate = onActivateAccount,
+                onApplyTrial = onApplyTrial,
                 onRefresh = onRefreshAccount,
+            )
+        }
+        item {
+            CloudSyncCard(
+                busy = syncBusy,
+                status = syncStatus,
+                lastSyncAt = syncLastAt,
+                onSync = onSyncNow,
             )
         }
         // 正式版地址由 BuildConfig 注入生产网关，普通用户无需也不应改地址；
@@ -2754,7 +2796,6 @@ private fun SettingsScreen(
                         Spacer(Modifier.width(10.dp))
                         Text("录音与转写默认只保存在本机。只有主动生成 AI 学习包或开启自动同步时，才会发送你选择的讲义、字幕文本或录音；原始录音默认不上传。", color = LiquidTextSecondary)
                     }
-                    PrivacyLinkRow("隐私说明", onOpenPrivacyPolicy)
                     PrivacyLinkRow("隐私政策", onOpenPrivacyPolicy)
                     GlassDivider()
                     GlassTextAction("打开系统电池优化设置", onOpenBatterySettings, Modifier.fillMaxWidth(), Icons.Outlined.BatteryChargingFull)
@@ -2864,6 +2905,46 @@ private fun PrivacyLinkRow(label: String, onOpen: () -> Unit) {
 }
 
 /** 离线模式卡片：说明 + 三开关 + 离线模型（可展开管理）。 */
+/** 云空间同步：与网页版同一套账号级 LWW 同步（仅学习文本与元数据）。 */
+@Composable
+private fun CloudSyncCard(
+    busy: Boolean,
+    status: String?,
+    lastSyncAt: Long?,
+    onSync: () -> Unit,
+) {
+    GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.Description, null, tint = RadarBrandDeep)
+                Text("云空间同步", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+            }
+            Text(
+                "将课程、学习内容与复习记录同步到你的账号云空间，重装或换设备后可找回。仅同步学习元数据与文本，不包含课堂音频，也不包含任何密钥。",
+                style = MaterialTheme.typography.bodySmall,
+                color = LiquidTextSecondary,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("上次同步", style = MaterialTheme.typography.bodySmall, color = LiquidTextSecondary)
+                Text(
+                    lastSyncAt?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "从未同步",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LiquidTextPrimary,
+                )
+            }
+            GlassTextAction(
+                label = if (busy) "同步中…" else "立即同步",
+                onClick = onSync,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy,
+            )
+            status?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = RadarBrandDeep)
+            }
+        }
+    }
+}
+
 @Composable
 private fun OfflineModeCard(
     state: SettingsState,
