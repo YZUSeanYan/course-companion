@@ -54,6 +54,22 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - 未配置短信时接口返回 503 `sms_not_configured`，官网申请页会明确提示；后台手动添加手机号不受影响。官网 `shuike.seanyan.store/api/trial/*` 由 nginx 反代到 `/v1/trial/*`，保持同源，不需要 CORS。
 - 可调参数：`TRIAL_DEFAULT_AI_PACKS`、`TRIAL_DEFAULT_AUDIO_MINUTES`、`TRIAL_DEFAULT_VALID_MONTHS`、`TRIAL_CODE_TTL_SECONDS`、`TRIAL_CODE_MAX_ATTEMPTS`、`TRIAL_CODE_RESEND_SECONDS`、`TRIAL_CODE_PER_PHONE_HOUR`、`TRIAL_CODE_PER_IP_HOUR`、`TRIAL_APPLY_PER_IP_HOUR`。
 
+## 激活验证码
+
+- `POST /v1/accounts/activate/request-code`（设备 bearer 鉴权）向已在 `access_accounts` 中且状态为 active 的手机号发送 6 位激活验证码：响应 `{"sent":true,"phoneMasked":"139****0997","cooldownSeconds":60}`。手机号未注册返回 404 `account_not_found`，停用/到期沿用 `account_disabled`/`account_expired` 语义。
+- 验证码 5 分钟有效（`ACTIVATION_CODE_TTL_SECONDS`）、最多错误 5 次（`ACTIVATION_CODE_MAX_ATTEMPTS`）、同手机号 60 秒重发冷却（`ACTIVATION_CODE_RESEND_SECONDS`）。数据库只在 `activation_codes` 表保存 HMAC 摘要，并记录申请设备 ID，绝不保存明文。
+- 限流：每手机号 10 次/小时、每设备 20 次/小时、每 IP 30 次/小时（`ACTIVATION_CODE_PER_PHONE_HOUR`、`ACTIVATION_CODE_PER_DEVICE_HOUR`、`ACTIVATION_CODE_PER_IP_HOUR`）。
+- `POST /v1/accounts/activate` 新增可选 `code` 字段（6 位数字）：提供时先校验验证码（不匹配 400 且中文提示剩余次数；过期 400 `code_expired`；超次 429 `too_many_attempts`；校验成功即消耗该码），再执行原有绑定逻辑。
+- `REQUIRE_ACTIVATION_CODE=true` 时，不带 `code` 的激活请求返回 403 `activation_code_required`；默认 `false`，保持与已发布 Android 客户端兼容。开启前先确认新版客户端已带上验证码流程。
+
+## 账号级云空间同步
+
+- `POST /v1/sync/push` 与 `POST /v1/sync/pull`（均要求已激活设备）按账号（不是按设备）同步学习数据，多设备登录同一手机号共享同一份云空间。
+- 同步实体白名单：`courses`、`learning_items`、`review_cards`、`review_logs`、`sessions`、`transcript_lines`、`doubts`、`materials`。数据整包存于 `sync_records.payload`（JSON 文本，单条 ≤128KB），服务端不理解其内部结构。
+- push 请求 `{"changes":[{"entity","clientUid","payload","updatedAt","deleted"}]}`，单批最多 500 条；`clientUid` 必须是 36 位 UUID（服务端统一按小写存储）；冲突按 last-write-wins 处理：库内 `client_updated_at` >= 新 `updatedAt` 时忽略，否则整体替换。响应逐条返回 `accepted` 或 `ignored` 及 `serverTime`（毫秒）。
+- pull 请求 `{"entities":[...]}`，空数组表示全部白名单实体；响应 `{"records":[{"entity","clientUid","payload","updatedAt","deleted"}],"serverTime"}`，只含本账号记录。删除用 `deleted=true` 的记录表示（墓碑），不做物理删除。
+- `/v1/sync/*` 与其他接口一样只写 `api_requests` 元数据审计（方法、路由、状态码、耗时），不记录 payload 内容，日志中也不得输出任何 payload 正文。
+
 ## Lecsync 全功能统一网关
 
 `LECSYNC_API_KEY` 仅由服务端环境变量/密钥服务提供，不进入 APK。所有官方 REST、Realtime 和 Voice Typing WebSocket 都经 `/v2/lecsync/*` 转发，APP 只使用匿名设备 token，不获得上游 key、一次性 socket token、上传/录音签名 URL 或 Webhook secret。

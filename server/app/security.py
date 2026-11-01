@@ -31,6 +31,14 @@ def sms_code_digest(phone: str, code: str, pepper: str) -> str:
     ).hexdigest()
 
 
+def activation_code_digest(phone: str, code: str, pepper: str) -> str:
+    return hmac.new(
+        pepper.encode("utf-8"),
+        ("activation-code:" + phone + ":" + code).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def request_ip_digest(ip: str, pepper: str) -> str:
     return hmac.new(
         pepper.encode("utf-8"), ("request-ip:" + ip).encode("utf-8"), hashlib.sha256
