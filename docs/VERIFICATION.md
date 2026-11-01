@@ -60,6 +60,13 @@
 - 本地端到端冒烟（uvicorn + vite preview + 内置浏览器）：设备注册、网关连接测试、手机号激活（脱敏号/有效期/四项额度展示）、课程创建（IndexedDB 持久化）、课程详情与复习页空状态、课堂页截图人工检查无控制台级布局问题；实时链路以真实 WebSocket 握手验证（直连网关与经代理均通过子协议鉴权、收到网关结构化 `session.error NOT_CONFIGURED`），未激活设备的 WS 握手拒绝路径也已验证。
 - 验收边界：ZCode 内置浏览器不支持任何 WebSocket（公共回显服务同样失败），浏览器端实时转写的**真机/真实浏览器**验收待在正式 Chrome/Edge 或移动端完成；未验证真实模型质量、CORS 生产部署与多浏览器兼容。部署与发版仍由项目负责人执行。
 
+## 网页版二期与生产部署（2026-11-01）
+
+- 二期三个 PR 合并：#13 实时纪要（digest）+ PCM→WAV 本地存档 + 云端补转写（`/v2/lecsync/audio/jobs`，分段毫秒口径与 Android `LecsyncModels` 一致）；#14 CET6 词库导入（`GlossaryImporter` 逐条对齐，含 Kotlin/JS split 语义差异处理）；#15 浏览器离线识别（sherpa-onnx WASM v1.13.7 流式中英 Zipformer SIMD：模型管理器镜像下载+SHA-256 逐次复验+Cache API+镜像地址覆盖，官方 demo 同款解码循环，课堂设置云/离线切换，离线免额度）。**webapp 30 项 vitest 通过**。
+- 生产部署（用户明确指令下执行）：网关 R14 由并行会话于 14:21 部署（`/opt/zhixi-gateway-20261101-r14`，含子协议鉴权与 CORS；`/health` 200、`providerConfigured=true`）；**网页版发布到 `https://zhixi.seanyan.store/web/`**（nginx `location /web/` alias `/opt/zhixi-webapp/current/`，同源直连 API/WS，无需 CORS；回滚=还原 `/root/zhixi-gateway-backup-*.conf` + 移除该 location）。
+- 生产冒烟（临时账号 139****0998，验后即删）：设备注册 201 → 激活 200 → **经 nginx TLS 的 WSS 子协议握手升级 101 → `session.ready` → `session.stop` → `session.ended`** 全链路通过；`/web/` 与资源 200；激活/WS 用的设备 token 已随临时账号删除。
+- 待办：离线识别镜像发布（上游 182MB 包在本机网络持续被截断，续传中；完成后按 `webapp/README.md` 上传 4 文件并登记 .wasm/.data 哈希）；真实浏览器（Chrome/Edge）人工验收；R14 中 PR #11 的 4012 关闭码随本次一并上线。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
