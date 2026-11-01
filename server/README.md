@@ -48,7 +48,9 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - `POST /v1/trial/request-code` 接收手机号，校验格式、是否已注册、手机号/IP 限流和 60 秒重发冷却后，通过阿里云短信发送 6 位验证码。
 - `POST /v1/trial/apply` 校验验证码、姓名、昵称和同意标记，成功后自动创建账号：默认每天 5 个 AI 学习包、30 分钟云端音频，翻译字符/文档解析/设备数沿用 `ACCOUNT_DEFAULT_*`，有效期按北京时间自然月 +2 个月。姓名写入账号备注，昵称写入显示名，管理后台立即可见。
 - 验证码 5 分钟有效、最多错误 5 次，单次使用；数据库只保存 HMAC 摘要，不保存明文。手机号仍使用 Fernet 密文保存。
-- 阿里云短信配置：`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`、`ALIYUN_SMS_REGION`（默认 `cn-hangzhou`）。模板变量名必须是 `code`，例如“您的验证码是 ${code}，5 分钟内有效”。AccessKey 只需 `dysms:SendSms` 权限。
+- 阿里云号码认证（PNVS）短信认证配置：`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`、`ALIYUN_SMS_REGION`（默认 `cn-hangzhou`）。服务端调用 `https://dypnsapi.aliyuncs.com/` 的 `SendSmsVerifyCode`，不是独立的短信服务（Dysms）。
+- 必须使用 PNVS 控制台“短信认证参数配置”中审核通过的系统赠送签名和模板。当前生产使用签名 `恒创联众`、登录/注册模板 `100001`，模板变量为 `code` 和 `min`。服务端自行生成 6 位验证码并以具体值填入 `TemplateParam`，阿里云只负责发送，验证码仍由本站按 HMAC 摘要校验；AccessKey 只需具备 PNVS 的 `SendSmsVerifyCode` 权限。
+- 未配置时 `/v1/trial/status` 返回 `smsConfigured=false`，申请页禁用发送；不要用未开通的 Dysms 签名/模板代替。
 - 未配置短信时接口返回 503 `sms_not_configured`，官网申请页会明确提示；后台手动添加手机号不受影响。官网 `shuike.seanyan.store/api/trial/*` 由 nginx 反代到 `/v1/trial/*`，保持同源，不需要 CORS。
 - 可调参数：`TRIAL_DEFAULT_AI_PACKS`、`TRIAL_DEFAULT_AUDIO_MINUTES`、`TRIAL_DEFAULT_VALID_MONTHS`、`TRIAL_CODE_TTL_SECONDS`、`TRIAL_CODE_MAX_ATTEMPTS`、`TRIAL_CODE_RESEND_SECONDS`、`TRIAL_CODE_PER_PHONE_HOUR`、`TRIAL_CODE_PER_IP_HOUR`、`TRIAL_APPLY_PER_IP_HOUR`。
 

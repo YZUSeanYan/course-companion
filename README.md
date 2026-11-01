@@ -92,7 +92,7 @@ npm run build
 
 - 地址：`https://zhixi.seanyan.store`。APP 的“设置 → AI 服务连接”填此域名即可，不填 Lecsync 地址或任何密钥。
 - 运营后台：`https://zhixi.seanyan.store/admin/`，使用服务器 `/opt/zhixi-gateway/.env` 中的 `ADMIN_PASSWORD` 登录；后台可添加同学手机号并配置每日额度与有效期。
-- 官网申请：`https://shuike.seanyan.store/#/apply`，验证码由阿里云短信发送；需要在服务器 `.env` 配置 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`。未配置时申请页会明确提示“短信服务尚未配置”，后台手动添加不受影响。
+- 官网申请：`https://shuike.seanyan.store/#/apply`，验证码由阿里云号码认证（PNVS）短信认证发送；需要在服务器 `.env` 配置 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`。生产签名使用系统赠送的 `恒创联众`，模板使用登录/注册模板 `100001`。未配置时申请页会明确提示“短信服务尚未配置”，后台手动添加不受影响。
 - 服务端以 systemd `zhixi-gateway` 运行，仅监听 `127.0.0.1:8766` 并由 nginx 提供 HTTPS；`/health` 返回 200，`/admin/` 由 nginx 代理到同一网关。
 - Lecsync 密钥只保存在服务器 `/opt/zhixi-gateway/.env`（权限 600），不进入 APK。DeepSeek/Kimi/MiMo 与视觉模型需另行配置，AI 学习包和视觉功能不能仅凭 Lecsync 地址推断可用。
 - 手机号在 `access_accounts` 表中以 Fernet 密文保存，查找使用 HMAC；`ACCOUNT_ENCRYPTION_KEY`、`ADMIN_PASSWORD`、`ADMIN_SESSION_SECRET` 只从服务器环境变量读取，不得写入源码或 APK。`REQUIRE_ACCOUNT_ACTIVATION=true` 为正式试用状态；紧急回退可设为 `false` 恢复旧的按设备默认额度。
@@ -110,6 +110,6 @@ npm run build
 
 - Android：78 项 JVM 单测，覆盖课堂、导入、DTO、FSRS、CET6 词表、地址校验、术语编辑格式、FastAPI 错误解析、文本 PDF 视觉需求、学习列表复合 key、学习内容分类与复习分类统计、试用手机号规范化与账号 DTO、模型下载进度/镜像回退与完整性校验；Room 2→8 迁移保留历史与复习卡。
 - 设备：24 项测试，覆盖中英文 ASR、模型隔离与回收站、暂停/继续、学习包后台任务轮询/失败/鉴权恢复、本地重复学习包去重、试用额度激活与错误码、Realtime 消息和云端失败→本机识别回退。
-- 服务端：101 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、管理后台登录/CSRF/账号 CRUD/统计、请求日志、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径。
+- 服务端：103 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、PNVS `SendSmsVerifyCode` 参数与错误、管理后台登录/CSRF/账号 CRUD/统计、请求日志、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径。
 
 完整结果与未完成项见 `docs/VERIFICATION.md`，AI 数据流见 `docs/AI_IMPLEMENTATION.md`。

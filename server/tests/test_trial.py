@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import secrets
 from dataclasses import replace
 from datetime import date
+from urllib.parse import parse_qs
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.security import phone_digest, sms_code_digest
+from app.sms import SMS_ENDPOINT, AliyunSmsSender, SmsDeliveryError
 from app.trial_routes import _add_months
 
 SMS_ACCESS_KEY_ID = secrets.token_hex(8)
@@ -202,3 +207,53 @@ def test_admin_sees_self_service_name_and_nickname(settings):
     assert "李同学" in account["note"]
     assert account["limits"]["aiPacksPerDay"] == 5
     assert account["limits"]["audioMinutesPerDay"] == 30
+
+
+def test_pnvs_sender_uses_send_sms_verify_code(settings):
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured.update(
+            {
+                key: values[0]
+                for key, values in parse_qs(request.content.decode()).items()
+            }
+        )
+        return httpx.Response(
+            200, json={"Code": "OK", "Success": True, "Model": {"BizId": "test"}}
+        )
+
+    sender = AliyunSmsSender(
+        trial_settings(settings), transport=httpx.MockTransport(handler)
+    )
+    asyncio.run(sender.send_code("13900000107", "246810"))
+
+    assert captured["url"] == SMS_ENDPOINT
+    assert captured["Action"] == "SendSmsVerifyCode"
+    assert captured["PhoneNumber"] == "13900000107"
+    assert captured["SignName"] == "test-sign"
+    assert captured["TemplateCode"] == "SMS_TEST"
+    assert json.loads(captured["TemplateParam"]) == {
+        "code": "246810",
+        "min": "5",
+    }
+    assert captured["CodeLength"] == "6"
+    assert captured["ValidTime"] == "300"
+    assert captured["Interval"] == "60"
+    assert captured["Signature"]
+
+
+def test_pnvs_sender_surfaces_provider_error(settings):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"Code": "isv.BUSINESS_LIMIT_CONTROL", "Success": False},
+        )
+
+    sender = AliyunSmsSender(
+        trial_settings(settings), transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(SmsDeliveryError) as error:
+        asyncio.run(sender.send_code("13900000108", "246810"))
+    assert error.value.provider_code == "isv.BUSINESS_LIMIT_CONTROL"
