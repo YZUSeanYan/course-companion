@@ -18,6 +18,7 @@ from .accounts import (
     normalize_phone,
     resolve_quota_subject,
 )
+from .activation import register_activation_routes, verify_activation_code
 from .auth import activated_device, device_identity
 from .config import ProviderNotConfigured, Settings
 from .db import (
@@ -44,6 +45,7 @@ from .schemas import (
     LearningPackage,
 )
 from .security import new_device_token, phone_digest, token_digest
+from .sync_routes import register_sync_routes
 from .v2_routes import register_v2_routes
 from .v2_documents import register_document_routes
 
@@ -89,6 +91,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_admin_routes(app, settings)
     from .trial_routes import register_trial_routes
     register_trial_routes(app, settings)
+    register_activation_routes(app, settings)
+    register_sync_routes(app, settings)
     app.state.register_limiter = SlidingWindowRateLimiter(
         settings.register_rate_limit, settings.register_rate_window_seconds
     )
@@ -203,6 +207,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             ) from exc
+        if payload.code is None and settings.require_activation_code:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="该账号已启用验证码保护，请先获取短信验证码后再激活",
+                headers={"X-Zhixi-Error-Code": "activation_code_required"},
+            )
         db: Database = app.state.db
         account = db.account_by_phone_hash(phone_digest(phone, settings.token_pepper))
         if account is None:
@@ -216,6 +226,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise AccountDisabled()
         if state == "expired":
             raise AccountExpired(str(account["valid_until"]))
+        if payload.code is not None:
+            verify_activation_code(db, settings, phone, payload.code)
         db.bind_device(str(account["id"]), device_id, int(account["max_devices"]))
         request.state.account_id = str(account["id"])
         return AccountStatusResponse(
