@@ -1,6 +1,40 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ModelManager, verifyAsset, type ModelAsset, type ModelStore } from "./model-manager";
+import {
+  DEFAULT_MODEL_BASE_URL,
+  ModelManager,
+  OFFLINE_ASR_MODEL,
+  resolveModelBaseUrl,
+  saveModelBaseUrlOverride,
+  verifyAsset,
+  type ModelAsset,
+  type ModelStore,
+} from "./model-manager";
 import { OfflineEngine, type OfflineSegment, type SherpaRecognizer } from "./engine";
+
+describe("resolveModelBaseUrl（设置页回归：禁止递归爆栈）", () => {
+  beforeEach(() => {
+    // node 环境无 localStorage，用内存桩（与浏览器同接口）。
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, String(value)),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => void store.clear(),
+    });
+  });
+
+  it("无覆盖时返回默认镜像常量（不递归）", () => {
+    expect(resolveModelBaseUrl()).toBe(DEFAULT_MODEL_BASE_URL);
+    expect(OFFLINE_ASR_MODEL.baseUrl).toBe(DEFAULT_MODEL_BASE_URL);
+  });
+
+  it("有覆盖时返回覆盖值（保留尾部斜杠）", () => {
+    saveModelBaseUrlOverride("http://127.0.0.1:8901");
+    expect(resolveModelBaseUrl()).toBe("http://127.0.0.1:8901/");
+    saveModelBaseUrlOverride("");
+    expect(resolveModelBaseUrl()).toBe(DEFAULT_MODEL_BASE_URL);
+  });
+});
 
 class MemoryStore implements ModelStore {
   private entries = new Map<string, Response>();
