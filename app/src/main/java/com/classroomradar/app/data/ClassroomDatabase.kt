@@ -178,7 +178,7 @@ interface ClassroomDao {
         LiveMinutesEntity::class,
         CloudTaskEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class ClassroomDatabase : RoomDatabase() {
@@ -371,13 +371,20 @@ abstract class ClassroomDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Official usage.update carries discardedSeconds alongside effectiveSeconds.
+                db.execSQL("ALTER TABLE cloud_tasks ADD COLUMN discardedSeconds REAL NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): ClassroomDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClassroomDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
                 .also { instance = it }
         }

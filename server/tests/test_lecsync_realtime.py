@@ -80,21 +80,25 @@ def test_realtime_forwards_all_official_event_families(monkeypatch):
         app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
         app.state.lecsync_connection_factory = Connection
         with TestClient(app) as client:
-            with client.websocket_connect("/v2/lecsync/realtime", headers=auth_headers(client)) as device:
-                device.send_json({"type": "configure", "config": {
-                    "transcribe": {"languages": ["en", "zh"], "strict": False, "identifyLanguage": True, "displayMode": "sentence", "speakers": True},
-                    "translate": {"languages": ["en", "zh"]},
-                    "glossary": {"terms": ["lathe"], "pairs": [{"source": "lathe", "target": "车床"}], "context": "Engineering"},
-                    "aiEnhance": True, "digest": True, "store": False, "region": "us",
-                }})
-                while True:
-                    event = device.receive_json()
-                    events.append(event)
-                    if event["type"] == "session.ended":
-                        break
+                with client.websocket_connect("/v2/lecsync/realtime", headers=auth_headers(client)) as device:
+                    device.send_json({"type": "configure", "config": {
+                        "transcribe": {"languages": ["en", "zh"], "strict": False, "identifyLanguage": True, "displayMode": "sentence", "speakers": True},
+                        "translate": {"languages": ["en", "zh"]},
+                        "glossary": {"terms": ["lathe"], "pairs": [{"source": "lathe", "target": "车床"}], "context": "Engineering"},
+                        "aiEnhance": True, "digest": True, "store": False, "region": "us",
+                    }})
+                    device.send_json({"type": "session.finalize"})
+                    while True:
+                        event = device.receive_json()
+                        events.append(event)
+                        if event["type"] == "session.ended":
+                            break
     asyncio.run(run())
     assert {event["type"] for event in events} == {"session.ready", "transcript.partial", "transcript.final", "translation.final", "digest.update", "usage.update", "session.pong", "session.ended"}
     assert sum(event["type"] == "translation.final" for event in events) == 2
+    usage = next(event for event in events if event["type"] == "usage.update")
+    assert usage["effectiveSeconds"] == 1.0 and usage["discardedSeconds"] == 0
+    assert {"type": "session.finalize"} in socket.sent
 
 
 def test_voice_typing_websocket_text_and_no_replay(monkeypatch):
@@ -129,6 +133,62 @@ def test_voice_typing_websocket_text_and_no_replay(monkeypatch):
                 result = device.receive_json()
                 assert result["text"] == "你好"
                 assert result["usedModel"] is True
+    asyncio.run(run())
+
+
+def test_realtime_accepts_browser_subprotocol_auth(monkeypatch):
+    """浏览器 WebSocket 无法设置 Authorization 头：允许 Sec-WebSocket-Protocol: bearer, <token>。"""
+    socket = FakeSocket([json.dumps({"type": "session.ready", "sessionId": "session-web", "store": False})])
+    events = []
+
+    class Connection:
+        def __init__(self, *args, **kwargs):
+            self.session_id = "session-web"
+
+        async def __aenter__(self):
+            self.events = socket.events
+            self.send_audio = socket.send_audio
+            self.control = socket.control
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    async def run():
+        from app.main import create_app
+        from fastapi.testclient import TestClient
+        app = create_app(make_settings())
+        app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
+        app.state.lecsync_connection_factory = Connection
+        with TestClient(app) as client:
+            token = auth_headers(client)["Authorization"].split(" ", 1)[1]
+            with client.websocket_connect(
+                "/v2/lecsync/realtime",
+                headers={"sec-websocket-protocol": f"bearer, {token}"},
+            ) as device:
+                device.send_json({"type": "configure", "config": {"transcribe": {"languages": ["en", "zh"]}}})
+                events.append(device.receive_json())
+    asyncio.run(run())
+    assert events == [{"type": "session.ready", "sessionId": "session-web", "store": False}]
+
+
+def test_realtime_rejects_malformed_subprotocol():
+    """非 bearer,<token> 形式的子协议不能通过鉴权，连接以 4401 关闭。"""
+    from fastapi import WebSocketDisconnect
+
+    async def run():
+        from app.main import create_app
+        from fastapi.testclient import TestClient
+        app = create_app(make_settings())
+        app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
+        with TestClient(app) as client:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                with client.websocket_connect(
+                    "/v2/lecsync/realtime",
+                    headers={"sec-websocket-protocol": "bearer"},
+                ):
+                    pass
+            assert excinfo.value.code == 4401
     asyncio.run(run())
 
 

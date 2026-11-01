@@ -9,6 +9,8 @@ sealed interface RecorderEvent {
     data class PartialTranscript(val text: String) : RecorderEvent
     data class Transcript(val lineId: Long, val text: String, val timestampMillis: Long) : RecorderEvent
     data class LiveMinutes(val contentJson: String) : RecorderEvent
+    /** Live cloud latency in ms, comparable with the official 0.28s first-word and ~88ms translation figures. */
+    data class CloudMetrics(val recognitionLatencyMs: Long, val translationLatencyMs: Long?) : RecorderEvent
     data class Failure(val message: String) : RecorderEvent
 }
 

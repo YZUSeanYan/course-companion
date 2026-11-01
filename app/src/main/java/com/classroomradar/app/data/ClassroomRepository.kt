@@ -45,10 +45,10 @@ class ClassroomRepository private constructor(
 
     fun observeLiveMinutes(sessionId: Long) = cloudDao.observeMinutes(sessionId)
 
-    fun saveLiveUsage(sessionId: Long, seconds: Double, cents: Double?) {
+    fun saveLiveUsage(sessionId: Long, seconds: Double, cents: Double?, discardedSeconds: Double = 0.0) {
         val taskId = "realtime-$sessionId"
         val now = System.currentTimeMillis()
-        cloudDao.upsertTask(CloudTaskEntity(taskId = taskId, sessionId = sessionId, kind = "REALTIME", status = "LIVE", effectiveSeconds = seconds, accruedCents = cents, createdAtMillis = now, updatedAtMillis = now))
+        cloudDao.upsertTask(CloudTaskEntity(taskId = taskId, sessionId = sessionId, kind = "REALTIME", status = "LIVE", effectiveSeconds = seconds, discardedSeconds = discardedSeconds, accruedCents = cents, createdAtMillis = now, updatedAtMillis = now))
     }
 
     fun saveCloudTask(task: CloudTaskEntity) = cloudDao.upsertTask(task)

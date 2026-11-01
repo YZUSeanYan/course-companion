@@ -136,6 +136,34 @@ class RoomMigrationTest {
         }
     }
 
+    @Test
+    fun migration7To9KeepsCloudTasksAndAddsDiscardedSeconds() {
+        helper.createDatabase(TEST_DATABASE, 7).apply {
+            execSQL("INSERT INTO sessions (id, startedAtMillis, title) VALUES (5, 1, '用量课堂')")
+            close()
+        }
+        helper.runMigrationsAndValidate(TEST_DATABASE, 9, true, ClassroomDatabase.MIGRATION_7_8, ClassroomDatabase.MIGRATION_8_9).apply {
+            execSQL(
+                "INSERT INTO cloud_tasks (taskId, sessionId, kind, status, progress, resultText, resultJson, effectiveSeconds, discardedSeconds, createdAtMillis, updatedAtMillis) " +
+                    "VALUES ('realtime-5', 5, 'REALTIME', 'LIVE', 0, '', '', 12.5, 0.25, 1, 1)",
+            )
+            query("SELECT effectiveSeconds, discardedSeconds FROM cloud_tasks WHERE taskId = 'realtime-5'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.getDouble(0) == 12.5)
+                assertTrue(cursor.getDouble(1) == 0.25)
+            }
+            execSQL(
+                "INSERT INTO cloud_tasks (taskId, sessionId, kind, status, progress, resultText, resultJson, effectiveSeconds, createdAtMillis, updatedAtMillis) " +
+                    "VALUES ('realtime-legacy', 5, 'REALTIME', 'LIVE', 0, '', '', 3.0, 1, 1)",
+            )
+            query("SELECT discardedSeconds FROM cloud_tasks WHERE taskId = 'realtime-legacy'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.getDouble(0) == 0.0)
+            }
+            close()
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "course-companion-migration-test"
     }

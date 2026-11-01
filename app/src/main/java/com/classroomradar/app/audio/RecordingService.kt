@@ -216,6 +216,7 @@ class RecordingService : Service() {
         releaseWakeLock()
         RecordingBus.emit(RecorderEvent.Status(isRecording = true, elapsedSeconds = elapsedSeconds(), isPaused = true))
         updateForegroundNotification()
+        engine?.finalizePending()
         worker.execute { recorder?.runCatching { stop() } }
     }
 
