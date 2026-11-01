@@ -107,8 +107,9 @@ export default function Download() {
                   也可以主动开启云端听课。
                 </div>
                 <p className="small mt-4">
-                  V2.0.4 新增手机号试用额度与运营后台：AI 学习包、翻译、云端听课和文档解析需在「设置 → 试用额度」激活手机号；
-                  额度按每日次数/时长和有效期管理，多台设备共用。离线听课和本机识别不受影响。
+                  AI 学习包、翻译、云端听课和文档解析需要激活手机号试用额度；App 与网页版都支持激活，
+                  网页版还能直接自助申请，一次短信完成。额度按每日次数/时长和有效期管理，多台设备共用；
+                  离线听课和本机识别不需要账号。
                 </p>
                 <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2">
                   <Link to="/apply" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>试用额度怎么获得 →</Link>
