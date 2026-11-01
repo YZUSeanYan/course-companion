@@ -268,7 +268,7 @@ const SECTIONS = [
   },
   {
     label: 'AI TRANSLATION',
-    title: '外教讲到哪，中文就跟到哪',
+    title: '老师讲到哪，中文就跟到哪',
     body: '转写定稿后自动进入独立翻译队列，中英双语对照展示。网络波动时翻译排队等待，录音与原文落库照常进行——你不会因为一次断网丢掉课堂内容，也不会为了等翻译停下听课。',
     points: ['原文优先落库，译文随后补齐', '翻译失败自动重试，不打断录音', '中英双语对照回看'],
     illustration: <TranslateIllustration />,
