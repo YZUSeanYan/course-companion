@@ -1,4 +1,6 @@
 // 设置页：AI 服务地址、账号额度、设备身份与隐私说明。
+// 网页端形态：桌面两栏——左栏是「当前状态」（额度 + 同步），右栏是「配置项」（服务地址 / 模型镜像 /
+// 设备身份 / 关于）。设置项不再排成一条长列表。
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -36,75 +38,96 @@ export default function SettingsPage() {
   };
 
   return (
-    <main>
-      <h1 className="page-title">设置</h1>
-      <div className="glass-card">
-        <div className="card-title">AI 服务连接</div>
-        <p className="card-desc">学习包、翻译、文档解析与云端听课都通过该网关完成；密钥只保存在服务端，浏览器不保存任何 API Key。</p>
-        <input
-          className="text-input"
-          value={gateway}
-          onChange={(event) => setGateway(event.target.value)}
-          placeholder="https://zhixi.example.com"
-        />
-        <div className="btn-row">
-          <button className="btn btn-primary" onClick={() => void testConnection()}>
-            保存并测试
-          </button>
-        </div>
-        {health && <p className="muted" style={{ marginBottom: 0 }}>{health}</p>}
-      </div>
-
-      {/* 激活成功后自动完整同步一次（fire-and-forget），结果由 SyncCard 展示。 */}
-      <AccountCard onActivated={() => void fullSync()} />
-
-      <SyncCard />
-
-      <div className="glass-card">
-        <div className="card-title">离线识别模型镜像</div>
-        <p className="card-desc">浏览器离线识别的 WASM 产物（约 200MB，一次性下载后缓存）。本地联调或内网镜像可在此覆盖根地址。</p>
-        <input
-          className="text-input"
-          value={modelBase}
-          onChange={(event) => setModelBase(event.target.value)}
-          placeholder="https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/"
-        />
-        <div className="btn-row">
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => {
-              saveModelBaseUrlOverride(modelBase);
-              setHealth("模型镜像地址已保存");
-            }}
-          >
-            保存镜像地址
-          </button>
+    <>
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">Settings</p>
+          <h2>账号与本地配置</h2>
+          <p>账号额度、云同步与本地设备身份。密钥只保存在服务端，浏览器不保存任何 API Key。</p>
         </div>
       </div>
 
-      <div className="glass-card">
-        <div className="card-title">设备身份</div>
-        <p className="card-desc">匿名设备令牌仅保存在本浏览器；服务端只存 HMAC 摘要，无法找回，清除后会自动重新注册。</p>
-        <div className="list-item">
-          <span className="muted">设备 ID</span>
-          <span style={{ fontFamily: "monospace", fontSize: 12 }}>{deviceId ?? "未注册"}</span>
-        </div>
-        <div className="btn-row">
-          <button className="btn btn-sm btn-danger" onClick={resetDevice}>
-            清除设备身份
-          </button>
-        </div>
-      </div>
+      <div className="cols cols--workbench">
+        {/* ── 左栏：当前状态 ── */}
+        <div className="cols__main">
+          {/* 激活成功后自动完整同步一次（fire-and-forget），结果由 SyncCard 展示。 */}
+          <AccountCard onActivated={() => void fullSync()} />
+          <SyncCard />
 
-      <div className="glass-card">
-        <div className="card-title">关于与隐私</div>
-        <p className="muted">知习网页版 v0.1 · 云端听课 + AI 学习包 + FSRS 复习。浏览器离线识别（sherpa-onnx WASM）规划于二期。</p>
-        <div className="btn-row">
-          <Link className="btn btn-sm" to="/privacy">
-            隐私政策
-          </Link>
+          <div className="glass-card">
+            <div className="card-title">设备身份</div>
+            <p className="card-desc">匿名设备令牌仅保存在本浏览器；服务端只存 HMAC 摘要，无法找回，清除后会自动重新注册。</p>
+            <div className="list-item">
+              <span className="muted">设备 ID</span>
+              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}>
+                {deviceId ?? "未注册"}
+              </span>
+            </div>
+            <div className="btn-row">
+              <button className="btn btn-sm btn-danger" onClick={resetDevice}>
+                清除设备身份
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── 右栏：配置项 ── */}
+        <div className="cols__side cols__side--sticky">
+          <div className="glass-card">
+            <div className="card-title">AI 服务连接</div>
+            <p className="card-desc">学习包、翻译、文档解析与云端听课都通过该网关完成。</p>
+            <label className="field-label">网关地址</label>
+            <input
+              className="text-input"
+              value={gateway}
+              onChange={(event) => setGateway(event.target.value)}
+              placeholder="https://zhixi.example.com"
+            />
+            <div className="btn-row">
+              <button className="btn btn-primary" onClick={() => void testConnection()}>
+                保存并测试
+              </button>
+            </div>
+            {health && <p className="muted" style={{ marginBottom: 0 }}>{health}</p>}
+          </div>
+
+          <div className="glass-card">
+            <div className="card-title">离线识别模型镜像</div>
+            <p className="card-desc">浏览器离线识别的 WASM 产物（约 200MB，一次性下载后缓存）。本地联调或内网镜像可在此覆盖根地址。</p>
+            <input
+              className="text-input"
+              value={modelBase}
+              onChange={(event) => setModelBase(event.target.value)}
+              placeholder="https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/"
+            />
+            <div className="btn-row">
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => {
+                  saveModelBaseUrlOverride(modelBase);
+                  setHealth("模型镜像地址已保存");
+                }}
+              >
+                保存镜像地址
+              </button>
+            </div>
+          </div>
+
+          <div className="glass-card">
+            <div className="card-title">关于与隐私</div>
+            <p className="muted" style={{ marginBottom: 10 }}>
+              知习网页版 v0.1 · 云端听课 + AI 学习包 + FSRS 复习。
+              <br />
+              浏览器离线识别（sherpa-onnx WASM）规划于二期。
+            </p>
+            <div className="btn-row" style={{ marginTop: 0 }}>
+              <Link className="btn btn-sm" to="/privacy">
+                隐私政策
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
-    </main>
+    </>
   );
 }
