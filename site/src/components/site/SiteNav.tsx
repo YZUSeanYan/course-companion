@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router'
 import LogoMark from './LogoMark'
+import { WEB_APP_URL } from '../../lib/release'
 
 const LINKS = [
   { to: '/', label: '首页' },
@@ -49,6 +50,7 @@ export default function SiteNav() {
               {l.label}
             </NavLink>
           ))}
+          <a href={WEB_APP_URL} className="nav-link">网页版</a>
         </nav>
 
         <div className="hidden md:block">
@@ -89,6 +91,7 @@ export default function SiteNav() {
                 {l.label}
               </NavLink>
             ))}
+            <a href={WEB_APP_URL} className="nav-link" onClick={() => setOpen(false)}>网页版</a>
             <Link to="/download" className="btn btn-primary mt-2 justify-center" onClick={() => setOpen(false)}>
               下载 App
             </Link>

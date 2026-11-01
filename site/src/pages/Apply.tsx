@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
-import { CURRENT_RELEASE } from '../lib/release'
+import { CURRENT_RELEASE, WEB_APP_URL } from '../lib/release'
 
 type TrialLimits = {
   aiPacksPerDay: number
@@ -227,15 +227,19 @@ export default function Apply() {
                     </p>
                   </div>
                   <div className="mt-5 flex flex-col gap-2">
-                    <Link to="/download" className="btn btn-primary justify-center">
-                      下载知习 v{CURRENT_RELEASE.version}
+                    <a href={WEB_APP_URL} className="btn btn-primary justify-center">
+                      第 1 步 · 打开网页版直接使用
+                    </a>
+                    <Link to="/download" className="btn btn-ghost justify-center">
+                      或下载知习 App v{CURRENT_RELEASE.version}
                     </Link>
                     <Link to="/features" className="btn btn-ghost justify-center">
                       查看使用说明
                     </Link>
                   </div>
                   <p className="body-2 mt-5" style={{ fontSize: 12, lineHeight: 1.8 }}>
-                    安装后打开「设置 → 试用额度」，输入刚才的手机号并完成激活。一个手机号可在多台设备上共用同一份额度。
+                    网页版：在电脑或手机浏览器打开，进入「设置 → 试用额度」用刚才的手机号激活即可，免安装。
+                    App：安装后同样在「设置 → 试用额度」激活。一个手机号可在多台设备与网页版共用同一份额度。
                   </p>
                 </div>
               ) : (

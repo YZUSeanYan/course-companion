@@ -3,7 +3,7 @@ import Reveal from '../components/site/Reveal'
 import Waveform from '../components/site/Waveform'
 import PhoneMockup from '../components/site/PhoneMockup'
 import ClassroomDemo from '../components/site/ClassroomDemo'
-import { CURRENT_RELEASE } from '../lib/release'
+import { CURRENT_RELEASE, WEB_APP_URL } from '../lib/release'
 
 /* ---------- 内联 SVG 图标 ---------- */
 const IconEar = (
@@ -106,6 +106,10 @@ export default function Home() {
                   获取知习
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
                 </Link>
+                <a href={WEB_APP_URL} className="btn btn-ghost">
+                  直接打开网页版
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 3h7v7M13 3 7.5 8.5M9 13H3V7"/></svg>
+                </a>
                 <a href="#how" className="btn btn-ghost">看看它怎么工作</a>
               </div>
             </Reveal>
@@ -236,6 +240,9 @@ export default function Home() {
               <Link to="/apply" className="inline-block mt-2" style={{ fontSize: 13, fontWeight: 800, color: 'var(--brand-deep)' }}>
                 没有试用名额？申请试用 →
               </Link>
+              <a href={WEB_APP_URL} className="inline-block mt-2 ml-5" style={{ fontSize: 13, fontWeight: 800, color: 'var(--brand-deep)' }}>
+                不想装 App？直接用网页版 →
+              </a>
             </div>
           </Reveal>
         </div>
@@ -319,6 +326,9 @@ export default function Home() {
                 前往下载页
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
               </Link>
+              <a href={WEB_APP_URL} className="btn btn-ghost" style={{ background: 'rgba(255,255,255,.14)', borderColor: 'rgba(255,255,255,.4)', color: '#fff', fontWeight: 800 }}>
+                打开网页版（免安装）
+              </a>
             </div>
           </Reveal>
         </div>
