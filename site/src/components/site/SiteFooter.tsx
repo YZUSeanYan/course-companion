@@ -17,7 +17,6 @@ export default function SiteFooter() {
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <a href={WEB_APP_URL} className="btn btn--ghost btn--sm">打开网页版</a>
-            <Link to="/apply" className="btn btn--ghost btn--sm">申请试用</Link>
           </div>
           <p className="tiny mt-5" style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>
             V{CURRENT_RELEASE.version} · LISTEN · LEARN · REVIEW · LOCAL-FIRST
@@ -30,7 +29,6 @@ export default function SiteFooter() {
             <li><Link className="footer-link" to="/features">功能介绍</Link></li>
             <li><Link className="footer-link" to="/download">下载与安装</Link></li>
             <li><a className="footer-link" href={WEB_APP_URL}>网页版</a></li>
-            <li><Link className="footer-link" to="/apply">试用额度</Link></li>
           </ul>
         </div>
 

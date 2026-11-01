@@ -8,7 +8,6 @@ const LINKS = [
   { to: '/', label: '首页' },
   { to: '/features', label: '功能' },
   { to: '/download', label: '下载' },
-  { to: '/apply', label: '申请试用' },
   { to: '/feedback', label: '反馈' },
 ]
 

@@ -108,13 +108,13 @@ export default function Download() {
                   也可以主动开启云端听课。
                 </div>
                 <p className="small mt-4">
-                  AI 学习包、翻译、云端听课和文档解析需要激活手机号试用额度；App 与网页版都支持激活，
-                  网页版还能直接自助申请，一次短信完成。额度按每日次数/时长和有效期管理，多台设备共用；
-                  离线听课和本机识别不需要账号。
+                  AI 学习包、翻译、云端听课和文档解析需要激活手机号试用额度。App 与网页版都能自己开通：
+                  进入「设置 → 试用额度」输入手机号，还没有额度的号码会直接走自助申请，一次短信完成开卡并绑定当前设备。
+                  额度按每日次数/时长和有效期管理，多台设备共用；离线听课和本机识别不需要账号。
                 </p>
                 <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2">
-                  <Link to="/apply" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>试用额度怎么获得 →</Link>
-                  <a href={WEB_APP_URL} style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>先用网页版试试 →</a>
+                  <a href={WEB_APP_URL} style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>去网页版开通试用额度 →</a>
+                  <Link to="/privacy#account" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>试用额度与隐私说明 →</Link>
                 </div>
               </div>
             </Reveal>
@@ -207,7 +207,6 @@ export default function Download() {
         lead="网页版在浏览器里运行，iPhone / iPad 同样可用；AI 与云端功能在「设置 → 试用额度」自助申请并激活，一次短信完成。"
       >
         <a href={WEB_APP_URL} className="btn btn--light btn--lg">打开网页版</a>
-        <Link to="/apply" className="btn btn--on-dark btn--lg">了解试用额度</Link>
       </CtaBand>
     </div>
   )
