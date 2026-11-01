@@ -92,6 +92,18 @@
 - 补充（PR #60，r22）：`session.error retryable=false`（额度耗尽等）标记为 fatal，**立即停止重连**并展示原因，避免无效重试期间继续推流计费。
 - **线上验证**（假麦克风流）：课堂运行中强制断开 socket（1005）→ 自动重连出新连接 → 课堂继续「听课中」、React 树完好。
 
+## V2.0.5 两步验证码激活 + 启动公告 + 标语远控（2026-11-01）
+
+- **服务端 R16（PR #64）**：新增 `app_config` 表（单 JSON 文档，`get/set_app_config`）；`GET /v1/app-config`（设备 token 鉴权，未激活设备可读）返回公告 + 标语 + updatedAt；管理 `GET/PATCH /admin/api/app-config`（session + CSRF，标语逐条 strip、≤8 条 ×40 字，空标题空正文强制 `enabled=false` 防误开）。8 项新 pytest，**143 项全绿**。部署 `/opt/zhixi-gateway-20261102-r16`（R15 保留回滚），`/health` 200。
+- **管理后台**：新增「公告与标语」页（启用开关 / 标题 ≤80 / 正文 ≤2000 / 标语逐行编辑含实时计数与前端 8×40 预校验），构建产物已更新 `/opt/zhixi-gateway/admin-dist`（旧包备份）。
+- **Android V2.0.5（versionCode 7）**：
+  - 激活卡片对齐网页版两步流：手机号 →「获取验证码」（服务端 `cooldownSeconds` 驱动倒计时）→ 6 位验证码 →「激活试用额度」+ 重新发送 / 更换手机号；手机号知情弹窗移至发送验证码一步触发；错误映射补 `activation_code_required` 与 HTTP 400 中文 detail 透传（验证码错误剩余次数等直达 UI）。
+  - 每次冷启动拉取 `/v1/app-config`：公告 enabled 且有正文时以「首次使用提示」同款玻璃弹窗弹出（`GlassConfirmDialog` 新增可空 dismissLabel，公告为单「我知道了」按钮；与首次提示同屏时排队其后）；首页轮播标语改为远控列表（5s 轮播与 AnimatedContent 不变），空配置/离线回退内置「知行合一 / 学而时习之，不亦说乎」。
+- **模拟器 E2E（假网关扩展 request-code/activate/app-config 三端点，验证码打到控制台）**：冷启动 → 公告弹窗（标题/正文/单按钮）→ 关闭后首页标语在远控 3 条间轮播；设置 → 更换手机号 → 输入手机号 → 获取验证码（POST 200）→ 第二步出现验证码输入 → 输码 → 激活 POST 200 → 卡片回已激活态。**E2E 发现并修复 2 个真 bug**：① `AppConfigDto` 缺 `updatedAt` 字段，严格 JSON 解码把整个响应判为 malformed，公告与标语静默失效；② `codeSent` 从未置 true，第二步 UI 永不出现（改为进入冷却即推进、激活成功回退）。
+- **回归**：89 项 JVM（+3：验证码响应解码、activate 请求 code 省略/携带序列化、app-config DTO 解码）、25 项设备测试、lint 全绿。
+- **生产冒烟**：`/health`、`/admin/`、`/v1/app-config` 默认空配置 200；管理 API 真实保存「知习 V2.0.5 上线」公告 + 3 条标语后，公网设备 token 读回一致；`request-code` 对未注册号返回 404（未发真实短信）。
+- **发版**：签名包 `知习-V2.0.5.apk`，50,552,218 字节，SHA-256 `6E5C4710D13EC222255ABDD565E57112BA87805CF51202A4499139C1FD4976BC`，证书与 V2.0.4 一致（CN=Zhixi）；已上传 `/opt/shuike-site/downloads/`，官网 release.ts 升 2.0.5（PR #65）并 overlay 发布，公网下载与页面 2.0.5/SHA-256 引用核对通过。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`

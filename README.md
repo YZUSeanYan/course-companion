@@ -116,10 +116,10 @@ npm run build
 
 ## 验证基线
 
-- Android：86 项 JVM 单测，覆盖课堂、导入、DTO、FSRS、CET6 词表、地址校验、术语编辑格式、FastAPI 错误解析、文本 PDF 视觉需求、学习列表复合 key、学习内容分类与复习分类统计、试用手机号规范化与账号 DTO、模型下载进度/镜像回退与完整性校验、Realtime 重连码与云端延迟测量、纪要确认态解析；Room 2→9 迁移保留历史与复习卡。
+- Android：89 项 JVM 单测，覆盖课堂、导入、DTO、FSRS、CET6 词表、地址校验、术语编辑格式、FastAPI 错误解析、文本 PDF 视觉需求、学习列表复合 key、学习内容分类与复习分类统计、试用手机号规范化与账号 DTO、两步验证码请求/响应序列化与 App 配置 DTO、模型下载进度/镜像回退与完整性校验、Realtime 重连码与云端延迟测量、纪要确认态解析；Room 2→9 迁移保留历史与复习卡。
 - 设备：25 项测试，覆盖中英文 ASR、模型隔离与回收站、暂停/继续、学习包后台任务轮询/失败/鉴权恢复、本地重复学习包去重、试用额度激活与错误码、Realtime 消息（含 partial 与流式译文）和云端失败→本机识别回退。
-- 服务端：107 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、PNVS `SendSmsVerifyCode` 参数与错误、管理后台登录/CSRF/账号 CRUD/统计、请求日志、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径，以及网页版 WebSocket 子协议鉴权与可选 CORS。
+- 服务端：143 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活（含两步验证码）/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、PNVS `SendSmsVerifyCode` 参数与错误、管理后台登录/CSRF/账号 CRUD/统计/公告标语配置校验、App 配置下发、请求日志、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径，以及网页版 WebSocket 子协议鉴权与可选 CORS。
 - 网页版：32 项 vitest，覆盖分类映射、minutes 拼接、术语/CET6 词表解析、复习分类汇总、FSRS 评分与间隔、WAV 编码、补转写分段解析、模型管理器下载/校验/拒绝、镜像同源约束与离线解码循环（注入假识别器）。
-- 生产已上线：网关 `https://zhixi.seanyan.store`（R14）、网页版 `https://zhixi.seanyan.store/web/`、官网与运营后台；生产冒烟含 WSS 子协议握手全链路与离线模型管线的浏览器端到端（下载/校验/WASM 初始化/解码）。
+- 生产已上线：网关 `https://zhixi.seanyan.store`（R16）、网页版 `https://zhixi.seanyan.store/web/`、官网与运营后台；生产冒烟含 WSS 子协议握手全链路、离线模型管线的浏览器端到端（下载/校验/WASM 初始化/解码）与公告/标语远控读写闭环。
 
 完整结果与未完成项见 `docs/VERIFICATION.md`，AI 数据流见 `docs/AI_IMPLEMENTATION.md`。
