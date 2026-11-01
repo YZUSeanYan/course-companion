@@ -48,7 +48,7 @@ const IconCards = (
 )
 
 const PAIN_POINTS = [
-  { n: '01', t: '外教语速太快', d: '重点还没反应过来，下一页 PPT 已经翻过去了，整节课都在追赶。' },
+  { n: '01', t: '课堂节奏太快', d: '重点还没反应过来，下一页 PPT 已经翻过去了，整节课都在追赶。' },
   { n: '02', t: '疑问一闪而过', d: '这里有处没听懂，想先标记一下——等下课再回想，已经忘了要问什么。' },
   { n: '03', t: '复习没有头绪', d: '90 分钟的课堂录音和零散笔记，考前根本不知道该从哪里看起。' },
 ]
@@ -160,7 +160,7 @@ export default function Home() {
           <Reveal>
             <p className="mono-label">THE PROBLEM</p>
             <h2 className="display mt-4" style={{ fontSize: 'clamp(30px, 4vw, 46px)' }}>
-              外教课的三道坎，卡在每个留学生身上
+              课堂上的三道坎，卡在每个认真学习的人身上
             </h2>
           </Reveal>
           <div className="grid md:grid-cols-3 gap-px mt-12" style={{ background: 'var(--line)', border: '1px solid var(--line)' }}>
@@ -186,7 +186,7 @@ export default function Home() {
               一节课，从听到复习的完整闭环
             </h2>
             <p className="mt-5 mx-auto max-w-xl" style={{ color: '#999', fontSize: 15.5, lineHeight: 1.8 }}>
-              从外教开口，到复习卡片进入计划——看一遍就懂。
+              从老师开口，到复习卡片进入计划——看一遍就懂。
             </p>
           </Reveal>
           <Reveal delay={0.12} className="mt-14">
