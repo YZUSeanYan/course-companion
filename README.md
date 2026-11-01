@@ -8,12 +8,13 @@
 
 私有协作仓库：`https://github.com/YZUSeanYan/course-companion`
 
-当前仓库包含四个可独立运行的模块：
+当前仓库包含五个可独立运行的模块：
 
 - `app/`：Android App
 - `server/`：FastAPI 学习网关
 - `admin/`：运营后台（React + Vite，由网关托管在 `/admin/`）
 - `site/`：官网源码
+- `webapp/`：网页版（一期云端版：云端听课转写、AI 学习包与 FSRS 复习，见 `webapp/README.md`）
 
 第一次参与开发请先读：
 

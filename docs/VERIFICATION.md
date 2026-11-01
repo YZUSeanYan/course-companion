@@ -52,6 +52,13 @@
 4. MinerU/LibreOffice 仍为可插拔解析器，未配置时复杂页只保留原图并标待解析；DOCX/PPTX 需对应环境。
 5. 正式 HTTPS 网关、运营后台、V2.0.4 签名包与官网下载页已完成；未准备参赛 PPT。
 
+## 网页版一期（2026-11-01，本地验收）
+
+- 新增 `webapp/`（React 19 + Vite 7 + TypeScript + Dexie + ts-fsrs）：云端听课转写/翻译、手动标记疑问、AI 学习包（异步任务+轮询+本地查重）、讲义导入、分类学习内容、FSRS 复习、账号激活与额度展示、Markdown 导出。本地数据只存浏览器 IndexedDB；构建 `tsc --noEmit && vite build` 通过，**14 项 vitest 通过**（分类映射、minutes 拼接、术语解析、复习分类汇总、FSRS 评分/遗忘/间隔、sourceHash 契约、错误提示映射）。
+- 服务端配套（不影响 Android 端）：`/v2/lecsync/realtime` 与 `/v2/lecsync/voice-typing/ws` 允许浏览器以 `Sec-WebSocket-Protocol: bearer, <token>` 携带令牌（回显 `bearer` 子协议）；新增可选 `WEB_CORS_ORIGINS` 白名单（默认关闭，同源部署无需开启），错误响应暴露 `X-Zhixi-*` 头。**FastAPI 107 项 pytest 通过**（含 2 项子协议鉴权、2 项 CORS）。
+- 本地端到端冒烟（uvicorn + vite preview + 内置浏览器）：设备注册、网关连接测试、手机号激活（脱敏号/有效期/四项额度展示）、课程创建（IndexedDB 持久化）、课程详情与复习页空状态、课堂页截图人工检查无控制台级布局问题；实时链路以真实 WebSocket 握手验证（直连网关与经代理均通过子协议鉴权、收到网关结构化 `session.error NOT_CONFIGURED`），未激活设备的 WS 握手拒绝路径也已验证。
+- 验收边界：ZCode 内置浏览器不支持任何 WebSocket（公共回显服务同样失败），浏览器端实时转写的**真机/真实浏览器**验收待在正式 Chrome/Edge 或移动端完成；未验证真实模型质量、CORS 生产部署与多浏览器兼容。部署与发版仍由项目负责人执行。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`

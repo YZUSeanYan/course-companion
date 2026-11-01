@@ -87,6 +87,7 @@ class Settings:
     trial_code_per_phone_hour: int = 5
     trial_code_per_ip_hour: int = 10
     trial_apply_per_ip_hour: int = 20
+    web_cors_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -163,6 +164,11 @@ class Settings:
             trial_code_per_phone_hour=_int_env("TRIAL_CODE_PER_PHONE_HOUR", 5, 1, 100),
             trial_code_per_ip_hour=_int_env("TRIAL_CODE_PER_IP_HOUR", 10, 1, 1000),
             trial_apply_per_ip_hour=_int_env("TRIAL_APPLY_PER_IP_HOUR", 20, 1, 1000),
+            web_cors_origins=tuple(
+                origin.strip()
+                for origin in os.getenv("WEB_CORS_ORIGINS", "").split(",")
+                if origin.strip()
+            ),
         )
 
     @property

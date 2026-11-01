@@ -72,6 +72,7 @@ site/.vite/
 site/.env
 site/.env.*
 !site/.env.example
+webapp/dist/
 
 # OS files
 .DS_Store
