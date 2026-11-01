@@ -22,7 +22,9 @@ export default function CourseDetailPage() {
   // 让下面的「课程不存在」兜底卡片接管。
   const parsed = Number(courseId);
   const courseIdNumber = Number.isFinite(parsed) ? parsed : -1;
-  const course = useLiveQuery(() => db.courses.get(courseIdNumber), [courseIdNumber]);
+  // 默认值给 null，用来区分「还在查」与「确实不存在」：不给默认值时两者都是 undefined，
+  // 每次进页面都会先闪一下「课程不存在」再被真实内容顶掉。
+  const course = useLiveQuery(() => db.courses.get(courseIdNumber), [courseIdNumber], null);
   const items = useLiveQuery(
     () => db.learningItems.where("courseId").equals(courseIdNumber).toArray(),
     [courseIdNumber],
@@ -46,11 +48,25 @@ export default function CourseDetailPage() {
     setNeedsActivation(isActivationError(error));
   };
 
+  if (course === null) {
+    return (
+      <div className="glass-card">
+        <p className="eyebrow">Loading</p>
+        <h2 style={{ margin: "0 0 8px", fontSize: 17, fontWeight: 700 }}>正在读取课程…</h2>
+        <p className="card-desc" style={{ marginBottom: 0 }}>
+          课程内容保存在本浏览器，首次打开需要一点时间。
+        </p>
+      </div>
+    );
+  }
+
   if (!course) {
     return (
       <div className="glass-card">
+        <p className="eyebrow">Not found</p>
+        <h2 style={{ margin: "0 0 8px", fontSize: 17, fontWeight: 700 }}>课程不存在</h2>
         <p className="card-desc" style={{ marginBottom: 12 }}>
-          课程不存在，可能已被删除，或链接来自另一台设备。
+          可能已被删除，或链接来自另一台设备。
         </p>
         <Link className="btn btn-sm" to="/learning">
           返回课程列表

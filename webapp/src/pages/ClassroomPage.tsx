@@ -101,11 +101,17 @@ export default function ClassroomPage() {
     () => (session == null ? Promise.resolve([] as TranscriptLineRecord[]) : db.transcriptLines.where("sessionId").equals(session).sortBy("timestampMillis")),
     [session],
   );
+  // 只取本节这些行的译文，不要整表全量拉取：跨课堂累积后这块会随课时线性变大。
+  // 按 transcriptLineId 取（该字段有索引），语种代号在两条通道里不一致的问题留给展示层处理。
   const translations = useLiveQuery(
-    () =>
-      session == null
-        ? Promise.resolve([] as TranslationRecord[])
-        : db.translations.toArray(),
+    async () => {
+      if (session == null) return [] as TranslationRecord[];
+      const ids = (await db.transcriptLines.where("sessionId").equals(session).toArray())
+        .map((line) => line.id!)
+        .filter(Boolean);
+      if (ids.length === 0) return [] as TranslationRecord[];
+      return db.translations.where("transcriptLineId").anyOf(ids).toArray();
+    },
     [session],
   );
   const doubts = useLiveQuery(

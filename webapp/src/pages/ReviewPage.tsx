@@ -100,7 +100,9 @@ export default function ReviewPage() {
     );
   }
 
-  return <ReviewSession type={type} />;
+  // key={type}：/review/all 与 /review/VOCABULARY 之间切换时组件实例不变，
+  // 不加 key 会沿用上一轮的队列快照（换了分类却还在复习旧分类的卡）。
+  return <ReviewSession key={type} type={type} />;
 }
 
 function ReviewSession({ type }: { type: string }) {
@@ -111,16 +113,34 @@ function ReviewSession({ type }: { type: string }) {
     const pool = (cards ?? []).filter((card) => card.dueAtMillis <= now);
     const selected = type === "all" ? pool : pool.filter((card) => card.itemType === type);
     return selected.sort((a, b) => a.dueAtMillis - b.dueAtMillis);
-  }, [cards, now, type]);
+  }, [cards, type]);
+
+  // 本轮队列在进入时快照一次：评分会把这张卡的 dueAt 推到未来，实时过滤的列表会立刻
+  // 少一张，而 index 同时 +1——两下一叠加就会跳过下一张（表现为「第 2/3 张」瞬间变
+  // 「第 2/2 张」，中间那张永远没出现）。快照后本轮按固定顺序走完。
+  const dueKey = dueCards.map((card) => card.id).join(",");
+  const [queue, setQueue] = useState<ReviewCardRecord[]>([]);
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [saved, setSaved] = useState(0);
+  const snapshotRef = useRef<string | null>(null);
   // 评分事务进行中：挡住键盘长按重复触发与连点评分，否则同一张卡会被评多次、
   // 后一次覆盖前一次的结果，还会写入重复日志。
   const ratingRef = useRef(false);
 
-  const current: ReviewCardRecord | undefined = dueCards[index];
-  const total = dueCards.length;
+  // 首次拿到数据、或切换分类时重建队列；评分本身引起的列表变化不重建。
+  useEffect(() => {
+    if (snapshotRef.current === null && dueKey.length > 0) {
+      snapshotRef.current = dueKey;
+      setQueue(dueCards);
+      setIndex(0);
+      setRevealed(false);
+    }
+  }, [dueKey, dueCards]);
+
+  const active = queue.length > 0 ? queue : dueCards;
+  const current: ReviewCardRecord | undefined = active[index];
+  const total = active.length;
   const progress = total === 0 ? 100 : Math.round((Math.min(index, total) / total) * 100);
 
   const rate = useCallback(
