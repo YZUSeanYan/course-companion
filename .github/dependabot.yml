@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /server
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /webapp
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /admin
+    schedule:
+      interval: weekly
+  - package-ecosystem: gradle
+    directory: /app
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
