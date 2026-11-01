@@ -18,7 +18,10 @@ export class TranslationQueue {
   async enqueueSession(sessionId: number, progress: TranslationProgress | null = null): Promise<void> {
     this.progress = progress;
     const lines = await db.transcriptLines.where("sessionId").equals(sessionId).toArray();
-    const existing = await db.translations.where("targetLang").equals(this.targetLang).toArray();
+    // 去重按 transcriptLineId，不按 targetLang：实时通道落库用的是服务端返回的语种代号
+    // （如 "zh"），与队列的 "zh-CN" 不是同一个字符串；按语种去重会把已翻译的行再排一次，
+    // 重复调用翻译接口、重复消耗额度。
+    const existing = await db.translations.toArray();
     const translatedLineIds = new Set(
       existing
         .filter((t) => t.status !== "failed")

@@ -40,6 +40,30 @@ export interface ClassroomStartOptions {
   liveMinutes: boolean;
   /** 识别模式：云端实时（默认）或浏览器离线（sherpa-onnx WASM）。 */
   mode: "cloud" | "offline";
+  /**
+   * 是否把本节 PCM 编码成 WAV 存进 IndexedDB（默认 false）。
+   * 只有「云端补转写」需要它；关闭时结束不落音频，隐私页口径与此一致。
+   */
+  saveAudio?: boolean;
+}
+
+/** 「保存原始录音」开关的持久化键。默认关，与 Android 端一致。 */
+const SAVE_AUDIO_KEY = "zhixi.web.saveAudio";
+
+export function loadSaveAudio(): boolean {
+  try {
+    return window.localStorage.getItem(SAVE_AUDIO_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveSaveAudio(value: boolean): void {
+  try {
+    window.localStorage.setItem(SAVE_AUDIO_KEY, value ? "1" : "0");
+  } catch {
+    // 隐私模式下 localStorage 不可写：仅在本次会话内生效，不视为错误。
+  }
 }
 
 function defaultConfig(options: ClassroomStartOptions): RealtimeConfig {
@@ -106,6 +130,8 @@ export class ClassroomController {
   private callbacks: ClassroomCallbacks | null = null;
   private digestJson = "";
   private mode: "cloud" | "offline" = "cloud";
+  /** 本节是否落音频存档（「保存原始录音」，默认关）。 */
+  private saveAudio = false;
   private offlineCallbacks: OfflineCallbacks | null = null;
   private offlineSessionId: number | null = null;
   private cloudOptions: ClassroomStartOptions | null = null;
@@ -140,6 +166,7 @@ export class ClassroomController {
     });
     try {
       this.mode = options.mode;
+      this.saveAudio = options.saveAudio ?? false;
       this.reconnectAttempts = 0;
       this.fatalSessionError = false;
       this.reconnectGeneration += 1;
@@ -179,8 +206,9 @@ export class ClassroomController {
       }
       this.capture = await startPcmCapture(this.stream, {
         onFrame: (frame) => {
-          // 原地累积 PCM 用于 WAV 存档（暂停时 worklet 不产帧，存档与转写时间轴一致）。
-          this.pcmFrames.push(frame);
+          // 只有开启「保存原始录音」才累积 PCM（约 115KB/s，长课几百 MB），
+          // 否则默认路径完全用不上，只会白占内存。
+          if (this.saveAudio) this.pcmFrames.push(frame);
           if (this.realtime?.isActive) this.realtime.sendPcm(frame);
           if (this.mode === "offline" && this.offlineCallbacks) {
             getOfflineEngine().feed(frame, this.offlineCallbacks);
@@ -359,12 +387,15 @@ export class ClassroomController {
   private async finishSession(): Promise<void> {
     const sessionId = this.snapshot.sessionId;
     await this.capture?.stop().catch(() => undefined);
-    // 从累积的 PCM 编码 WAV 存档（网关音频接口支持 .wav；暂停期间无帧，时间轴一致）。
+    // 只有用户显式开启「保存原始录音」才把 PCM 编码成 WAV 落库（用于云端补转写）。
+    // 默认关闭：录音不进 IndexedDB，与隐私页口径一致，也避免整节课音频占满存储配额。
     let audioBlob: Blob | null = null;
-    try {
-      audioBlob = this.pcmFrames.length ? encodeWav(this.pcmFrames) : null;
-    } catch {
-      audioBlob = null;
+    if (this.saveAudio) {
+      try {
+        audioBlob = this.pcmFrames.length ? encodeWav(this.pcmFrames) : null;
+      } catch {
+        audioBlob = null;
+      }
     }
     await this.releaseMedia();
     if (sessionId != null) {

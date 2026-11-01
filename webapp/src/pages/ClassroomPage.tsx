@@ -1,11 +1,13 @@
-// 听课页：云端实时转写（含翻译）、暂停/继续、标记疑问与生成学习包入口。
-// 本页依赖麦克风权限与前台标签页；浏览器不支持锁屏后台录音。
+// 听课台：云端实时转写（含翻译）、暂停/继续、标记疑问与生成学习包入口。
+// 网页端形态：桌面为「主区（计时台 + 转写流）+ 侧栏（设置 / 纪要 / 回看 / 额度）」的工作台，
+// 窄屏收成单列。转写流独立滚动并吸顶表头，长课时主区仍可停留在视野内。
+// 依赖麦克风权限与前台标签页；浏览器不支持锁屏后台录音。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, newUid, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
-import { ClassroomController, type ClassroomSnapshot } from "../lib/classroom";
+import { ClassroomController, loadSaveAudio, saveSaveAudio, type ClassroomSnapshot } from "../lib/classroom";
 import { TranslationQueue, lineTranslationOf } from "../lib/translate-queue";
 import { describeError, isActivationError, loadGatewayUrl } from "../lib/api/client";
 import ActivationNotice from "../components/ActivationNotice";
@@ -46,6 +48,13 @@ function formatSeconds(total: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** 转写条目的时间标签：相对本节开始时刻。 */
+function clockOf(timestampMillis: number, baseMillis: number | null): string {
+  if (!baseMillis) return "";
+  const delta = Math.max(0, Math.round((timestampMillis - baseMillis) / 1000));
+  return formatSeconds(delta);
+}
+
 export default function ClassroomPage() {
   const navigate = useNavigate();
   const controller = useMemo(() => new ClassroomController(), []);
@@ -66,8 +75,13 @@ export default function ClassroomPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [liveMinutes, setLiveMinutes] = useState(false);
   const [mode, setMode] = useState<"cloud" | "offline">("cloud");
+  const [saveAudio, setSaveAudio] = useState(() => loadSaveAudio());
   const [digestJson, setDigestJson] = useState("");
   const [retranscribing, setRetranscribing] = useState(false);
+  const [sessionBase, setSessionBase] = useState<number | null>(null);
+  // 长课时只渲染最近一段，避免几百行 DOM 拖慢输入；上翻后暂停自动吸底。
+  const [followLive, setFollowLive] = useState(true);
+  const [showAllLines, setShowAllLines] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const subscribedRef = useRef(false);
 
@@ -91,7 +105,7 @@ export default function ClassroomPage() {
     () =>
       session == null
         ? Promise.resolve([] as TranslationRecord[])
-        : db.translations.where("targetLang").equals("zh").toArray(),
+        : db.translations.toArray(),
     [session],
   );
   const doubts = useLiveQuery(
@@ -99,18 +113,44 @@ export default function ClassroomPage() {
     [session],
   );
 
+  // 转写条目显示相对时间，需要本节开始时刻作为基准。
+  useEffect(() => {
+    if (session == null) {
+      setSessionBase(null);
+      return;
+    }
+    let cancelled = false;
+    void db.sessions.get(session).then((record) => {
+      if (!cancelled) setSessionBase(record?.startedAtMillis ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
   const active = snapshot.phase === "listening" || snapshot.phase === "paused" || snapshot.phase === "connecting" || snapshot.phase === "stopping";
   const listening = snapshot.phase === "listening";
 
   useEffect(() => {
-    if (listRef.current && lines && lines.length > 0) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [lines?.length]);
+    const el = listRef.current;
+    if (!el || !followLive || !lines || lines.length === 0) return;
+    el.scrollTop = el.scrollHeight;
+  }, [lines?.length, followLive]);
+
+  // 用户往上翻就停跟随，回到底部附近再恢复，避免新句子把阅读位置顶走。
+  const onTranscriptScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+    setFollowLive(atBottom);
+  };
 
   const start = async () => {
     setGenerateStatus(null);
     setDigestJson("");
+    // 会话级状态复位：上一节上翻过的转写或展开过的全量列表不应带到新课堂。
+    setFollowLive(true);
+    setShowAllLines(false);
     if (mode === "cloud" && !loadGatewayUrl()) {
       setGenerateStatus("请先在设置中配置网关地址");
       return;
@@ -125,6 +165,7 @@ export default function ClassroomPage() {
         glossaryTerms: [],
         liveMinutes,
         mode,
+        saveAudio,
       });
     } catch {
       // 错误已通过 snapshot.statusMessage 呈现。
@@ -231,175 +272,283 @@ export default function ClassroomPage() {
     }
   };
 
+  const digest = parseDigestSections(digestJson);
+  const hasTranscript = session != null && lines != null && lines.length > 0;
+  // 默认只渲染最近 60 行（Android 端窗口是 30 行），需要时展开全部。
+  const WINDOW = 60;
+  const truncated = !showAllLines && (lines?.length ?? 0) > WINDOW;
+  const visibleLines = truncated ? (lines ?? []).slice(-WINDOW) : lines ?? [];
+
   return (
-    <main>
-      <h1 className="page-title">听课</h1>
+    <>
       {!loadGatewayUrl() && (
-        <div className="banner banner-warn">尚未配置网关地址，请先到「设置」填写 AI 服务地址。</div>
-      )}
-      {showSettings && !active ? (
-        <div className="glass-card">
-          <div className="card-title">课堂设置</div>
-          <label className="field-label">讲师语言</label>
-          <select className="text-input" value={sourceLang} onChange={(event) => setSourceLang(event.target.value)}>
-            {LANG_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <label className="field-label">关联课程（可选）</label>
-          <select className="text-input" value={courseId} onChange={(event) => setCourseId(event.target.value)}>
-            <option value="">不关联</option>
-            {(courses ?? []).map((course) => (
-              <option key={course.id} value={course.id}>
-                {course.name}
-              </option>
-            ))}
-          </select>
-          <label className="field-label">识别模式</label>
-          <select className="text-input" value={mode} onChange={(event) => setMode(event.target.value as "cloud" | "offline")}>
-            <option value="cloud">云端实时（转写+翻译+纪要，需额度）</option>
-            <option value="offline">浏览器离线（无需额度，首次需下载模型约 200MB）</option>
-          </select>
-          <label className="field-label">实时纪要（AI 课堂小结，额外消耗云端音频时长）</label>
-          <select
-            className="text-input"
-            value={liveMinutes ? "on" : "off"}
-            onChange={(event) => setLiveMinutes(event.target.value === "on")}
-            disabled={mode === "offline"}
-          >
-            <option value="off">关闭</option>
-            <option value="on">开启</option>
-          </select>
-          <div className="btn-row">
-            <button className="btn" onClick={() => setShowSettings(false)}>
-              完成
-            </button>
-          </div>
+        <div className="banner banner-warn">
+          <span aria-hidden>●</span>
+          <span>尚未配置网关地址。AI 与云端功能需要先到「设置」填写服务地址。</span>
         </div>
-      ) : (
-        <div className="glass-card">
-          <div className="card-title">
-            <span className={`pill ${snapshot.phase === "paused" ? "pill-warn" : snapshot.phase === "listening" ? "pill-ok" : ""}`}>
-              {phaseLabel(snapshot.phase)}
-            </span>
-            <span className="muted">云端听写 · 用量 {formatSeconds(snapshot.usageSeconds)}</span>
-          </div>
-          <div className="big-timer">{formatSeconds(snapshot.elapsedSeconds)}</div>
-          <div className="dock">
-            {!active && (
-              <>
-                <button className="btn btn-primary" onClick={() => void start()}>
-                  开始听课
-                </button>
-                <button className="btn" onClick={() => setShowSettings(true)}>
-                  课堂设置
-                </button>
-              </>
-            )}
-            {active && (
-              <>
-                {snapshot.phase === "paused" ? (
-                  <button className="btn" onClick={() => void controller.resume()}>
-                    继续
-                  </button>
-                ) : (
-                  <button className="btn" onClick={() => void controller.pause()} disabled={snapshot.phase !== "listening"}>
-                    暂停
-                  </button>
+      )}
+
+      <div className="cols cols--workbench">
+        {/* ── 主区：计时台 + 转写流 ── */}
+        <div className="cols__main">
+          <section className="glass-card glass-card--hero">
+            <div className="session">
+              <div className="session__meta">
+                <span
+                  className={`pill ${snapshot.phase === "paused" ? "pill-warn" : ""} ${listening ? "pill-ok pill-dot" : ""} ${
+                    snapshot.phase === "idle" || snapshot.phase === "ended" ? "pill-brand" : ""
+                  }`}
+                >
+                  {phaseLabel(snapshot.phase)}
+                </span>
+                {snapshot.phase !== "idle" && (
+                  <span className="muted">云端听写 · 计费用量 {formatSeconds(snapshot.usageSeconds)}</span>
                 )}
-                <button className="btn btn-danger" onClick={() => void stop()}>
-                  停止
-                </button>
-              </>
-            )}
-          </div>
-          {active && (
-            <>
-              <div className="transcript-partial">
-                {snapshot.partialText || (listening ? "正在聆听…" : "已暂停")}
+                {mode === "offline" && <span className="pill">浏览器离线</span>}
+                {liveMinutes && <span className="pill pill-brand">实时纪要</span>}
               </div>
-              <div className="btn-row">
-                <button className="btn" onClick={() => void markDoubt()}>
-                  标记疑问
-                </button>
+
+              <div className="session__timer">
+                {formatSeconds(snapshot.elapsedSeconds)}
+                <small>{active ? (listening ? "Recording" : "Paused") : "Ready"}</small>
               </div>
-              <input
-                className="text-input"
-                style={{ marginTop: 8 }}
-                placeholder="疑问备注（可留空，直接保存当前原话）"
-                value={doubtNote}
-                onChange={(event) => setDoubtNote(event.target.value)}
-                maxLength={3000}
-              />
-            </>
-          )}
-          {snapshot.statusMessage && (
-            <p className="muted" style={{ marginBottom: 0 }}>
-              {snapshot.statusMessage}
-            </p>
+
+              <div className="session__dock">
+                {!active ? (
+                  <>
+                    <button className="btn btn-primary btn-lg" onClick={() => void start()}>
+                      开始听课
+                    </button>
+                    <button className="btn btn-lg" onClick={() => setShowSettings(true)}>
+                      课堂设置
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {snapshot.phase === "paused" ? (
+                      <button className="btn btn-primary btn-lg" onClick={() => void controller.resume()}>
+                        继续
+                      </button>
+                    ) : (
+                      <button className="btn btn-lg" onClick={() => void controller.pause()} disabled={snapshot.phase !== "listening"}>
+                        暂停
+                      </button>
+                    )}
+                    <button className="btn btn-lg btn-danger" onClick={() => void stop()}>
+                      停止
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {active && (
+                <>
+                  <div className="live-line">
+                    {listening && (
+                      <span className="live-line__wave" aria-hidden>
+                        <i />
+                        <i />
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    )}
+                    <span>{snapshot.partialText || (listening ? "正在聆听…" : "已暂停，点「继续」恢复")}</span>
+                  </div>
+                  <div className="btn-row" style={{ alignItems: "center" }}>
+                    <input
+                      className="text-input"
+                      style={{ flex: "1 1 240px", width: "auto" }}
+                      placeholder="疑问备注（可留空，直接保存当前原话）"
+                      value={doubtNote}
+                      onChange={(event) => setDoubtNote(event.target.value)}
+                      maxLength={3000}
+                    />
+                    <button className="btn" onClick={() => void markDoubt()}>
+                      标记疑问
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {snapshot.statusMessage && <p className="card-desc" style={{ marginTop: 12 }}>{snapshot.statusMessage}</p>}
+            </div>
+          </section>
+
+          {hasTranscript ? (
+            <section className="glass-card transcript">
+              <div className="transcript__head">
+                <div className="card-title" style={{ margin: 0 }}>
+                  实时转写
+                  <span className="pill">{lines.length} 行</span>
+                </div>
+                <div className="card-title__actions">
+                  {!followLive && (
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => {
+                        setFollowLive(true);
+                        const el = listRef.current;
+                        if (el) el.scrollTop = el.scrollHeight;
+                      }}
+                    >
+                      回到最新
+                    </button>
+                  )}
+                  {doubts && doubts.length > 0 && <span className="pill pill-brand">疑问 {doubts.length}</span>}
+                </div>
+              </div>
+              {truncated && (
+                <p className="muted" style={{ margin: "0 0 6px" }}>
+                  只显示最近 {WINDOW} 行 ·{" "}
+                  <button
+                    className="btn btn-sm"
+                    style={{ height: 22, padding: "0 8px", fontSize: 11 }}
+                    onClick={() => setShowAllLines(true)}
+                  >
+                    显示全部 {lines.length} 行
+                  </button>
+                </p>
+              )}
+              <div className="transcript__body" ref={listRef} onScroll={onTranscriptScroll} style={{ maxHeight: "min(58vh, 620px)" }}>
+                {visibleLines.map((line) => {
+                  // 语种代号在两条通道里不一致（实时用 "zh"，补翻队列用 "zh-CN"），两个都试。
+                  const translation =
+                    lineTranslationOf(translations ?? [], line, "zh") ??
+                    lineTranslationOf(translations ?? [], line, "zh-CN");
+                  return (
+                    <div className="transcript-line" key={line.id}>
+                      <span className="ts">{clockOf(line.timestampMillis, sessionBase)}</span>
+                      <div>
+                        <div className="zh">{line.text}</div>
+                        {translation?.translatedText && <div className="en">{translation.translatedText}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <section className="glass-card">
+              <p className="eyebrow">Live transcript</p>
+              <h2 style={{ margin: "0 0 8px", fontSize: 17, fontWeight: 700 }}>转写会出现在这里</h2>
+              <p className="card-desc" style={{ maxWidth: "56ch" }}>
+                点「开始听课」并允许麦克风权限后，{sourceLang === "en" ? "英文" : "中文"}原声会被实时转写，
+                逐句附上译文。音频只在页面停留前台时采集，切换标签页或锁屏会暂停。
+              </p>
+              <div className="empty-hint">等待第一句话</div>
+            </section>
           )}
         </div>
-      )}
 
-      {snapshot.phase === "ended" && snapshot.sessionId != null && (
-        <div className="glass-card">
-          <div className="card-title">本节课回看</div>
-          <div className="btn-row">
-            <button className="btn btn-primary" onClick={() => void generatePack()}>
-              生成 AI 学习包
-            </button>
-            <button className="btn" onClick={() => void retranscribe()} disabled={retranscribing}>
-              {retranscribing ? "补转写中…" : "云端补转写"}
-            </button>
-            <button className="btn" onClick={openCourse}>
-              查看课程
-            </button>
-          </div>
-          {generateStatus && <ActivationNotice text={generateStatus} needsActivation={needsActivation} />}
-        </div>
-      )}
+        {/* ── 侧栏：设置 / 纪要 / 回看 / 额度 ── */}
+        <div className="cols__side cols__side--sticky">
+          {snapshot.phase === "ended" && snapshot.sessionId != null && (
+            <div className="glass-card">
+              <div className="card-title">本节课回看</div>
+              <p className="card-desc">把本节转写整理成结构化学习包，或重新跑一次云端转写。</p>
+              <div className="btn-row" style={{ marginTop: 0 }}>
+                <button className="btn btn-primary" onClick={() => void generatePack()}>
+                  生成 AI 学习包
+                </button>
+                <button className="btn" onClick={() => void retranscribe()} disabled={retranscribing}>
+                  {retranscribing ? "补转写中…" : "云端补转写"}
+                </button>
+                <button className="btn" onClick={openCourse}>
+                  查看课程
+                </button>
+              </div>
+              {generateStatus && <ActivationNotice text={generateStatus} needsActivation={needsActivation} />}
+            </div>
+          )}
 
-      {parseDigestSections(digestJson).length > 0 && (
-        <div className="glass-card">
-          <div className="card-title">
-            课堂纪要
-            {snapshot.phase === "listening" && <span className="pill">实时</span>}
-          </div>
-          {parseDigestSections(digestJson).map((section, index) => (
-            <div className="transcript-line" key={index}>
-              {section.title && <div className="zh"><strong>{section.title}</strong></div>}
-              {section.points.map((point, pointIndex) => (
-                <div className="zh" key={pointIndex}>· {point}</div>
+          {digest.length > 0 && (
+            <div className="glass-card">
+              <div className="card-title">
+                课堂纪要
+                {snapshot.phase === "listening" && <span className="pill pill-ok pill-dot">实时</span>}
+              </div>
+              {digest.map((section, index) => (
+                <div className="digest-section" key={index}>
+                  {section.title && <h3>{section.title}</h3>}
+                  {section.points.length > 0 && (
+                    <ul>
+                      {section.points.map((point, pointIndex) => (
+                        <li key={pointIndex}>{point}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {session != null && lines && lines.length > 0 && (
-        <div className="glass-card">
-          <div className="card-title">
-            实时转写（{lines.length} 行）
-            {doubts && doubts.length > 0 && <span className="pill">疑问 {doubts.length}</span>}
+          <div className={`glass-card panel-settings${showSettings ? " is-open" : ""}`}>
+            <div className="card-title">
+              课堂设置
+              <button className="btn btn-sm" onClick={() => setShowSettings(false)}>
+                收起
+              </button>
+            </div>
+            <label className="field-label">讲师语言</label>
+            <select className="text-input" value={sourceLang} onChange={(event) => setSourceLang(event.target.value)}>
+              {LANG_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <label className="field-label">关联课程（可选）</label>
+            <select className="text-input" value={courseId} onChange={(event) => setCourseId(event.target.value)}>
+              <option value="">不关联</option>
+              {(courses ?? []).map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.name}
+                </option>
+              ))}
+            </select>
+            <label className="field-label">识别模式</label>
+            <select className="text-input" value={mode} onChange={(event) => setMode(event.target.value as "cloud" | "offline")}>
+              <option value="cloud">云端实时（转写 + 翻译 + 纪要，需额度）</option>
+              <option value="offline">浏览器离线（无需额度，首次下载约 200MB）</option>
+            </select>
+            <label className="field-label">实时纪要（AI 课堂小结，额外消耗云端音频时长）</label>
+            <select
+              className="text-input"
+              value={liveMinutes ? "on" : "off"}
+              onChange={(event) => setLiveMinutes(event.target.value === "on")}
+              disabled={mode === "offline"}
+            >
+              <option value="off">关闭</option>
+              <option value="on">开启</option>
+            </select>
+            <label className="field-label">
+              保存原始录音（用于「云端补转写」，默认关{active ? " · 本次课堂按开始时的设置执行" : ""}）
+            </label>
+            <select
+              className="text-input"
+              value={saveAudio ? "on" : "off"}
+              disabled={active}
+              onChange={(event) => {
+                const next = event.target.value === "on";
+                setSaveAudio(next);
+                saveSaveAudio(next);
+              }}
+            >
+              <option value="off">不保存（只留文字转写）</option>
+              <option value="on">保存整节 WAV 到本浏览器（占用较多存储）</option>
+            </select>
+            <div className="btn-row">
+              <button className="btn btn-primary" onClick={() => setShowSettings(false)}>
+                完成
+              </button>
+            </div>
           </div>
-          <div ref={listRef} style={{ maxHeight: 320, overflowY: "auto" }}>
-            {lines.map((line) => {
-              const translation = lineTranslationOf(translations ?? [], line);
-              return (
-                <div className="transcript-line" key={line.id}>
-                  <div className="zh">{line.text}</div>
-                  {translation?.translatedText && <div className="en">译：{translation.translatedText}</div>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {!active && <AccountCard />}
-    </main>
+          {!active && <AccountCard />}
+        </div>
+      </div>
+    </>
   );
 }
 
