@@ -286,8 +286,8 @@ export default function Home() {
                 一次短信完成，iPhone 用户同样适用。Android 用户也可以下载 App，离线听课在本机完成。
               </p>
               <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1">
-                <Link to="/apply" style={{ fontWeight: 700, color: 'var(--brand-deep)' }}>了解试用额度 →</Link>
                 <a href={WEB_APP_URL} style={{ fontWeight: 700, color: 'var(--brand-deep)' }}>打开网页版 →</a>
+                <Link to="/download" style={{ fontWeight: 700, color: 'var(--brand-deep)' }}>下载 App →</Link>
               </div>
             </div>
           </Reveal>

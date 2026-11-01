@@ -48,7 +48,7 @@
 - 离线模型支持国内高速镜像、官方源回退、完整下载校验、卸载到应用回收站、恢复和停用；release 不内置模型权重，需在设置中下载或恢复后才能离线听课。
 - 试用额度：AI 学习包、翻译、云端听课和文档解析需在「设置 → 试用额度」激活管理员发放的手机号；每日额度按 AI 包次数/音频分钟/翻译字符/文档次数配置，并有有效期。一个手机号可在多台设备上共用同一份额度，服务端按账号汇总，未激活设备返回可执行的激活引导。
 - 手机号安全：服务端使用独立密钥加密保存，查找使用 HMAC 摘要；App 本地只保存脱敏号码（如 `139****0001`），隐私政策已披露用途、保留与删除方式。
-- 官网试用申请：`https://shuike.seanyan.store/#/apply` 填写姓名、昵称、手机号并完成短信验证码后，自动加入管理后台试用名单；默认每天 5 个 AI 学习包、30 分钟云端音频，有效期 2 个月，翻译字符/文档解析/设备数沿用默认配置。
+- 自助开通试用额度：在 App（V2.0.6 起）或网页版的「设置 → 试用额度」输入手机号即可。手机号已在试用名单里则直接发激活验证码绑定当前设备；还没有额度时自动切换到自助申请，补填姓名、昵称并同意条款后完成短信验证，服务端自动开卡并绑定。默认每天 5 个 AI 学习包、30 分钟云端音频，有效期 2 个月，翻译字符/文档解析/设备数沿用默认配置。官网不再提供单独的申请页。
 - 运营后台：管理员密码登录后可查看请求/学习包/音频/翻译用量、活跃设备与账号、错误率、每日趋势、接口和模型分布；可新增/批量添加手机号、配置额度与有效期、禁用/解绑/删除账号，并查看设备与最近请求（不记录请求正文）。
 - 设置内含正式隐私政策和 `https://shuike.seanyan.store` 官网入口。
 - 网页版（与 App 共用额度体系）：云端实时听课转写 + 双向翻译、手动标记疑问、AI 学习包、讲义上传、CET6 词库导入、FSRS 复习、课程/转写 Markdown 导出；**浏览器离线识别**（sherpa-onnx WASM 流式中英模型，首次自动从同源镜像下载约 200MB 并做 SHA-256 校验，之后完全本地识别、不消耗额度）。本地数据只存浏览器 IndexedDB；WAV 本地存档支持云端补转写。
@@ -100,7 +100,7 @@ npm run build
 
 - 地址：`https://zhixi.seanyan.store`。APP 的“设置 → AI 服务连接”填此域名即可，不填 Lecsync 地址或任何密钥。
 - 运营后台：`https://zhixi.seanyan.store/admin/`，使用服务器 `/opt/zhixi-gateway/.env` 中的 `ADMIN_PASSWORD` 登录；后台可添加同学手机号并配置每日额度与有效期。
-- 官网申请：`https://shuike.seanyan.store/#/apply`，验证码由阿里云号码认证（PNVS）短信认证发送；需要在服务器 `.env` 配置 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`。生产签名使用系统赠送的 `恒创联众`，模板使用登录/注册模板 `100001`。未配置时申请页会明确提示“短信服务尚未配置”，后台手动添加不受影响。
+- 自助开通试用额度：在 App 或网页版的「设置 → 试用额度」里输入手机号，验证码由阿里云号码认证（PNVS）短信认证发送；需要在服务器 `.env` 配置 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`。生产签名使用系统赠送的 `恒创联众`，模板使用登录/注册模板 `100001`。未配置时客户端会提示短信服务不可用，后台手动添加手机号不受影响。
 - 服务端以 systemd `zhixi-gateway` 运行，仅监听 `127.0.0.1:8766` 并由 nginx 提供 HTTPS；`/health` 返回 200，`/admin/` 由 nginx 代理到同一网关。
 - Lecsync 密钥只保存在服务器 `/opt/zhixi-gateway/.env`（权限 600），不进入 APK。DeepSeek/Kimi/MiMo 与视觉模型需另行配置，AI 学习包和视觉功能不能仅凭 Lecsync 地址推断可用。
 - 手机号在 `access_accounts` 表中以 Fernet 密文保存，查找使用 HMAC；`ACCOUNT_ENCRYPTION_KEY`、`ADMIN_PASSWORD`、`ADMIN_SESSION_SECRET` 只从服务器环境变量读取，不得写入源码或 APK。`REQUIRE_ACCOUNT_ACTIVATION=true` 为正式试用状态；紧急回退可设为 `false` 恢复旧的按设备默认额度。
