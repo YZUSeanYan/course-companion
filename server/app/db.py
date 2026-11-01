@@ -236,6 +236,19 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS trial_applications_phone
                     ON trial_applications(phone_hash, created_at);
+                CREATE TABLE IF NOT EXISTS activation_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    phone_hash TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+                    consumed_at TEXT,
+                    request_ip_hash TEXT,
+                    device_id TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS activation_codes_phone
+                    ON activation_codes(phone_hash, created_at);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -1003,6 +1016,94 @@ class Database:
         with self.connect() as connection:
             connection.execute(
                 "UPDATE sms_verification_codes SET consumed_at = ? "
+                "WHERE id = ? AND consumed_at IS NULL",
+                (self._now(), code_id),
+            )
+
+    def create_activation_code(
+        self,
+        phone_hash: str,
+        code_hash: str,
+        expires_at: str,
+        request_ip_hash: str | None,
+        device_id: str | None,
+    ) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO activation_codes(
+                    phone_hash, code_hash, expires_at, request_ip_hash, device_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (phone_hash, code_hash, expires_at, request_ip_hash, device_id, self._now()),
+            )
+            return int(cursor.lastrowid)
+
+    def last_activation_code_created_at(self, phone_hash: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT created_at FROM activation_codes "
+                "WHERE phone_hash = ? ORDER BY id DESC LIMIT 1",
+                (phone_hash,),
+            ).fetchone()
+        return None if row is None else str(row["created_at"])
+
+    def check_activation_code(
+        self,
+        phone_hash: str,
+        code_hash: str,
+        max_attempts: int,
+    ) -> tuple[str, dict | None]:
+        """Atomically consume a matching activation code and count failed attempts."""
+        import hmac
+
+        now = self._now()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT * FROM activation_codes
+                WHERE phone_hash = ? ORDER BY id DESC LIMIT 1
+                """,
+                (phone_hash,),
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return "not_found", None
+            current = dict(row)
+            if current["consumed_at"] is not None:
+                connection.commit()
+                return "consumed", current
+            if str(current["expires_at"]) < now:
+                connection.commit()
+                return "expired", current
+            if int(current["attempts"]) >= max_attempts:
+                connection.commit()
+                return "attempts_exhausted", current
+            if not hmac.compare_digest(str(current["code_hash"]), code_hash):
+                connection.execute(
+                    "UPDATE activation_codes SET attempts = attempts + 1 WHERE id = ?",
+                    (current["id"],),
+                )
+                connection.commit()
+                return "mismatch", current
+            connection.execute(
+                "UPDATE activation_codes SET consumed_at = ? WHERE id = ?",
+                (now, current["id"]),
+            )
+            connection.commit()
+            return "ok", current
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def invalidate_activation_code(self, code_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE activation_codes SET consumed_at = ? "
                 "WHERE id = ? AND consumed_at IS NULL",
                 (self._now(), code_id),
             )
