@@ -23,6 +23,20 @@ def phone_digest(phone: str, pepper: str) -> str:
     ).hexdigest()
 
 
+def sms_code_digest(phone: str, code: str, pepper: str) -> str:
+    return hmac.new(
+        pepper.encode("utf-8"),
+        ("sms-code:" + phone + ":" + code).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def request_ip_digest(ip: str, pepper: str) -> str:
+    return hmac.new(
+        pepper.encode("utf-8"), ("request-ip:" + ip).encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
 def _account_fernet(key: str) -> Fernet:
     derived = hashlib.sha256(("account-phone-encryption:" + key).encode("utf-8")).digest()
     return Fernet(base64.urlsafe_b64encode(derived))

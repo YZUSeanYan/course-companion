@@ -50,6 +50,7 @@ scripts/             本地检查与开发辅助
 - `server/app/main.py`：网关入口；`server/app/v2_provider.py`：模型调用与严格校验。
 - `server/app/admin_routes.py`：运营后台登录、账号与统计 API。
 - `admin/src/`：运营后台页面；`admin/dist` 不提交。
+- `site/src/pages/Apply.tsx`：官网试用申请页；短信验证码与自动开户规则见 `docs/VERIFICATION.md`。
 - `site/src/lib/release.ts`：官网版本、APK 地址与 SHA-256 的唯一当前来源。
 
 ## 4. 本地私有文件
@@ -107,6 +108,7 @@ npm run build
 
 - 管理后台只允许项目负责人使用；不得把管理员密码写入前端、源码、测试或示例。
 - 手机号是敏感个人信息：服务端必须加密保存，App 只能保存脱敏号码；不得在日志、错误消息或测试 fixture 中使用真实手机号。
+- 阿里云短信凭据只能来自服务器环境变量；验证码只保存 HMAC 摘要，必须有过期、尝试次数上限、重发冷却和手机号/IP 限流。未配置短信时申请接口必须明确失败，不得用固定验证码或日志输出替代。
 - 修改账号、配额或管理 API 必须覆盖未激活、停用、到期、设备上限、CSRF 和越权路径。
 
 - 当前全量 ESLint 仍有已知模板错误；修改文件应定向检查，不得伪造“lint 全绿”。

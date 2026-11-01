@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
 import LogoMark from '../components/site/LogoMark'
 import { APK_SHA256, CURRENT_RELEASE, LEGACY_RELEASE } from '../lib/release'
@@ -88,6 +89,10 @@ export default function Download() {
               <p className="body-2 mt-4" style={{ fontSize: 13, lineHeight: 1.7 }}>
                 V2.0.4 新增手机号试用额度与运营后台：AI 学习包、翻译、云端听课和文档解析需在「设置 → 试用额度」激活管理员添加的手机号；
                 额度按每日次数/时长和有效期管理，多台设备共用。离线听课和本机识别不受影响，学习内容与复习卡片也改为按类型分类浏览。
+              </p>
+              <p className="mt-3" style={{ fontSize: 13, fontWeight: 600 }}>
+                还没有试用额度？
+                <Link to="/apply" style={{ color: 'var(--brand-deep)', fontWeight: 800 }}>申请试用 →</Link>
               </p>
             </div>
 
