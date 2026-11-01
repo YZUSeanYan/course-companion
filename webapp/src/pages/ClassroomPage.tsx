@@ -4,10 +4,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
+import { db, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
 import { ClassroomController, type ClassroomSnapshot } from "../lib/classroom";
 import { TranslationQueue, lineTranslationOf } from "../lib/translate-queue";
 import { loadGatewayUrl } from "../lib/api/client";
+import { retranscribeWav, type TranscriptSegment } from "../lib/audio/transcribe-job";
 import { generatePackForSession } from "../lib/generate";
 import AccountCard from "../components/AccountCard";
 
@@ -15,6 +16,28 @@ const LANG_OPTIONS = [
   { value: "zh", label: "中文" },
   { value: "en", label: "English" },
 ];
+
+interface DigestSection {
+  title: string;
+  points: string[];
+}
+
+function parseDigestSections(digestJson: string): DigestSection[] {
+  if (!digestJson.trim()) return [];
+  try {
+    const parsed = JSON.parse(digestJson) as { sections?: unknown };
+    if (!Array.isArray(parsed.sections)) return [];
+    return parsed.sections
+      .filter((section): section is Record<string, unknown> => typeof section === "object" && section !== null)
+      .map((section) => ({
+        title: typeof section.title === "string" ? section.title : "",
+        points: Array.isArray(section.points) ? section.points.filter((p): p is string => typeof p === "string") : [],
+      }))
+      .filter((section) => section.title || section.points.length);
+  } catch {
+    return [];
+  }
+}
 
 function formatSeconds(total: number): string {
   const minutes = Math.floor(total / 60);
@@ -39,6 +62,9 @@ export default function ClassroomPage() {
   const [doubtNote, setDoubtNote] = useState("");
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [liveMinutes, setLiveMinutes] = useState(false);
+  const [digestJson, setDigestJson] = useState("");
+  const [retranscribing, setRetranscribing] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const subscribedRef = useRef(false);
 
@@ -48,6 +74,7 @@ export default function ClassroomPage() {
     controller.subscribe({
       onSnapshot: setSnapshot,
       onLineSaved: () => undefined,
+      onDigest: setDigestJson,
     });
   }, [controller]);
 
@@ -80,6 +107,7 @@ export default function ClassroomPage() {
 
   const start = async () => {
     setGenerateStatus(null);
+    setDigestJson("");
     if (!loadGatewayUrl()) {
       setGenerateStatus("请先在设置中配置网关地址");
       return;
@@ -92,7 +120,7 @@ export default function ClassroomPage() {
         translateDirection: sourceLang === "en" ? ["en", "zh"] : ["zh", "en"],
         speakerAttribution: false,
         glossaryTerms: [],
-        liveMinutes: false,
+        liveMinutes,
       });
     } catch {
       // 错误已通过 snapshot.statusMessage 呈现。
@@ -137,6 +165,60 @@ export default function ClassroomPage() {
     });
   };
 
+  const retranscribe = async () => {
+    if (snapshot.sessionId == null) return;
+    const sessionRecord: ClassroomSessionRecord | undefined = await db.sessions.get(snapshot.sessionId);
+    if (!sessionRecord?.audioBlob) {
+      setGenerateStatus("本节课没有可用的本地录音存档，无法补转写。");
+      return;
+    }
+    if ((lines ?? []).length > 0 && !window.confirm("补转写会替换现有转写内容并重新翻译，继续吗？")) {
+      return;
+    }
+    setRetranscribing(true);
+    setGenerateStatus("正在上传音频…");
+    try {
+      const outcome = await retranscribeWav(sessionRecord.audioBlob, {
+        onStatus: setGenerateStatus,
+      });
+      if (!outcome.segments.length) {
+        setGenerateStatus("云端没有返回可用的转写内容。");
+        return;
+      }
+      const sessionId = snapshot.sessionId;
+      const existingLineIds = (await db.transcriptLines.where("sessionId").equals(sessionId).toArray())
+        .map((line) => line.id!)
+        .filter(Boolean);
+      await db.transaction("rw", db.transcriptLines, db.translations, db.doubts, async () => {
+        if (existingLineIds.length) {
+          await db.translations.bulkDelete(
+            (await db.translations.toArray()).filter((t) => existingLineIds.includes(t.transcriptLineId)).map((t) => t.id!),
+          );
+          await db.transcriptLines.bulkDelete(existingLineIds);
+        }
+        const base = sessionRecord.startedAtMillis;
+        await db.transcriptLines.bulkAdd(
+          outcome.segments.map((segment: TranscriptSegment, index: number) => ({
+            sessionId,
+            timestampMillis: base + (segment.startMs || index * 1000),
+            text: segment.text,
+            segmentKey: `retranscribe-${index}`,
+            speaker: null,
+            startMs: segment.startMs || null,
+            endMs: segment.endMs || null,
+            language: null,
+          })),
+        );
+      });
+      setGenerateStatus(`补转写完成：${outcome.segments.length} 行，正在重新翻译…`);
+      void translationQueue.enqueueSession(sessionId);
+    } catch (error) {
+      setGenerateStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRetranscribing(false);
+    }
+  };
+
   return (
     <main>
       <h1 className="page-title">听课</h1>
@@ -162,6 +244,11 @@ export default function ClassroomPage() {
                 {course.name}
               </option>
             ))}
+          </select>
+          <label className="field-label">实时纪要（AI 课堂小结，额外消耗云端音频时长）</label>
+          <select className="text-input" value={liveMinutes ? "on" : "off"} onChange={(event) => setLiveMinutes(event.target.value === "on")}>
+            <option value="off">关闭</option>
+            <option value="on">开启</option>
           </select>
           <div className="btn-row">
             <button className="btn" onClick={() => setShowSettings(false)}>
@@ -241,11 +328,31 @@ export default function ClassroomPage() {
             <button className="btn btn-primary" onClick={() => void generatePack()}>
               生成 AI 学习包
             </button>
+            <button className="btn" onClick={() => void retranscribe()} disabled={retranscribing}>
+              {retranscribing ? "补转写中…" : "云端补转写"}
+            </button>
             <button className="btn" onClick={openCourse}>
               查看课程
             </button>
           </div>
           {generateStatus && <p className="muted" style={{ marginBottom: 0 }}>{generateStatus}</p>}
+        </div>
+      )}
+
+      {parseDigestSections(digestJson).length > 0 && (
+        <div className="glass-card">
+          <div className="card-title">
+            课堂纪要
+            {snapshot.phase === "listening" && <span className="pill">实时</span>}
+          </div>
+          {parseDigestSections(digestJson).map((section, index) => (
+            <div className="transcript-line" key={index}>
+              {section.title && <div className="zh"><strong>{section.title}</strong></div>}
+              {section.points.map((point, pointIndex) => (
+                <div className="zh" key={pointIndex}>· {point}</div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 

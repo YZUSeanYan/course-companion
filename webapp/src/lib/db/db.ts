@@ -23,6 +23,7 @@ export interface ClassroomSessionRecord {
   audioBlob: Blob | null;
   audioMime: string;
   courseId: number | null;
+  digestJson: string; // 实时纪要 digest.update 原始事件 JSON
 }
 
 export interface TranscriptLineRecord {

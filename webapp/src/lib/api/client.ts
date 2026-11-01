@@ -316,6 +316,27 @@ export class ZhixiClient {
     return URL.createObjectURL(blob);
   }
 
+  /** 云端音频补转写：上传音频创建任务（result 为 normalize 后的 camelCase JSON）。 */
+  async createAudioJob(
+    audio: Blob,
+    options: { language?: string; timestamps?: "none" | "segment" | "word"; hotwords?: string[] } = {},
+  ): Promise<{ jobId?: string; requestId?: string; id?: string; status?: string; [key: string]: unknown }> {
+    const form = new FormData();
+    form.append("file", audio, "classroom.wav");
+    form.append("options", JSON.stringify(options));
+    return this.requestJson("/v2/lecsync/audio/jobs", { method: "POST", body: form });
+  }
+
+  async getAudioJob(jobId: string): Promise<{ status?: string; [key: string]: unknown }> {
+    return this.requestJson(`/v2/lecsync/audio/jobs/${encodeURIComponent(jobId)}`, { method: "GET" });
+  }
+
+  async getAudioJobResult(jobId: string): Promise<unknown> {
+    return this.requestJson(`/v2/lecsync/audio/jobs/${encodeURIComponent(jobId)}/result`, {
+      method: "GET",
+    });
+  }
+
   /** 实时课堂 WebSocket 地址；浏览器无法自定义请求头，token 走 Sec-WebSocket-Protocol。 */
   realtimeUrl(): string {
     return `${this.baseUrl.replace(/^http/, "ws")}/v2/lecsync/realtime`;
