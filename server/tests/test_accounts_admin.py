@@ -37,7 +37,10 @@ def test_unactivated_device_gets_actionable_account_errors(settings, payload):
     response = client.post("/v1/analyze", json=payload, headers=headers)
     assert response.status_code == 403
     assert response.headers["X-Zhixi-Error-Code"] == "account_required"
-    assert "激活手机号" in response.json()["detail"]
+    # 文案同时服务 App 与网页版：不再出现「更新到最新版知习」这类客户端专属指引。
+    detail = response.json()["detail"]
+    assert "试用额度" in detail
+    assert "App" not in detail
 
     status_response = client.get("/v1/accounts/me", headers=headers)
     assert status_response.status_code == 200

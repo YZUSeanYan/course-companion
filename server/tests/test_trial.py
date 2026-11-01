@@ -129,6 +129,70 @@ def test_request_code_and_apply_creates_account_with_defaults(settings):
     assert application_count == 1
 
 
+def test_apply_with_device_token_binds_device_in_one_step(settings):
+    """浏览器自助申请：短信验证通过后直接绑定当前设备，无需第二次短信。"""
+    client, fake = make_trial_client(settings)
+    registration = client.post("/v1/devices/register")
+    assert registration.status_code == 201, registration.text
+    token = registration.json()["token"]
+    device_id = registration.json()["deviceId"]
+
+    phone = "13900000201"
+    assert request_code(client, phone).status_code == 200
+    code = fake.sent[-1][1]
+    applied = client.post(
+        "/v1/trial/apply",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "phone": phone,
+            "code": code,
+            "name": "王同学",
+            "nickname": "小王",
+            "consent": True,
+        },
+    )
+    assert applied.status_code == 201, applied.text
+    body = applied.json()
+    assert body["deviceBound"] is True
+    assert "已开通" in body["message"]
+
+    account = client.app.state.db.account_for_device(device_id)
+    assert account is not None and account["display_name"] == "小王"
+    # 绑定后无需激活即可通过额度校验
+    status = client.get(
+        "/v1/accounts/me", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    assert status["activated"] is True
+    assert status["phoneMasked"] == "139****0201"
+    assert status["limits"]["documentsPerDay"] == 5
+
+
+def test_apply_without_device_token_only_creates_account(settings):
+    client, fake = make_trial_client(settings)
+    phone = "13900000202"
+    assert request_code(client, phone).status_code == 200
+    applied = apply_trial(client, phone, fake.sent[-1][1])
+    assert applied.status_code == 201, applied.text
+    assert applied.json()["deviceBound"] is False
+
+    # 失效令牌不应让整笔申请失败（短信验证码已被消费，重试会很贵）
+    other = "13900000203"
+    assert request_code(client, other).status_code == 200
+    stale = client.post(
+        "/v1/trial/apply",
+        headers={"Authorization": "Bearer not-a-real-token"},
+        json={
+            "phone": other,
+            "code": fake.sent[-1][1],
+            "name": "赵同学",
+            "nickname": "小赵",
+            "consent": True,
+        },
+    )
+    assert stale.status_code == 201, stale.text
+    assert stale.json()["deviceBound"] is False
+
+
 def test_wrong_code_is_bounded(settings):
     client, fake = make_trial_client(settings)
     phone = "13900000102"

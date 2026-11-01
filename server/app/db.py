@@ -36,7 +36,8 @@ class AccountRequired(AccountError):
     code = "account_required"
 
     def __init__(self) -> None:
-        super().__init__("请先更新到最新版知习，并在 设置 → 试用额度 中激活手机号")
+        # 网页版与 App 共用这段文案：不指向任何单一客户端，避免浏览器用户被要求「去 App」。
+        super().__init__("需要先激活试用额度：在「设置 → 试用额度」用手机号激活即可")
 
 
 class AccountDisabled(AccountError):

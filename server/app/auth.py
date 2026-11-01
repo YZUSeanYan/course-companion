@@ -46,3 +46,26 @@ def activated_device(
 ) -> str:
     require_active_account(request.app.state.db, request.app.state.settings, device_id)
     return device_id
+
+
+def optional_device_identity(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> str | None:
+    """解析可选设备身份：没有令牌或令牌已失效时返回 None，不拦截匿名调用。
+
+    用于「自助申请试用」这类既允许浏览器（带设备令牌、希望顺带激活）也允许
+    不带身份的服务端调用的端点。令牌无效时不抛 401，避免已经消费掉短信验证码
+    的申请因设备身份过期而整笔失败。
+    """
+    settings = request.app.state.settings
+    if not settings.token_pepper:
+        return None
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        return None
+    device_id = request.app.state.db.find_device_by_token_hash(
+        token_digest(credentials.credentials, settings.token_pepper)
+    )
+    if device_id is not None:
+        request.state.device_id = device_id
+    return device_id

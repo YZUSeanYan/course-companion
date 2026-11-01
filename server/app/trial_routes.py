@@ -5,11 +5,12 @@ import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 
 from .accounts import mask_phone, normalize_phone
+from .auth import optional_device_identity
 from .config import Settings
-from .db import Database
+from .db import AccountError, Database
 from .rate_limit import SlidingWindowRateLimiter
 from .security import (
     encrypt_account_phone,
@@ -101,7 +102,7 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
             raise _trial_error(
                 status.HTTP_409_CONFLICT,
                 "phone_registered",
-                "该手机号已在试用名单中，可直接在 App 内激活",
+                "该手机号已在试用名单中，直接获取激活验证码即可使用",
             )
         ip_key = request_ip_digest(client_ip(request), pepper)
         if not phone_limiter.allow(phone_hash) or not ip_code_limiter.allow(ip_key):
@@ -170,7 +171,9 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
         status_code=status.HTTP_201_CREATED,
     )
     def apply_for_trial(
-        payload: TrialApplyRequest, request: Request
+        payload: TrialApplyRequest,
+        request: Request,
+        device_id: str | None = Depends(optional_device_identity),
     ) -> TrialApplicationResponse:
         pepper = require_pepper()
         if not payload.consent:
@@ -225,7 +228,7 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
             raise _trial_error(
                 status.HTTP_409_CONFLICT,
                 "phone_registered",
-                "该手机号已在试用名单中，可直接在 App 内激活",
+                "该手机号已在试用名单中，直接获取激活验证码即可使用",
             )
         account_key = settings.account_key
         if not account_key:
@@ -255,12 +258,24 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
                 raise _trial_error(
                     status.HTTP_409_CONFLICT,
                     "phone_registered",
-                    "该手机号已在试用名单中，可直接在 App 内激活",
+                    "该手机号已在试用名单中，直接获取激活验证码即可使用",
                 ) from exc
             raise
         database.record_trial_application(
             str(uuid.uuid4()), str(account["id"]), phone_hash, ip_key
         )
+        # 浏览器自助申请：短信已验证手机号，直接把当前设备绑定到新账号，
+        # 让网页版（含 iOS/Safari）一次短信就完成「申请 + 激活」，无需再装 App。
+        device_bound = False
+        if device_id:
+            try:
+                database.bind_device(
+                    str(account["id"]), device_id, int(account["max_devices"])
+                )
+                device_bound = True
+            except AccountError:
+                # 设备已绑定其他账号或达到上限：申请仍然成功，客户端可走常规激活流程。
+                device_bound = False
         return TrialApplicationResponse(
             applied=True,
             phoneMasked=mask_phone(phone),
@@ -272,5 +287,6 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
                 documentsPerDay=settings.account_default_document_daily_limit,
                 maxDevices=settings.account_default_max_devices,
             ),
-            message="申请成功，已加入试用名单",
+            message="申请成功，已开通试用额度" if device_bound else "申请成功，已加入试用名单",
+            deviceBound=device_bound,
         )

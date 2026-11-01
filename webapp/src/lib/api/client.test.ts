@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sha256Hex, zhixi, ZhixiApiError } from "./client";
+import { describeError, isActivationError, sha256Hex, zhixi, ZhixiApiError } from "./client";
 import type { AccountStatus, SyncChange } from "./types";
 
 describe("sha256Hex", () => {
@@ -19,7 +19,8 @@ describe("ZhixiApiError.userMessage", () => {
     expect(new ZhixiApiError("", 429, "quota_exceeded", "audio_seconds").userMessage).toContain("音频");
     expect(new ZhixiApiError("", 429, "quota_exceeded", "text").userMessage).toContain("翻译");
     expect(new ZhixiApiError("", 403, "account_required").userMessage).toContain("激活");
-    expect(new ZhixiApiError("", 404, "account_not_found").userMessage).toContain("管理员");
+    // 网页版不再把未开卡用户指向 App / 管理员，而是指向本页自助申请。
+    expect(new ZhixiApiError("", 404, "account_not_found").userMessage).toContain("申请试用");
   });
 
   it("设备上限提示包含上限数字", () => {
@@ -150,6 +151,76 @@ describe("activateAccountWithCode（两步激活第 2 步）", () => {
     const error = await zhixi.activateAccountWithCode("13800001234", "000000").catch((e: unknown) => e);
     expect((error as ZhixiApiError).code).toBe("code_mismatch");
     expect((error as ZhixiApiError).userMessage).toBe("验证码不正确，还可尝试 4 次");
+  });
+});
+
+describe("自助申请试用（网页版独立可用）", () => {
+  it("requestTrialCode POST {phone} 并解析冷却时间", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${GATEWAY}/v1/trial/request-code`);
+      return jsonResponse({
+        sent: true,
+        phoneMasked: "139****0997",
+        expiresInSeconds: 300,
+        resendAfterSeconds: 60,
+      });
+    });
+    const result = await zhixi.requestTrialCode("13800001234");
+    expect(result.resendAfterSeconds).toBe(60);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ phone: "13800001234" });
+  });
+
+  it("applyTrial 携带设备 Bearer，返回 deviceBound 供 UI 判断是否需要二次验证", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${GATEWAY}/v1/trial/apply`);
+      return jsonResponse(
+        {
+          applied: true,
+          phoneMasked: "139****0997",
+          validUntil: "2027-01-02",
+          limits: {
+            aiPacksPerDay: 5,
+            audioMinutesPerDay: 30,
+            textCharactersPerDay: 20000,
+            documentsPerDay: 5,
+            maxDevices: 3,
+          },
+          message: "申请成功，已开通试用额度",
+          deviceBound: true,
+        },
+        { status: 201 },
+      );
+    });
+    const applied = await zhixi.applyTrial({
+      phone: "13800001234",
+      code: "123456",
+      name: "张三",
+      nickname: "小张",
+      consent: true,
+    });
+    expect(applied.deviceBound).toBe(true);
+    expect(applied.validUntil).toBe("2027-01-02");
+    const headers = new Headers(calls[0].init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer token-1");
+  });
+
+  it("409 phone_registered 映射到 isActivationError 之外的独立错误码", async () => {
+    mockFetch(() =>
+      jsonResponse(
+        { detail: "该手机号已在试用名单中" },
+        { status: 409, headers: { "X-Zhixi-Error-Code": "phone_registered" } },
+      ),
+    );
+    const error = await zhixi.requestTrialCode("13800001234").catch((e: unknown) => e);
+    expect((error as ZhixiApiError).code).toBe("phone_registered");
+    expect(isActivationError(error)).toBe(false);
+  });
+
+  it("describeError/isActivationError 区分激活类错误与其它错误", () => {
+    expect(isActivationError(new ZhixiApiError("", 403, "account_required"))).toBe(true);
+    expect(isActivationError(new ZhixiApiError("", 404, "account_not_found"))).toBe(true);
+    expect(isActivationError(new Error("boom"))).toBe(false);
+    expect(describeError(new ZhixiApiError("原文", 403, "account_required"))).toContain("设置");
   });
 });
 
