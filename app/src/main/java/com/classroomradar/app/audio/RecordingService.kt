@@ -167,6 +167,7 @@ class RecordingService : Service() {
                 engine = localEngine
                 localEngine.start(object : TranscriptionEngine.Listener {
                     override fun onPartialText(text: String) = handlePartialTranscript(text)
+                    override fun onPartialTranslation(text: String?) = handlePartialTranslation(text)
                     override fun onFinalText(text: String) = handleFinalTranscript(text)
                     override fun onFinalSegment(segment: TranscriptSegment) = handleFinalSegment(segment)
                     override fun onError(error: Throwable) = handleEngineFailure(error)
@@ -185,7 +186,9 @@ class RecordingService : Service() {
         check(localRecorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
             "The microphone did not enter the recording state."
         }
-        val buffer = ShortArray(SAMPLE_RATE / 5)
+        // 100ms chunks keep first-word latency near the official 0.28s figure;
+        // 200ms chunking would add up to a tenth of a second before the audio even leaves.
+        val buffer = ShortArray(SAMPLE_RATE / 10)
         var consecutiveEmptyReads = 0
         while (recording && !paused) {
             val read = localRecorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
@@ -274,6 +277,10 @@ class RecordingService : Service() {
             requestForegroundNotificationUpdate()
             RecordingBus.emit(RecorderEvent.PartialTranscript(text))
         }
+    }
+
+    private fun handlePartialTranslation(text: String?) {
+        if (recording) RecordingBus.emit(RecorderEvent.PartialTranslation(text))
     }
 
     private fun handleEngineFailure(error: Throwable) {

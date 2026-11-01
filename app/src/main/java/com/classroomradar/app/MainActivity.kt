@@ -878,6 +878,7 @@ private data class DashboardState(
     val transcript: List<TranscriptLineEntity> = emptyList(),
     val translations: Map<Long, TranslationEntity> = emptyMap(),
     val liveTranscript: String = "",
+    val liveTranslation: String? = null,
     val failureMessage: String? = null,
     val doubts: List<DoubtEventEntity> = emptyList(),
     val liveMinutes: String? = null,
@@ -939,18 +940,21 @@ private class ClassroomPresenter(private val appContext: Context) {
                         isPaused = event.isPaused,
                         elapsedSeconds = event.elapsedSeconds,
                         liveTranscript = if (event.isRecording) _dashboard.value.liveTranscript else "",
+                        liveTranslation = if (event.isRecording) _dashboard.value.liveTranslation else null,
                         cloudMetrics = if (event.isRecording) _dashboard.value.cloudMetrics else null,
                     )
                     is RecorderEvent.PartialTranscript -> _dashboard.value = _dashboard.value.copy(liveTranscript = event.text, failureMessage = null)
+                    is RecorderEvent.PartialTranslation -> _dashboard.value = _dashboard.value.copy(liveTranslation = event.text?.takeIf(String::isNotBlank))
                     is RecorderEvent.Transcript -> _dashboard.value = _dashboard.value.copy(
                         liveTranscript = "",
+                        liveTranslation = null,
                         failureMessage = null,
                     )
                     is RecorderEvent.LiveMinutes -> _dashboard.value = _dashboard.value.copy(liveMinutes = event.contentJson)
                     is RecorderEvent.CloudMetrics -> _dashboard.value = _dashboard.value.copy(
                         cloudMetrics = RecorderDashboardMetrics(event.recognitionLatencyMs, event.translationLatencyMs),
                     )
-                    is RecorderEvent.Failure -> _dashboard.value = _dashboard.value.copy(failureMessage = event.message, liveTranscript = "")
+                    is RecorderEvent.Failure -> _dashboard.value = _dashboard.value.copy(failureMessage = event.message, liveTranscript = "", liveTranslation = null)
                 }
             }
         }
@@ -1700,6 +1704,7 @@ private fun HomeScreen(
             TranscriptCard(
                 transcript = state.transcript,
                 liveTranscript = state.liveTranscript,
+                liveTranslation = state.liveTranslation,
                 failureMessage = state.failureMessage,
                 translations = state.translations,
                 cloudMetrics = state.cloudMetrics,
@@ -1941,6 +1946,7 @@ private fun TranscriptCard(
     liveTranscript: String,
     failureMessage: String?,
     cloudMetrics: RecorderDashboardMetrics? = null,
+    liveTranslation: String? = null,
 ) {
     GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2004,12 +2010,24 @@ private fun TranscriptCard(
                             shape = RoundedCornerShape(18.dp),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                         ) {
-                            Text(
-                                "正在识别  $liveTranscript",
-                                color = LiquidTextPrimary,
-                                maxLines = 8,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    "正在识别  $liveTranscript",
+                                    color = LiquidTextPrimary,
+                                    maxLines = 8,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                // Streaming translation preview, like the official bilingual subtitle.
+                                if (!liveTranslation.isNullOrBlank()) {
+                                    Text(
+                                        "译  $liveTranslation",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = LiquidTextSecondary,
+                                        maxLines = 4,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

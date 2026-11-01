@@ -13,6 +13,8 @@ data class TranscriptSegment(
 interface TranscriptionEngine : AutoCloseable {
     interface Listener {
         fun onPartialText(text: String)
+        /** Cloud engines stream the in-flight translation; null clears the preview. */
+        fun onPartialTranslation(text: String?) = Unit
         fun onFinalText(text: String)
         fun onFinalSegment(segment: TranscriptSegment) = onFinalText(segment.text)
         fun onError(error: Throwable)

@@ -60,6 +60,7 @@ class LecsyncRealtimeEngine(
     @Volatile private var streamOffsetMs = 0L
     @Volatile private var cloudTaskId: String? = null
     @Volatile private var listener: TranscriptionEngine.Listener? = null
+    @Volatile private var liveTranslation: String? = null
     private var reconnectAttempts = 0
     private val pending = ByteArrayOutputStream()
     private val segmentLines = ConcurrentHashMap<String, Long>()
@@ -67,6 +68,7 @@ class LecsyncRealtimeEngine(
     private val latencyTracker = RealtimeLatencyTracker()
     private var lastMetricsEmitAtMs = 0L
     private var lastEmittedRecognitionMs = 0L
+    private var lastEmittedTranslationMs: Long? = null
     private val lock = Any()
 
     override fun start(listener: TranscriptionEngine.Listener) {
@@ -117,6 +119,7 @@ class LecsyncRealtimeEngine(
             streamStartedAt = System.currentTimeMillis()
             streamId = java.util.UUID.randomUUID().toString()
             latencyTracker.resetStream()
+            liveTranslation = null
             runCatching { stream?.cancel() }
             RecordingBus.emit(RecorderEvent.Failure("连接已中断，正在恢复；已保存的课堂不会丢失"))
             connect()
@@ -215,11 +218,18 @@ class LecsyncRealtimeEngine(
             }
             "transcript.partial" -> {
                 latencyTracker.onPartial(System.currentTimeMillis())?.let { publishMetrics() }
+                // Sentence-mode partials carry the unconfirmed tail's translation preview.
+                event.string("tailTranslation")?.takeIf(String::isNotBlank)?.let {
+                    liveTranslation = it
+                    listener.onPartialTranslation(it)
+                }
                 event.string("text")?.takeIf(String::isNotBlank)?.let(listener::onPartialText)
             }
             "transcript.final" -> {
                 val text = event.string("text").orEmpty().trim()
                 val segment = event.string("segmentId")
+                liveTranslation = null
+                listener.onPartialTranslation(null)
                 if (text.isEmpty() || segment == null) return
                 latencyTracker.onFinal(segment, System.currentTimeMillis())
                 listener.onFinalSegment(
@@ -235,6 +245,10 @@ class LecsyncRealtimeEngine(
             }
             "translation.partial" -> {
                 latencyTracker.onTranslationPartial(System.currentTimeMillis())?.let { publishMetrics() }
+                event.string("text")?.takeIf(String::isNotBlank)?.let { preview ->
+                    liveTranslation = preview
+                    listener.onPartialTranslation(preview)
+                }
             }
             "translation.final" -> {
                 val segment = event.string("segmentId") ?: return
@@ -286,16 +300,17 @@ class LecsyncRealtimeEngine(
         pendingTranslations.remove(segmentKey)?.let { translation -> saveTranslation(lineId, translation) }
     }
 
-    /** Publishes live latency at most twice a second and only when the value moved. */
+    /** Publishes live latency at most twice a second and only when a value moved. */
     private fun publishMetrics() {
         val now = System.currentTimeMillis()
         val recognition = latencyTracker.recognitionLatencyMs
-        if (now - lastMetricsEmitAtMs < 500 || recognition == lastEmittedRecognitionMs) return
+        val translation = latencyTracker.translationLatencyMs.takeIf { it > 0 }
+        if (now - lastMetricsEmitAtMs < 500) return
+        if (recognition == lastEmittedRecognitionMs && translation == lastEmittedTranslationMs) return
         lastMetricsEmitAtMs = now
         lastEmittedRecognitionMs = recognition
-        RecordingBus.emit(
-            RecorderEvent.CloudMetrics(recognition, latencyTracker.translationLatencyMs.takeIf { it > 0 }),
-        )
+        lastEmittedTranslationMs = translation
+        RecordingBus.emit(RecorderEvent.CloudMetrics(recognition, translation))
     }
 
     private fun saveTranslation(lineId: Long, event: JsonObject) {

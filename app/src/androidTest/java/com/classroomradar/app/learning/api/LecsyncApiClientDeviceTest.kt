@@ -66,10 +66,12 @@ class LecsyncApiClientDeviceTest {
         val server = MockWebServer()
         server.enqueue(MockResponse().setResponseCode(201).setBody("{\"deviceId\":\"device\",\"token\":\"development-token\",\"tokenType\":\"bearer\"}"))
         val received = java.util.concurrent.CopyOnWriteArrayList<JsonObject>()
-        val latch = CountDownLatch(5)
+        val latch = CountDownLatch(7)
         val listener = object : okhttp3.WebSocketListener() {
             override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
                 webSocket.send("{\"type\":\"session.ready\",\"sessionId\":\"s1\"}")
+                webSocket.send("{\"type\":\"transcript.partial\",\"text\":\"A lat\",\"tailTranslation\":\"一台车\"}")
+                webSocket.send("{\"type\":\"translation.partial\",\"text\":\"一台车床\"}")
                 webSocket.send("{\"type\":\"transcript.final\",\"segmentId\":\"1\",\"text\":\"A lathe\",\"startMs\":0,\"endMs\":1000,\"speaker\":\"speaker_0\"}")
                 webSocket.send("{\"type\":\"translation.final\",\"segmentId\":\"1\",\"text\":\"车床\",\"sourceText\":\"A lathe\",\"targetLanguage\":\"zh\"}")
                 webSocket.send("{\"type\":\"digest.update\",\"sections\":[{\"title\":\"Machines\",\"points\":[\"Lathes\"],\"status\":\"pending\"}]}")
@@ -93,6 +95,8 @@ class LecsyncApiClientDeviceTest {
                 override fun onClosed(code: Int, reason: String) = Unit
             })
             assertTrue(latch.await(15, TimeUnit.SECONDS))
+            assertTrue(received.any { it["type"]?.jsonPrimitive?.content == "transcript.partial" })
+            assertTrue(received.any { it["type"]?.jsonPrimitive?.content == "translation.partial" })
             assertTrue(received.any { it["type"]?.jsonPrimitive?.content == "transcript.final" })
             assertTrue(received.any { it["type"]?.jsonPrimitive?.content == "translation.final" })
             assertTrue(received.any { it["type"]?.jsonPrimitive?.content == "digest.update" })
