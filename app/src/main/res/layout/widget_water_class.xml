@@ -17,7 +17,7 @@
             android:layout_width="28dp"
             android:layout_height="28dp"
             android:contentDescription="@string/app_name"
-            android:src="@drawable/widget_brand_mark" />
+            android:src="@drawable/ic_brand_square" />
 
         <LinearLayout
             android:layout_width="0dp"

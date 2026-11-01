@@ -100,7 +100,28 @@ class ClassroomRepository private constructor(
 
     fun finishSession(sessionId: Long, endedAtMillis: Long) = dao.finishSession(sessionId, endedAtMillis)
 
+    /** Replaces a session's provisional local transcript with cloud re-transcription segments. */
+    fun replaceSessionTranscript(sessionId: Long, segments: List<com.classroomradar.app.audio.TranscriptSegment>) {
+        val now = System.currentTimeMillis()
+        val lines = segments.mapIndexed { index, segment ->
+            TranscriptLineEntity(
+                sessionId = sessionId,
+                timestampMillis = now + index,
+                text = segment.text,
+                segmentKey = segment.segmentKey,
+                speaker = segment.speaker,
+                startMs = segment.startMs,
+                endMs = segment.endMs,
+                language = segment.language,
+            )
+        }
+        if (lines.isEmpty()) return
+        dao.replaceSessionTranscript(sessionId, lines)
+    }
+
     fun setAudioPath(sessionId: Long, relativePath: String?) = dao.updateAudioPath(sessionId, relativePath)
+
+    fun getSessionAudioPath(sessionId: Long): String? = dao.getSession(sessionId)?.audioRelativePath
 
     fun observeSessionSummaries() = dao.observeSessionSummaries()
     fun observeSession(sessionId: Long) = dao.observeSession(sessionId)
