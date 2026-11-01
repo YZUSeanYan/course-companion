@@ -92,6 +92,16 @@
 - 补充（PR #60，r22）：`session.error retryable=false`（额度耗尽等）标记为 fatal，**立即停止重连**并展示原因，避免无效重试期间继续推流计费。
 - **线上验证**（假麦克风流）：课堂运行中强制断开 socket（1005）→ 自动重连出新连接 → 课堂继续「听课中」、React 树完好。
 
+## 网页版自助开通与官网重做（2026-11-02，r23 / 网关 r17）
+
+- **问题**：网页版导入讲义后，新注册用户被提示「请先更新到最新版知习，并在 设置 → 试用额度 中激活手机号」——文案写死 App 语境，且网页版没有自助开卡路径（`/v1/accounts/activate/request-code` 对未开卡手机号直接 404），iOS 用户因此无法独立使用。
+- **服务端（网关 r17）**：`/v1/trial/apply` 接受可选 `Authorization` 设备令牌，短信验证通过后直接用同一账号绑定当前设备并返回 `deviceBound`，浏览器一次短信完成「申请 + 激活」；新增 `optional_device_identity`，令牌失效时按匿名调用放行，避免已消费验证码的申请整整失败；`account_required` / `account_not_found` / `phone_registered` 文案去掉 App 专属指向与「更新到最新版」。
+- **网页版（r23）**：设置页「试用额度」改为申请/激活一体——先探测是否已开卡，`account_not_found` 时自动切换到自助申请（昵称必填、姓名可选、同意条款），开卡后立刻刷新额度；讲义导入、学习包生成、云端听课失败改用 `userMessage` 并给出「去激活试用额度 →」入口。
+- **官网（/opt/shuike-site）**：重写设计系统并统一六个页面（PageHero / SectionHead / CtaBand 共享组件、统一字号刻度与分区留白、卡片/按钮/键值表）。修复深色分区标题不可见（`.display` 的 `-webkit-text-fill-color: transparent` 覆盖了 `color:#fff`）、750/650 非标准字重、中文负字距与伪粗体、中文标签套大写宽字距等字体问题；申请页改两栏、反馈页改三卡 + 双列问答、隐私页加目录侧栏。四张 App 截图重新从模拟器抓取（原先「间隔复习」误抓为系统启动器、「实时听课」为待机页）。
+- **验证**：server 144 项通过（`test_lecsync_admin` 仅因本机缺 `mutagen` 失败，该依赖已在 `requirements.txt`）；webapp `tsc` + 69 项 vitest；site `tsc` + build；桌面 1440 逐页渲染核对，390 宽无横向溢出。
+- **线上核对**：`zhixi.seanyan.store/v1/accounts/me`（新设备）返回 `activated:false`；`/v2/learning-pack/jobs` 与 `/v2/documents/analyze` 对未激活设备返回 `需要先激活试用额度：在「设置 → 试用额度」用手机号激活即可`（403，不再提 App）；`shuike.seanyan.store` 已切到新 bundle，`screenshots/app-live-class.png` 200（356,786 字节），`downloads/` 373M 与 `models/` 298M 未受影响。
+- **未做真机短信验证**：`/v1/trial/request-code` 会真实发短信，本轮只用已注册设备验证了 404/403/422 分支，未向任何手机号发送验证码。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
