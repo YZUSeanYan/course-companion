@@ -16,6 +16,13 @@ class PauseActionTest {
     fun pauseAndResumeKeepTheSameRecordingSession() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        // 显式使用云端引擎：设备测试不依赖本机是否下载过离线模型或残留设置。
+        context.getSharedPreferences("water_class_radar_settings", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("cloud_listening_enabled", true)
+            .putBoolean("force_offline_recording", false)
+            .putBoolean("offline_first_start", false)
+            .commit()
         automation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             automation.grantRuntimePermission(context.packageName, Manifest.permission.POST_NOTIFICATIONS)
