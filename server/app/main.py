@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -70,6 +71,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Course Companion Learning Analysis", version="1.2.0")
     app.state.settings = settings
     app.state.db = Database(settings.database_path, settings.usage_timezone)
+    if settings.web_cors_origins:
+        # 网页版与网关不同源部署时的显式白名单；同源部署（网关托管 /web/）无需开启。
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.web_cors_origins),
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+            expose_headers=["X-Zhixi-Error-Code", "X-Zhixi-Quota-Scope", "X-Zhixi-Quota-Limit", "X-Zhixi-Quota-Used"],
+        )
     register_v2_routes(app, settings)
     register_document_routes(app, settings)
     from .lecsync_routes import register_lecsync_routes
