@@ -1,5 +1,6 @@
 import Reveal from '../components/site/Reveal'
 import Waveform from '../components/site/Waveform'
+import { BenchmarksSection } from '../components/site/BenchmarksSection'
 
 /* ---------- 小插图：设备端识别 ---------- */
 function AsrIllustration() {
@@ -334,6 +335,8 @@ export default function Features() {
           </Reveal>
         </div>
       </section>
+
+      <BenchmarksSection />
 
       {SECTIONS.map((s, i) => (
         <section
