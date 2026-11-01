@@ -113,7 +113,7 @@ def register_activation_routes(app: FastAPI, settings: Settings) -> None:
             raise _activation_error(
                 status.HTTP_404_NOT_FOUND,
                 "account_not_found",
-                "未找到该手机号的试用额度，请联系管理员添加",
+                "该手机号还没有试用额度，可自助申请试用或联系管理员添加",
             )
         state = account_state(account, database.today())
         if state == "disabled":

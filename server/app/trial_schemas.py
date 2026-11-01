@@ -48,6 +48,8 @@ class TrialApplicationResponse(StrictModel):
     valid_until: str = Field(alias="validUntil")
     limits: TrialLimitsResponse
     message: str = ""
+    # 调用方带了有效设备令牌时，开卡后直接绑定该设备；浏览器自助申请因此只需一次短信。
+    device_bound: bool = Field(default=False, alias="deviceBound")
 
 
 class TrialStatusResponse(StrictModel):

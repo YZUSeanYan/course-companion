@@ -17,6 +17,8 @@ import type {
   SyncPullResponse,
   SyncPushResponse,
   TranslateResponse,
+  TrialApplication,
+  TrialCodeResult,
 } from "./types";
 
 export type ErrorCode =
@@ -27,6 +29,7 @@ export type ErrorCode =
   | "device_limit_reached"
   | "quota_exceeded"
   | "sms_not_configured"
+  | "phone_registered"
   | "cooldown"
   | "rate_limited"
   | "code_mismatch"
@@ -66,15 +69,17 @@ export class ZhixiApiError extends Error {
   get userMessage(): string {
     switch (this.code) {
       case "account_required":
-        return "请先在设置中激活试用额度，离线功能不受影响。";
+        return "需要先激活试用额度：在「设置 → 试用额度」用手机号激活，一次短信即可完成。";
       case "account_expired":
         return "试用额度已到期，请联系管理员续期。";
       case "account_disabled":
         return "账号已停用，请联系管理员。";
       case "account_not_found":
-        return "未找到该手机号的试用额度，请联系管理员添加。";
+        return "该手机号还没有试用额度，可在本页直接申请试用。";
       case "sms_not_configured":
         return "短信服务未配置，请联系管理员开通。";
+      case "phone_registered":
+        return "该手机号已有试用额度，改用激活验证码即可。";
       case "cooldown":
         return "验证码发送过于频繁，请稍等片刻再试。";
       case "rate_limited":
@@ -290,6 +295,35 @@ export class ZhixiClient {
     });
   }
 
+  /**
+   * 自助申请试用第 1 步：请求申请验证码。
+   * 手机号已在试用名单时服务端返回 409（phone_registered），此时应改用激活通道。
+   */
+  async requestTrialCode(phone: string): Promise<TrialCodeResult> {
+    return this.requestJson("/v1/trial/request-code", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    });
+  }
+
+  /**
+   * 自助申请试用第 2 步：验证码通过后开通试用额度。
+   * 请求带设备令牌时服务端会把当前浏览器绑定到新账号（deviceBound=true），
+   * 因此网页版（含 iOS/Safari）不需要安装 App，也不需要第二次短信。
+   */
+  async applyTrial(payload: {
+    phone: string;
+    code: string;
+    name: string;
+    nickname: string;
+    consent: boolean;
+  }): Promise<TrialApplication> {
+    return this.requestJson("/v1/trial/apply", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   /** 云空间同步：推送一批本地变更（服务端限 ≤500 条/批，调用方负责分批）。 */
   async syncPush(changes: SyncChange[]): Promise<SyncPushResponse> {
     return this.requestJson("/v1/sync/push", {
@@ -421,6 +455,25 @@ function mapJobErrorCode(code: string): ErrorCode {
     default:
       return "unknown";
   }
+}
+
+/** 面向用户的错误文案：优先用按错误码映射的可执行提示，而不是服务端原文。 */
+export function describeError(error: unknown): string {
+  if (error instanceof ZhixiApiError) return error.userMessage;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+/** 该错误是否属于「需要激活试用额度」这类可由账户卡片解决的问题。 */
+export function isActivationError(error: unknown): boolean {
+  if (!(error instanceof ZhixiApiError)) return false;
+  return (
+    error.code === "account_required" ||
+    error.code === "account_not_found" ||
+    error.code === "account_expired" ||
+    error.code === "account_disabled" ||
+    error.code === "device_limit_reached"
+  );
 }
 
 export function sleep(ms: number): Promise<void> {

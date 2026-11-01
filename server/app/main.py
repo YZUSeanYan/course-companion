@@ -220,7 +220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if account is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="未找到该手机号的试用额度，请联系管理员添加",
+                detail="该手机号还没有试用额度，可自助申请试用或联系管理员添加",
                 headers={"X-Zhixi-Error-Code": "account_not_found"},
             )
         state = account_state(account, db.today())

@@ -41,6 +41,25 @@ export interface ActivationCodeResult {
   cooldownSeconds: number;
 }
 
+/** POST /v1/trial/request-code 响应（自助申请试用第 1 步）。 */
+export interface TrialCodeResult {
+  sent: boolean;
+  phoneMasked: string;
+  expiresInSeconds: number;
+  resendAfterSeconds: number;
+}
+
+/** POST /v1/trial/apply 响应（自助申请试用第 2 步）。 */
+export interface TrialApplication {
+  applied: boolean;
+  phoneMasked: string;
+  validUntil: string;
+  limits: AccountLimits;
+  message: string;
+  /** 申请时带了设备令牌：服务端已把当前设备绑定到新账号，无需再收一次验证码。 */
+  deviceBound: boolean;
+}
+
 // ---------- 云空间同步（/v1/sync） ----------
 
 /** 参与同步的实体；与 webapp/src/lib/db/db.ts 的 8 张表一一对应。 */

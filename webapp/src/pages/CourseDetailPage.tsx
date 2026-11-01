@@ -9,8 +9,9 @@ import { groupLearningItems, LEARNING_CATEGORIES } from "../lib/pack";
 import { generatePackForMaterial } from "../lib/generate";
 import { importCet6Csv } from "../lib/cet6";
 import { exportCourseMarkdown } from "../lib/export";
-import { zhixi } from "../lib/api/client";
+import { describeError, isActivationError, zhixi } from "../lib/api/client";
 import type { DocumentAsset } from "../lib/api/types";
+import ActivationNotice from "../components/ActivationNotice";
 
 export default function CourseDetailPage() {
   const { courseId } = useParams();
@@ -30,7 +31,14 @@ export default function CourseDetailPage() {
   const cet6InputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [needsActivation, setNeedsActivation] = useState(false);
   const [openType, setOpenType] = useState<string | null>(null);
+
+  // 统一错误出口：额度未激活时给出可点击的「去激活」入口，而不是把服务端原文直接铺在页面上。
+  const reportError = (error: unknown) => {
+    setStatus(describeError(error));
+    setNeedsActivation(isActivationError(error));
+  };
 
   if (!course) {
     return (
@@ -58,9 +66,10 @@ export default function CourseDetailPage() {
         pageCount: asset.pages.length,
         importedAtMillis: Date.now(),
       });
+      setNeedsActivation(false);
       setStatus(`已导入 ${file.name}（${asset.pages.length} 页）`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      reportError(error);
     } finally {
       setUploading(false);
     }
@@ -70,9 +79,10 @@ export default function CourseDetailPage() {
     setStatus("正在创建生成任务…");
     try {
       const outcome = await generatePackForMaterial({ materialId, onStatus: setStatus });
+      setNeedsActivation(false);
       setStatus(`已生成 ${outcome.itemCount} 项学习内容、${outcome.cardCount} 张复习卡`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      reportError(error);
     }
   };
 
@@ -81,9 +91,10 @@ export default function CourseDetailPage() {
     try {
       const text = await file.text();
       const count = await importCet6Csv(courseIdNumber, text);
+      setNeedsActivation(false);
       setStatus(`已导入 ${count} 个 CET6 词条，重复词条已跳过`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      reportError(error);
     }
   };
 
@@ -143,7 +154,7 @@ export default function CourseDetailPage() {
           </div>
         ))}
         {(materials ?? []).length === 0 && <p className="muted" style={{ marginBottom: 0 }}>还没有讲义。也可以在「听课」页生成课堂学习包。</p>}
-        {status && <p className="muted" style={{ marginBottom: 0 }}>{status}</p>}
+        {status && <ActivationNotice text={status} needsActivation={needsActivation} />}
       </div>
 
       <div className="category-grid">

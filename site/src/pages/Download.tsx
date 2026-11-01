@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
 import LogoMark from '../components/site/LogoMark'
+import PageHero from '../components/site/PageHero'
+import SectionHead from '../components/site/SectionHead'
+import CtaBand from '../components/site/CtaBand'
 import { APK_SHA256, CURRENT_RELEASE, LEGACY_RELEASE, WEB_APP_URL } from '../lib/release'
 
 const LEGACY_COUNT_URL = '/api/downloads/count'
 const LEGACY_INCREMENT_URL = '/api/downloads/increment'
 
 const STORES = [
-  { name: '知习官网直链', status: `v${CURRENT_RELEASE.version} ${CURRENT_RELEASE.channel}` },
-  { name: '小米应用商店', status: '审核筹备中' },
-  { name: '华为应用市场', status: '计划中' },
+  { name: '知习官网直链', status: `v${CURRENT_RELEASE.version} ${CURRENT_RELEASE.channel}`, live: true },
+  { name: '小米应用商店', status: '审核筹备中', live: false },
+  { name: '华为应用市场', status: '计划中', live: false },
 ]
 
 const SPECS = [
@@ -18,7 +21,7 @@ const SPECS = [
   { k: '系统要求', v: CURRENT_RELEASE.minAndroid },
   { k: '设备架构', v: CURRENT_RELEASE.abi },
   { k: '安装包体积', v: CURRENT_RELEASE.sizeLabel },
-  { k: '账号要求', v: '无需注册账号；AI 学习包、翻译、云端听课与文档解析需在设置中激活管理员发放的手机号试用额度，离线听课不受影响' },
+  { k: '账号要求', v: '无需注册账号；AI 学习包、翻译、云端听课与文档解析需在「设置 → 试用额度」激活手机号试用额度，离线听课不受影响' },
   { k: '离线模型', v: 'release 版不内置模型；首次离线听课前需在设置中联网下载' },
   { k: '联网说明', v: '模型下载、云端听课 / 音频转写、Voice Typing、翻译、文档解析与 AI 学习包需联网' },
   { k: '所需权限', v: '麦克风 · 通知 · 前台服务 · 网络 · 震动；文件通过系统选择器导入' },
@@ -49,149 +52,161 @@ export default function Download() {
 
   return (
     <div className="page-enter">
-      <section className="radar-bg">
-        <div className="container-x pt-16 pb-16 lg:pt-24 text-center">
-          <Reveal className="flex justify-center">
-            <div className="wiggle inline-block">
-              <LogoMark size={88} />
-            </div>
-          </Reveal>
-          <Reveal delay={0.08}>
-            <p className="release-pill mt-7">ZHIXI V{CURRENT_RELEASE.version} · {CURRENT_RELEASE.channel}</p>
-            <h1 className="display mt-5" style={{ fontSize: 'clamp(36px, 5vw, 58px)' }}>
-              获取知习
-            </h1>
-            <p className="body-2 mt-5 mx-auto max-w-xl" style={{ fontSize: 16 }}>
-              本地离线听课与可选云端听课并行，支持音频导入、AI 学习包与间隔复习。
-              无需注册账号；AI 与云端功能需激活管理员发放的手机号试用额度。
-            </p>
-          </Reveal>
-          <Reveal delay={0.16}>
-            <div className="download-panel glass-card mt-9 mx-auto">
-              <a
-                className="btn btn-primary"
-                href={CURRENT_RELEASE.apkUrl}
-                download={`zhixi-v${CURRENT_RELEASE.version}.apk`}
-                style={{ padding: '16px 34px', fontSize: 17 }}
-              >
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" />
-                </svg>
-                下载知习 v{CURRENT_RELEASE.version}
-              </a>
-              <p className="mt-4" style={{ fontSize: 13.5, fontWeight: 750, color: 'var(--ink-2)' }}>
-                {CURRENT_RELEASE.channel} · {CURRENT_RELEASE.sizeLabel} · {CURRENT_RELEASE.minAndroidShort} · {CURRENT_RELEASE.abi} · 需激活试用额度
-              </p>
-              <div className="model-notice mt-5">
-                <strong>首次离线听课前：</strong>release 版不内置离线识别模型，请先联网进入「设置」下载模型；
-                也可以主动开启云端听课。
-              </div>
-              <p className="body-2 mt-4" style={{ fontSize: 13, lineHeight: 1.7 }}>
-                V2.0.4 新增手机号试用额度与运营后台：AI 学习包、翻译、云端听课和文档解析需在「设置 → 试用额度」激活管理员添加的手机号；
-                额度按每日次数/时长和有效期管理，多台设备共用。离线听课和本机识别不受影响，学习内容与复习卡片也改为按类型分类浏览。
-              </p>
-              <p className="mt-3" style={{ fontSize: 13, fontWeight: 600 }}>
-                还没有试用额度？
-                <Link to="/apply" style={{ color: 'var(--brand-deep)', fontWeight: 800 }}>申请试用 →</Link>
-              </p>
-              <p className="mt-2" style={{ fontSize: 13, fontWeight: 600 }}>
-                不想安装 App？
-                <a href={WEB_APP_URL} style={{ color: 'var(--brand-deep)', fontWeight: 800 }}>直接打开网页版 →</a>
-                <span className="body-2" style={{ fontSize: 12, color: 'var(--ink-3)' }}>（电脑/手机浏览器免安装，同一手机号共用额度）</span>
-              </p>
-            </div>
+      <PageHero
+        align="center"
+        top={<div className="wiggle inline-block"><LogoMark size={76} /></div>}
+        eyebrow="DOWNLOAD"
+        title="选择你的使用方式"
+        lead="不想装 App？网页版在电脑、Android 与 iPhone / iPad 的浏览器里都能用，云端听课、讲义导入、AI 学习包与复习计划完整可用。"
+        actions={
+          <>
+            <a href={WEB_APP_URL} className="btn btn--primary btn--lg">
+              打开网页版（免安装）
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M6 3h7v7M13 3 7.5 8.5M9 13H3V7" /></svg>
+            </a>
+            <a href={CURRENT_RELEASE.apkUrl} download={`zhixi-v${CURRENT_RELEASE.version}.apk`} className="btn btn--ghost btn--lg">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" /></svg>
+              下载 Android 版
+            </a>
+          </>
+        }
+      >
+        <p className="tiny mt-5">同一手机号可在 App 与网页版共用额度；网页版不需要激活以外任何安装步骤。</p>
+      </PageHero>
 
-            <div className="mt-7 flex flex-col items-center gap-3">
-              <a
-                className="btn btn-ghost"
-                href={LEGACY_RELEASE.apkUrl}
-                onClick={trackLegacyDownload}
-                style={{ padding: '12px 26px', fontSize: 14 }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" />
-                </svg>
-                下载前代「{LEGACY_RELEASE.productName}」v{LEGACY_RELEASE.version}
-              </a>
-              <p className="body-2" style={{ fontSize: 13 }}>
-                前代独立版本 · {LEGACY_RELEASE.sizeLabel} · 内置离线模型 · 纯离线课堂转写与提问捕捉
-              </p>
-              {legacyCount !== null && (
-                <p className="inline-flex items-center gap-2 rounded-full px-4 py-1.5" style={{ fontSize: 12.5, fontWeight: 800, background: 'var(--brand-soft)', color: 'var(--brand-deep)' }}>
-                  <span className="rec-dot" style={{ background: 'var(--brand)' }} />
-                  仅前代「{LEGACY_RELEASE.productName}」累计下载 {legacyCount.toLocaleString()} 次
+      {/* ============ App 下载面板 ============ */}
+      <section className="band band--surface">
+        <div className="container-x section">
+          <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
+            <Reveal>
+              <SectionHead
+                eyebrow="ANDROID APP"
+                title={`知习 App v${CURRENT_RELEASE.version}`}
+                lead="需要离线听课、课堂录音与本地识别时使用 App；模型按需下载，识别在设备端完成。"
+              />
+              <div className="card mt-8">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="release-pill">V{CURRENT_RELEASE.version} · {CURRENT_RELEASE.channel}</span>
+                  <span className="pill">{CURRENT_RELEASE.sizeLabel}</span>
+                  <span className="pill">{CURRENT_RELEASE.minAndroidShort}</span>
+                  <span className="pill">{CURRENT_RELEASE.abi}</span>
+                </div>
+                <a
+                  className="btn btn--primary btn--lg btn--block mt-6"
+                  href={CURRENT_RELEASE.apkUrl}
+                  download={`zhixi-v${CURRENT_RELEASE.version}.apk`}
+                >
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" />
+                  </svg>
+                  下载知习 v{CURRENT_RELEASE.version}
+                </a>
+                <p className="tiny mt-4">安装包需在系统设置中允许「安装未知来源应用」；SHA-256 见右侧安装须知。</p>
+                <div className="notice notice--warn mt-4">
+                  <strong>首次离线听课前：</strong>release 版不内置离线识别模型，请先联网进入「设置」下载模型；
+                  也可以主动开启云端听课。
+                </div>
+                <p className="small mt-4">
+                  V2.0.4 新增手机号试用额度与运营后台：AI 学习包、翻译、云端听课和文档解析需在「设置 → 试用额度」激活手机号；
+                  额度按每日次数/时长和有效期管理，多台设备共用。离线听课和本机识别不受影响。
                 </p>
-              )}
-            </div>
-          </Reveal>
+                <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2">
+                  <Link to="/apply" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>试用额度怎么获得 →</Link>
+                  <a href={WEB_APP_URL} style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)' }}>先用网页版试试 →</a>
+                </div>
+              </div>
+            </Reveal>
+
+            <Reveal delay={0.08}>
+              <SectionHead eyebrow="SPECIFICATIONS" title="安装须知" />
+              <div className="rows mt-8">
+                {SPECS.map((s) => (
+                  <div key={s.k} className="rows__row">
+                    <p className="rows__key">{s.k}</p>
+                    <p className="rows__val">{s.v}</p>
+                  </div>
+                ))}
+              </div>
+            </Reveal>
+          </div>
         </div>
       </section>
 
-      <section className="hairline-t" style={{ background: 'var(--surface)' }}>
-        <div className="container-x py-16 grid gap-12 lg:grid-cols-2">
-          <Reveal>
-            <p className="mono-label">WHERE TO GET IT</p>
-            <h2 className="display mt-4" style={{ fontSize: 'clamp(26px, 3.2vw, 36px)' }}>获取渠道</h2>
-            <div className="flex flex-col gap-3 mt-8">
-              {STORES.map((s, i) => (
-                <Reveal key={s.name} delay={i * 0.06}>
-                  <div className="channel-row flex flex-wrap items-center gap-4 rounded-2xl px-5 py-4">
-                    <span className="flex shrink-0 items-center justify-center rounded-xl" style={{ width: 40, height: 40, background: 'var(--brand-soft)' }}>
+      {/* ============ 渠道 + 前代版本 ============ */}
+      <section className="band">
+        <div className="container-x section">
+          <div className="grid gap-10 lg:grid-cols-2 lg:gap-16">
+            <Reveal>
+              <SectionHead eyebrow="WHERE TO GET IT" title="获取渠道" />
+              <div className="mt-8 flex flex-col gap-3">
+                {STORES.map((s) => (
+                  <div key={s.name} className="card flex flex-wrap items-center gap-4" style={{ padding: '16px 20px' }}>
+                    <span className="card__icon" style={{ width: 40, height: 40 }}>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" /></svg>
                     </span>
-                    <p style={{ fontSize: 15, fontWeight: 800 }}>{s.name}</p>
-                    <span className="ml-auto rounded-full px-3 py-1" style={{ fontSize: 11, fontWeight: 800, background: 'var(--section)', color: 'var(--ink-2)' }}>
-                      {s.status}
-                    </span>
+                    <p style={{ fontSize: 15, fontWeight: 700 }}>{s.name}</p>
+                    <span className={`pill ml-auto ${s.live ? 'pill--ok' : ''}`}>{s.status}</span>
                   </div>
-                </Reveal>
-              ))}
-            </div>
-            <p className="body-2 mt-6" style={{ fontSize: 13.5 }}>
-              官网当前提供知习 v{CURRENT_RELEASE.version} {CURRENT_RELEASE.channel} APK 直链。
-              应用商店仍在筹备；前代「{LEGACY_RELEASE.productName}」作为独立旧版本保留，不与知习新版混计。
-            </p>
-          </Reveal>
+                ))}
+              </div>
+              <p className="small mt-5">
+                官网当前提供知习 v{CURRENT_RELEASE.version} {CURRENT_RELEASE.channel} APK 直链。
+                应用商店仍在筹备；前代「{LEGACY_RELEASE.productName}」作为独立旧版本保留，不与知习新版混计。
+              </p>
+            </Reveal>
+
+            <Reveal delay={0.08}>
+              <SectionHead eyebrow="LEGACY" title={`前代「${LEGACY_RELEASE.productName}」`} />
+              <div className="card mt-8">
+                <p className="body-2" style={{ fontSize: 14 }}>
+                  前代纯离线版：内置离线模型，只做课堂转写与提问捕捉，不申请网络权限。
+                  它作为独立版本保留，计数不与知习新版混计。
+                </p>
+                <div className="rows mt-5">
+                  {LEGACY_SPECS.map((s) => (
+                    <div key={s.k} className="rows__row">
+                      <p className="rows__key">{s.k}</p>
+                      <p className="rows__val">{s.v}</p>
+                    </div>
+                  ))}
+                </div>
+                <a
+                  className="btn btn--ghost btn--block mt-5"
+                  href={LEGACY_RELEASE.apkUrl}
+                  onClick={trackLegacyDownload}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" />
+                  </svg>
+                  下载前代 v{LEGACY_RELEASE.version}
+                </a>
+                {legacyCount !== null && (
+                  <p className="tiny mt-3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="rec-dot" style={{ background: 'var(--brand)' }} />
+                    仅前代「{LEGACY_RELEASE.productName}」累计下载 <span className="num">{legacyCount.toLocaleString()}</span> 次
+                  </p>
+                )}
+              </div>
+            </Reveal>
+          </div>
 
           <Reveal delay={0.1}>
-            <p className="mono-label">SPECIFICATIONS</p>
-            <h2 className="display mt-4" style={{ fontSize: 'clamp(26px, 3.2vw, 36px)' }}>安装须知（知习）</h2>
-            <div className="spec-card mt-8 rounded-3xl overflow-hidden">
-              {SPECS.map((s, i) => (
-                <div
-                  key={s.k}
-                  className="grid sm:grid-cols-[132px_1fr] gap-1.5 sm:gap-4 px-5 sm:px-6 py-4"
-                  style={{ background: i % 2 === 0 ? 'var(--bg)' : 'var(--surface)', borderTop: i === 0 ? 'none' : '1px solid var(--line)' }}
-                >
-                  <p style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink-2)' }}>{s.k}</p>
-                  <p style={{ fontSize: 13.5, fontWeight: 600, overflowWrap: 'anywhere' }}>{s.v}</p>
-                </div>
-              ))}
-            </div>
-            <div className="spec-card mt-6 rounded-3xl overflow-hidden">
-              <p className="px-5 sm:px-6 py-3" style={{ fontSize: 12, fontWeight: 800, color: 'var(--ink-3)', background: 'var(--section)', letterSpacing: '.06em' }}>
-                LEGACY · 前代离线版（独立下载与计数）
-              </p>
-              {LEGACY_SPECS.map((s) => (
-                <div
-                  key={s.k}
-                  className="grid sm:grid-cols-[132px_1fr] gap-1.5 sm:gap-4 px-5 sm:px-6 py-4"
-                  style={{ background: 'var(--bg)', borderTop: '1px solid var(--line)' }}
-                >
-                  <p style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink-2)' }}>{s.k}</p>
-                  <p style={{ fontSize: 13.5, fontWeight: 600 }}>{s.v}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-6 rounded-2xl p-5" style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn-line)' }}>
-              <p style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--warn-ink)', lineHeight: 1.75 }}>
-                <strong>温馨提示：</strong>长时间录音受系统后台策略影响，请按 App 内引导设置自启动与电池优化，并在正式上课前做一次短时测试。
-                课堂录音请先取得任课教师许可，不要在禁止录音或涉密场所使用。
-              </p>
+            <div className="notice notice--warn mt-10">
+              <strong>温馨提示：</strong>长时间录音受系统后台策略影响，请按 App 内引导设置自启动与电池优化，并在正式上课前做一次短时测试。
+              课堂录音请先取得任课教师许可，不要在禁止录音或涉密场所使用。
             </div>
           </Reveal>
         </div>
       </section>
+
+      <CtaBand
+        eyebrow="NO INSTALL NEEDED"
+        title={<>不装 App，<br />也能把课上完。</>}
+        lead="网页版在浏览器里运行，iPhone / iPad 同样可用；AI 与云端功能在「设置 → 试用额度」自助申请并激活，一次短信完成。"
+      >
+        <a href={WEB_APP_URL} className="btn btn--light btn--lg">打开网页版</a>
+        <Link to="/apply" className="btn btn--on-dark btn--lg">了解试用额度</Link>
+      </CtaBand>
     </div>
   )
 }

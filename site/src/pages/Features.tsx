@@ -1,186 +1,204 @@
+import type { ReactNode } from 'react'
 import Reveal from '../components/site/Reveal'
 import Waveform from '../components/site/Waveform'
-import { BenchmarksSection } from '../components/site/BenchmarksSection'
+import PageHero from '../components/site/PageHero'
+import SectionHead from '../components/site/SectionHead'
+import CtaBand from '../components/site/CtaBand'
+import BenchmarksSection from '../components/site/BenchmarksSection'
+import { Link } from 'react-router'
+import { WEB_APP_URL } from '../lib/release'
 
-/* ---------- 小插图：设备端识别 ---------- */
-function AsrIllustration() {
+/* ---------- 统一的插图容器：所有功能插图共用同一套内边距与标题样式 ---------- */
+function MiniPanel({
+  label,
+  dark = false,
+  children,
+}: {
+  label: string
+  dark?: boolean
+  children: ReactNode
+}) {
   return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--dark)', border: '1px solid var(--dark-line)' }}>
-      <p className="mono-label mb-5" style={{ color: '#888' }}>ON-DEVICE ASR</p>
-      <div className="flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: 'var(--dark-2)', border: '1px solid var(--dark-line)' }}>
-        <span className="rec-dot" />
-        <Waveform color="var(--brand)" />
-        <span style={{ fontSize: 11, color: '#999', fontFamily: 'var(--font-mono)' }}>16kHz · mono</span>
-      </div>
-      <div className="mt-3 rounded-xl px-4 py-3" style={{ background: 'var(--dark-2)', border: '1px solid var(--dark-line)' }}>
-        <p style={{ fontSize: 12.5, color: '#e8e8e8', lineHeight: 1.8, fontWeight: 600 }}>
-          Good morning everyone, let's start with a quick review of last week's lecture……
-        </p>
-        <p style={{ fontSize: 10, color: '#666', marginTop: 6, fontFamily: 'var(--font-mono)' }}>流式 Zipformer → Paraformer 定稿 · 设备端推理</p>
-      </div>
-      <div className="mt-3 rounded-xl px-4 py-3 flex items-center justify-between" style={{ background: 'var(--dark-2)', border: '1px solid var(--dark-line)' }}>
-        <p style={{ fontSize: 11, color: '#bbb', fontWeight: 700 }}>离线识别模型</p>
-        <span className="rounded-full px-2.5 py-1" style={{ fontSize: 10, fontWeight: 800, background: 'rgba(255,103,13,.15)', color: 'var(--brand)' }}>
-          设置中按需下载
-        </span>
-      </div>
+    <div className={`card ${dark ? 'card--dark' : 'card--soft'}`} style={{ padding: 24 }}>
+      <p className="eyebrow eyebrow--plain" style={dark ? { color: 'var(--brand)' } : undefined}>
+        {label}
+      </p>
+      <div className="mt-4 flex flex-col gap-3">{children}</div>
     </div>
   )
 }
 
-/* ---------- 小插图：云端听课与音频导入 ---------- */
+const miniLine = {
+  border: '1px solid var(--line)',
+  borderRadius: 'var(--r-md)',
+  background: '#fff',
+  padding: '12px 14px',
+} as const
+
+const miniLineDark = {
+  border: '1px solid var(--dark-line)',
+  borderRadius: 'var(--r-md)',
+  background: 'var(--dark)',
+  padding: '12px 14px',
+} as const
+
+/* ---------- 设备端识别 ---------- */
+function AsrIllustration() {
+  return (
+    <MiniPanel label="ON-DEVICE ASR" dark>
+      <div className="flex items-center gap-3 rounded-[var(--r-md)] px-4 py-3" style={{ background: 'var(--dark)', border: '1px solid var(--dark-line)' }}>
+        <span className="rec-dot" />
+        <Waveform color="var(--brand)" />
+        <span className="tiny" style={{ fontFamily: 'var(--font-mono)' }}>16kHz · mono</span>
+      </div>
+      <div style={miniLineDark}>
+        <p style={{ fontSize: 12.5, color: '#e8e8e8', lineHeight: 1.8, fontWeight: 600 }}>
+          Good morning everyone, let's start with a quick review of last week's lecture……
+        </p>
+        <p className="tiny mt-2" style={{ fontFamily: 'var(--font-mono)' }}>流式 Zipformer → Paraformer 定稿 · 设备端推理</p>
+      </div>
+      <div className="flex items-center justify-between gap-3" style={miniLineDark}>
+        <p style={{ fontSize: 12, color: 'var(--on-dark-2)', fontWeight: 600 }}>离线识别模型</p>
+        <span className="pill" style={{ background: 'rgba(255,103,13,.16)', borderColor: 'rgba(255,103,13,.3)', color: 'var(--brand)' }}>
+          设置中按需下载
+        </span>
+      </div>
+    </MiniPanel>
+  )
+}
+
+/* ---------- 云端听课与音频导入 ---------- */
 function CloudAudioIllustration() {
   return (
-    <div className="illustration-card rounded-3xl p-6">
-      <p className="mono-label mb-5">CLOUD LISTENING & AUDIO</p>
+    <MiniPanel label="CLOUD LISTENING & AUDIO">
       <div className="flex flex-wrap gap-2">
         {['云端听课', '导入音频', 'Voice Typing'].map((item) => (
-          <span key={item} className="rounded-full px-3 py-1.5" style={{ fontSize: 11, fontWeight: 800, background: 'var(--brand-soft)', color: 'var(--brand-deep)' }}>
-            {item}
-          </span>
+          <span key={item} className="pill pill--brand">{item}</span>
         ))}
       </div>
-      <div className="audio-route mt-4 rounded-2xl p-4">
+      <div className="audio-route">
         <div className="flex items-center gap-3">
           <span className="audio-route-icon"><Waveform color="var(--brand)" /></span>
           <div>
-            <p style={{ fontSize: 13, fontWeight: 800 }}>你选择的课堂音频</p>
-            <p style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2 }}>主动开启或导入并确认</p>
+            <p style={{ fontSize: 13, fontWeight: 700 }}>你选择的课堂音频</p>
+            <p className="tiny" style={{ marginTop: 2 }}>主动开启或导入并确认</p>
           </div>
         </div>
         <div className="audio-route-line" aria-hidden />
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-center">
-          <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
-            <p style={{ fontSize: 11.5, fontWeight: 800 }}>知习服务器</p>
-            <p style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>安全转发</p>
+          <div style={miniLine}>
+            <p style={{ fontSize: 12, fontWeight: 700 }}>知习服务器</p>
+            <p className="tiny" style={{ marginTop: 2 }}>安全转发</p>
           </div>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 9h11M10 5l4 4-4 4" /></svg>
-          <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
-            <p style={{ fontSize: 11.5, fontWeight: 800 }}>Lecsync</p>
-            <p style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>转写与音频智能</p>
+          <div style={miniLine}>
+            <p style={{ fontSize: 12, fontWeight: 700 }}>Lecsync</p>
+            <p className="tiny" style={{ marginTop: 2 }}>转写与音频智能</p>
           </div>
         </div>
       </div>
-      <p className="body-2 mt-4" style={{ fontSize: 11.5 }}>
+      <p className="tiny" style={{ lineHeight: 1.8 }}>
         云端录音默认不保存；只有主动开启云端保留后，音频与转写才保留 30 天，可通过云端任务删除。
       </p>
-    </div>
+    </MiniPanel>
   )
 }
 
-/* ---------- 小插图：翻译队列 ---------- */
+/* ---------- 翻译队列 ---------- */
 function TranslateIllustration() {
   return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
-      <p className="mono-label mb-5">TRANSLATION QUEUE</p>
-      <div className="flex flex-col gap-3">
-        <div className="rounded-xl px-4 py-3" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
-          <p style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)' }}>原文 · 16:10:48</p>
-          <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', marginTop: 3, lineHeight: 1.6 }}>
-            So the displacement current is not a real current, but it explains the gap……
-          </p>
-        </div>
-        <div className="rounded-xl px-4 py-3" style={{ background: 'rgba(61,111,168,.08)', border: '1px solid rgba(61,111,168,.35)' }}>
-          <p style={{ fontSize: 10.5, fontWeight: 800, color: '#3d6fa8' }}>AI 翻译 · 已生成</p>
-          <p style={{ fontSize: 12.5, fontWeight: 600, color: '#2d5378', marginTop: 3, lineHeight: 1.6 }}>
-            所以位移电流并不是真实的电流，但它解释了这段空隙……
-          </p>
-        </div>
-        <div className="rounded-xl px-4 py-2.5 flex items-center gap-2" style={{ background: 'var(--bg)', border: '1px dashed var(--line)' }}>
-          <span style={{ fontSize: 11 }}>🛡️</span>
-          <p style={{ fontSize: 11, color: 'var(--ink-2)', fontWeight: 600 }}>网络中断时：翻译排队等待，录音与原文落库照常进行</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------- 小插图：标记疑问 ---------- */
-function MarkIllustration() {
-  return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--dark)', border: '1px solid var(--dark-line)' }}>
-      <p className="mono-label mb-5" style={{ color: '#888' }}>MARK A QUESTION</p>
-      <div className="flex flex-col gap-3">
-        <div className="rounded-xl px-4 py-3 flex items-center gap-3" style={{ background: 'var(--brand)' }}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="#fff"><path d="M8 1.5a3.5 3.5 0 0 1 3.5 3.5c0 1.5-.8 2.4-1.5 3.2-.5.6-.8 1-.8 1.8H6.8c0-.8-.3-1.2-.8-1.8C5.3 7.4 4.5 6.5 4.5 5A3.5 3.5 0 0 1 8 1.5Z"/><path d="M6.6 11.5h2.8v.8a1.4 1.4 0 1 1-2.8 0v-.8Z"/></svg>
-          <p style={{ fontSize: 12.5, fontWeight: 800, color: '#fff' }}>标记疑问 · 一键按下</p>
-          <span className="ml-auto" style={{ fontSize: 10, color: 'rgba(255,255,255,.8)', fontFamily: 'var(--font-mono)' }}>16:10:52</span>
-        </div>
-        <div className="rounded-xl px-4 py-3" style={{ background: 'var(--dark-2)', border: '1px solid var(--dark-line)' }}>
-          <p style={{ fontSize: 10.5, fontWeight: 800, color: '#888' }}>自动关联课堂原文</p>
-          <p style={{ fontSize: 12, fontWeight: 600, color: '#e8e8e8', marginTop: 3, lineHeight: 1.7 }}>
-            Who can explain what displacement current means?
-          </p>
-        </div>
-        <div className="rounded-xl px-4 py-3" style={{ background: 'var(--dark-2)', border: '1px dashed rgba(255,103,13,.45)' }}>
-          <p style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--brand)' }}>备注（可选）</p>
-          <p style={{ fontSize: 11.5, color: '#999', marginTop: 3, lineHeight: 1.7 }}>来不及写备注也没关系——先存下来，课后补。</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------- 小插图：AI 学习包 ---------- */
-function PackageIllustration() {
-  return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
-      <p className="mono-label mb-5">AI STUDY PACKAGE</p>
-      <div className="rounded-xl p-4" style={{ background: 'var(--dark)', fontFamily: 'var(--font-mono)' }}>
-        <p style={{ fontSize: 11, color: '#888' }}># 电磁场与波 · 10-29 学习包</p>
-        <p style={{ fontSize: 11, color: '#e8e8e8', marginTop: 8 }}>## 重难点 · 位移电流</p>
-        <p style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>定义 / 物理意义 / 与传导电流的区别</p>
-        <p style={{ fontSize: 11, color: '#e8e8e8', marginTop: 8 }}>## 疑问解答（你标记于 16:10）</p>
-        <p style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>Q: 位移电流是什么意思？</p>
-        <p style={{ fontSize: 11, color: '#e8e8e8', marginTop: 8 }}>## 自测卡 ×5</p>
-        <p style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>「位移电流」 → 已进入明天复习计划</p>
-      </div>
-      <div className="flex flex-wrap gap-2 mt-4">
-        {['课堂纪要', '讲义纪要', '备考纪要', 'Markdown 导出'].map((f) => (
-          <span key={f} className="rounded-full px-3 py-1.5" style={{ fontSize: 11, fontWeight: 800, background: 'var(--brand-soft)', color: 'var(--brand-deep)' }}>{f}</span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ---------- 小插图：文档解析 ---------- */
-function DocIllustration() {
-  return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
-      <p className="mono-label mb-5">DOCUMENT PARSING</p>
-      <div className="flex flex-col gap-3">
-        {[
-          { p: '第 1 页 · 文字版讲义', s: '原生文本直接提取', ok: true },
-          { p: '第 2 页 · 公式截图', s: '原图保留 + 视觉模型解析', ok: true },
-          { p: '第 3 页 · 手写推导', s: '原图保留，标记待视觉解析', ok: false },
-        ].map((r) => (
-          <div key={r.p} className="flex items-center gap-4 rounded-xl px-4 py-3" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
-            <div className="flex-1">
-              <p style={{ fontSize: 13, fontWeight: 800 }}>{r.p}</p>
-              <p style={{ fontSize: 11.5, color: 'var(--ink-2)', marginTop: 2 }}>{r.s}</p>
-            </div>
-            <span
-              className="rounded-full px-2.5 py-1"
-              style={{
-                fontSize: 10, fontWeight: 800,
-                background: r.ok ? 'var(--brand-soft)' : 'var(--section)',
-                color: r.ok ? 'var(--brand-deep)' : 'var(--ink-3)',
-              }}
-            >
-              {r.ok ? '已解析' : '原图兜底'}
-            </span>
-          </div>
-        ))}
-        <p style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.7 }}>
-          OCR 提取不到结构时，保留页面原图而不是伪造内容——解析不上的部分，宁可让你亲眼看到原题。
+    <MiniPanel label="TRANSLATION QUEUE">
+      <div style={miniLine}>
+        <p className="tiny" style={{ fontWeight: 700 }}>原文 · 16:10:48</p>
+        <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', marginTop: 3, lineHeight: 1.7 }}>
+          So the displacement current is not a real current, but it explains the gap……
         </p>
       </div>
-    </div>
+      <div style={{ ...miniLine, background: 'rgba(61,111,168,.08)', border: '1px solid rgba(61,111,168,.3)' }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: '#3d6fa8' }}>AI 翻译 · 已生成</p>
+        <p style={{ fontSize: 12.5, fontWeight: 600, color: '#2d5378', marginTop: 3, lineHeight: 1.7 }}>
+          所以位移电流并不是真实的电流，但它解释了这段空隙……
+        </p>
+      </div>
+      <div className="flex items-center gap-2" style={{ ...miniLine, border: '1px dashed var(--line-2)', background: 'var(--bg)' }}>
+        <span aria-hidden>🛡️</span>
+        <p className="tiny" style={{ fontWeight: 600 }}>网络中断时：翻译排队等待，录音与原文落库照常进行</p>
+      </div>
+    </MiniPanel>
   )
 }
 
-/* ---------- 小插图：间隔复习 ---------- */
+/* ---------- 标记疑问 ---------- */
+function MarkIllustration() {
+  return (
+    <MiniPanel label="MARK A QUESTION" dark>
+      <div className="flex items-center gap-3 rounded-[var(--r-md)] px-4 py-3" style={{ background: 'var(--brand)' }}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="#fff" aria-hidden><path d="M8 1.5a3.5 3.5 0 0 1 3.5 3.5c0 1.5-.8 2.4-1.5 3.2-.5.6-.8 1-.8 1.8H6.8c0-.8-.3-1.2-.8-1.8C5.3 7.4 4.5 6.5 4.5 5A3.5 3.5 0 0 1 8 1.5Z" /><path d="M6.6 11.5h2.8v.8a1.4 1.4 0 1 1-2.8 0v-.8Z" /></svg>
+        <p style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>标记疑问 · 一键按下</p>
+        <span className="tiny ml-auto" style={{ fontFamily: 'var(--font-mono)' }}>16:10:52</span>
+      </div>
+      <div style={miniLineDark}>
+        <p className="tiny" style={{ fontWeight: 700 }}>自动关联课堂原文</p>
+        <p style={{ fontSize: 12, fontWeight: 600, color: '#e8e8e8', marginTop: 3, lineHeight: 1.7 }}>
+          Who can explain what displacement current means?
+        </p>
+      </div>
+      <div style={{ ...miniLineDark, border: '1px dashed rgba(255,103,13,.45)' }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--brand)' }}>备注（可选）</p>
+        <p style={{ fontSize: 12, color: 'var(--on-dark-2)', marginTop: 3, lineHeight: 1.7 }}>来不及写备注也没关系——先存下来，课后补。</p>
+      </div>
+    </MiniPanel>
+  )
+}
+
+/* ---------- AI 学习包 ---------- */
+function PackageIllustration() {
+  return (
+    <MiniPanel label="AI STUDY PACKAGE">
+      <div style={{ background: 'var(--dark)', borderRadius: 'var(--r-md)', padding: 16, fontFamily: 'var(--font-mono)' }}>
+        <p style={{ fontSize: 11, color: 'var(--on-dark-3)' }}># 电磁场与波 · 10-29 学习包</p>
+        <p style={{ fontSize: 11, color: '#e8e8e8', marginTop: 10 }}>## 重难点 · 位移电流</p>
+        <p style={{ fontSize: 11, color: 'var(--on-dark-2)', marginTop: 4 }}>定义 / 物理意义 / 与传导电流的区别</p>
+        <p style={{ fontSize: 11, color: '#e8e8e8', marginTop: 10 }}>## 疑问解答（你标记于 16:10）</p>
+        <p style={{ fontSize: 11, color: 'var(--on-dark-2)', marginTop: 4 }}>Q: 位移电流是什么意思？</p>
+        <p style={{ fontSize: 11, color: '#e8e8e8', marginTop: 10 }}>## 自测卡 ×5</p>
+        <p style={{ fontSize: 11, color: 'var(--on-dark-2)', marginTop: 4 }}>「位移电流」→ 已进入明天复习计划</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {['课堂纪要', '讲义纪要', '备考纪要', 'Markdown 导出'].map((f) => (
+          <span key={f} className="pill pill--brand">{f}</span>
+        ))}
+      </div>
+    </MiniPanel>
+  )
+}
+
+/* ---------- 文档解析 ---------- */
+function DocIllustration() {
+  const rows = [
+    { p: '第 1 页 · 文字版讲义', s: '原生文本直接提取', ok: true },
+    { p: '第 2 页 · 公式截图', s: '原图保留 + 视觉模型解析', ok: true },
+    { p: '第 3 页 · 手写推导', s: '原图保留，标记待视觉解析', ok: false },
+  ]
+  return (
+    <MiniPanel label="DOCUMENT PARSING">
+      {rows.map((r) => (
+        <div key={r.p} className="flex items-center gap-4" style={miniLine}>
+          <div className="flex-1">
+            <p style={{ fontSize: 13, fontWeight: 700 }}>{r.p}</p>
+            <p className="tiny" style={{ marginTop: 2 }}>{r.s}</p>
+          </div>
+          <span className={`pill ${r.ok ? 'pill--brand' : ''}`}>{r.ok ? '已解析' : '原图兜底'}</span>
+        </div>
+      ))}
+      <p className="tiny" style={{ lineHeight: 1.8 }}>
+        OCR 提取不到结构时，保留页面原图而不是伪造内容——解析不上的部分，宁可让你亲眼看到原题。
+      </p>
+    </MiniPanel>
+  )
+}
+
+/* ---------- 间隔复习 ---------- */
 function ReviewIllustration() {
   const rows = [
     { t: '位移电流 · 定义', d: '今天', hot: true },
@@ -189,34 +207,23 @@ function ReviewIllustration() {
     { t: 'CET-6 高频词 · Unit 4', d: '5 天后', hot: false },
   ]
   return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
-      <p className="mono-label mb-5">FSRS REVIEW PLAN</p>
-      <div className="flex flex-col gap-3">
-        {rows.map((r) => (
-          <div key={r.t} className="flex items-center gap-4 rounded-xl px-4 py-3" style={{ background: 'var(--bg)', border: `1px solid ${r.hot ? 'var(--brand)' : 'var(--line)'}` }}>
-            <div className="flex-1">
-              <p style={{ fontSize: 13.5, fontWeight: 800 }}>{r.t}</p>
-            </div>
-            <span
-              className="rounded-full px-2.5 py-1"
-              style={{
-                fontSize: 10, fontWeight: 800,
-                background: r.hot ? 'var(--brand)' : 'var(--section)',
-                color: r.hot ? '#fff' : 'var(--ink-3)',
-              }}
-            >
-              {r.d}
-            </span>
-          </div>
-        ))}
-        <p style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.7 }}>
-          按 FSRS 间隔重复算法安排复习节奏，支持 TTS 跟读；词汇按讲义语境提取，不脱离课堂。
-        </p>
-      </div>
-    </div>
+    <MiniPanel label="FSRS REVIEW PLAN">
+      {rows.map((r) => (
+        <div key={r.t} className="flex items-center gap-4" style={miniLine}>
+          <p className="flex-1" style={{ fontSize: 13.5, fontWeight: 700 }}>{r.t}</p>
+          <span className={`pill ${r.hot ? '' : ''}`} style={r.hot ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff' } : undefined}>
+            {r.d}
+          </span>
+        </div>
+      ))}
+      <p className="tiny" style={{ lineHeight: 1.8 }}>
+        按 FSRS 间隔重复算法安排复习节奏，支持 TTS 跟读；词汇按讲义语境提取，不脱离课堂。
+      </p>
+    </MiniPanel>
   )
 }
 
+/* ---------- 分类归档 ---------- */
 const CATEGORY_GROUPS = [
   { t: '课堂纪要', n: 1 },
   { t: '我的疑问', n: 2 },
@@ -229,25 +236,20 @@ const CATEGORY_GROUPS = [
 
 function CategoryIllustration() {
   return (
-    <div className="rounded-3xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}>
-      <p className="mono-label mb-5">ORGANIZED BY TYPE</p>
+    <MiniPanel label="ORGANIZED BY TYPE">
       <div className="grid grid-cols-2 gap-2">
-        {CATEGORY_GROUPS.map((group) => (
-          <div
-            key={group.t}
-            className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5"
-            style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 800 }}>{group.t}</span>
-            <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--brand-deep)' }}>{group.n} 项</span>
+        {CATEGORY_GROUPS.map((g) => (
+          <div key={g.t} className="flex items-center justify-between gap-2" style={{ ...miniLine, padding: '10px 12px' }}>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>{g.t}</span>
+            <span className="num" style={{ fontSize: 11, fontWeight: 700, color: 'var(--brand-deep)' }}>{g.n} 项</span>
           </div>
         ))}
       </div>
-      <div className="mt-4 rounded-xl px-4 py-3" style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}>
-        <p style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--brand-deep)' }}>复习 · 今日到期 5</p>
-        <p style={{ fontSize: 11, marginTop: 3, color: 'var(--ink-2)' }}>词汇 2 · 短语 1 · 自测 1 · 练习 1</p>
+      <div className="notice notice--brand">
+        <p style={{ fontWeight: 700 }}>复习 · 今日到期 5</p>
+        <p style={{ marginTop: 3, color: 'var(--ink-2)', fontWeight: 500 }}>词汇 2 · 短语 1 · 自测 1 · 练习 1</p>
       </div>
-    </div>
+    </MiniPanel>
   )
 }
 
@@ -313,57 +315,69 @@ const SECTIONS = [
 export default function Features() {
   return (
     <div className="page-enter">
-      <section className="radar-bg">
-        <div className="container-x pt-16 pb-14 lg:pt-24">
-          <Reveal>
-            <p className="mono-label mono-label--brand">FEATURES</p>
-            <h1 className="display mt-5 max-w-3xl" style={{ fontSize: 'clamp(36px, 5vw, 60px)' }}>
-              听课、学习、复习，
-              <br />
-              <span style={{ color: 'var(--brand)' }}>一条链路走完</span>
-            </h1>
-          </Reveal>
-          <Reveal delay={0.08}>
-            <div
-              className="mt-8 max-w-3xl rounded-2xl px-5 py-4"
-              style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}
-            >
-              <p style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--brand-deep)', lineHeight: 1.8 }}>
-                离线听课不需要注册账号；AI 学习包、翻译、云端听课和文档解析需要在「设置 → 试用额度」激活管理员发放的手机号。额度按每日次数/时长和有效期管理，多台设备共用，离线功能不受影响。
-              </p>
-            </div>
-          </Reveal>
+      <PageHero
+        eyebrow="FEATURES"
+        title={<>听课、学习、复习，<br /><span className="accent">一条链路走完</span></>}
+        lead="从课堂转写到复习卡片，知习把中间最容易丢东西的环节接了起来。以下 8 个能力都可以在网页版与 Android App 里用。"
+        actions={
+          <>
+            <a href={WEB_APP_URL} className="btn btn--primary">打开网页版试用</a>
+            <Link to="/download" className="btn btn--ghost">下载 App</Link>
+          </>
+        }
+      >
+        <div className="notice notice--brand mt-8 max-w-2xl">
+          <strong>关于激活：</strong>离线听课不需要注册账号；AI 学习包、翻译、云端听课和文档解析需要在「设置 → 试用额度」
+          用手机号激活。网页版可自助申请，一次短信完成开通与激活，不需要安装 App。
         </div>
-      </section>
+      </PageHero>
 
       <BenchmarksSection />
 
       {SECTIONS.map((s, i) => (
         <section
           key={s.label}
-          className="hairline-t"
-          style={{ background: i % 2 === 0 ? 'var(--surface)' : 'var(--section)' }}
+          className={`band ${i % 2 === 1 ? 'band--section' : ''}`}
         >
-          <div className={`container-x py-20 grid gap-12 lg:grid-cols-2 items-center`}>
-            <Reveal className={i % 2 === 1 ? 'lg:order-2' : ''}>
-              <p className="mono-label mono-label--brand">{s.label}</p>
-              <h2 className="display mt-4" style={{ fontSize: 'clamp(26px, 3.4vw, 38px)' }}>{s.title}</h2>
-              <p className="body-2 mt-5" style={{ fontSize: 15.5 }}>{s.body}</p>
-              <ul className="mt-6 flex flex-col gap-2.5">
-                {s.points.map((p) => (
-                  <li key={p} className="flex items-center gap-2.5" style={{ fontSize: 14, fontWeight: 600 }}>
-                    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="var(--brand)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m2.5 7.5 3 3 6-6.5"/></svg>
-                    {p}
-                  </li>
-                ))}
-              </ul>
-            </Reveal>
-            <Reveal delay={0.12} className={i % 2 === 1 ? 'lg:order-1' : ''}>
-              {s.illustration}
-            </Reveal>
+          <div className="container-x section">
+            <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+              <Reveal className={i % 2 === 1 ? 'lg:order-2' : ''}>
+                <p className="eyebrow eyebrow--brand">{s.label}</p>
+                <h2 className="h2 mt-4">{s.title}</h2>
+                <p className="body-2 mt-4">{s.body}</p>
+                <ul className="mt-6 flex flex-col gap-2.5">
+                  {s.points.map((p) => (
+                    <li key={p} className="flex items-start gap-2.5" style={{ fontSize: 14.5, fontWeight: 600 }}>
+                      <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="var(--brand)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 4, flexShrink: 0 }} aria-hidden><path d="m2.5 7.5 3 3 6-6.5" /></svg>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </Reveal>
+              <Reveal delay={0.1} className={i % 2 === 1 ? 'lg:order-1' : ''}>
+                {s.illustration}
+              </Reveal>
+            </div>
           </div>
         </section>
       ))}
+
+      <section className="band band--surface">
+        <div className="container-x section--tight">
+          <SectionHead
+            eyebrow="NEXT"
+            align="center"
+            title="想知道这些功能长什么样？"
+            lead="看真实产品截图，或直接打开网页版试一节课。"
+          />
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <Link to="/#how" className="btn btn--ghost">看工作原理</Link>
+            <Link to="/feedback" className="btn btn--ghost">常见问题</Link>
+          </div>
+        </div>
+      </section>
+
+      <CtaBand eyebrow="USE IT NOW" />
     </div>
   )
 }

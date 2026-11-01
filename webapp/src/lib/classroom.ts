@@ -150,7 +150,7 @@ export class ClassroomController {
         token = await zhixi.deviceToken();
         const account = await zhixi.accountStatus();
         if (!account.activated) {
-          throw new Error("请先在设置中激活试用额度，再开始云端听课。");
+          throw new Error("需要先激活试用额度：在「设置 → 试用额度」用手机号激活，即可开始云端听课。");
         }
       }
       this.stream = await requestMicrophone();

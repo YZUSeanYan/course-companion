@@ -24,18 +24,11 @@ export default function SiteNav() {
 
   return (
     <header className={`nav-shell ${scrolled ? 'is-scrolled' : ''}`}>
-      <div className="container-x flex items-center justify-between" style={{ height: 68 }}>
+      <div className="container-x flex items-center justify-between" style={{ height: 66 }}>
         <Link to="/" className="wiggle flex items-center gap-3" aria-label="知习首页" onClick={() => setOpen(false)}>
-          <LogoMark />
-          <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: '-0.01em' }}>
-            知习
-          </span>
-          <span
-            className="mono-label mono-label--brand hidden sm:inline"
-            style={{ marginTop: 4 }}
-          >
-            听课 · 学习 · 复习
-          </span>
+          <LogoMark size={32} />
+          <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: 0 }}>知习</span>
+          <span className="tagline hidden sm:inline" style={{ marginTop: 2 }}>听课 · 学习 · 复习</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
@@ -43,58 +36,50 @@ export default function SiteNav() {
             <NavLink
               key={l.to}
               to={l.to}
-              onClick={() => setOpen(false)}
               end={l.to === '/'}
               className={({ isActive }) => `nav-link ${isActive ? 'is-active' : ''}`}
             >
               {l.label}
             </NavLink>
           ))}
-          <a href={WEB_APP_URL} className="nav-link">网页版</a>
         </nav>
 
-        <div className="hidden md:block">
-          <Link to="/download" className="btn btn-primary" style={{ padding: '10px 22px', fontSize: 14 }}>
-            下载 App
-          </Link>
+        <div className="hidden md:flex items-center gap-2">
+          <a href={WEB_APP_URL} className="btn btn--primary btn--sm">
+            打开网页版
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M6 3h7v7M13 3 7.5 8.5M9 13H3V7" /></svg>
+          </a>
         </div>
 
         <button
           type="button"
-          className="md:hidden flex flex-col gap-1.5 p-2"
+          className="flex flex-col gap-1.5 p-2 md:hidden"
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? '关闭菜单' : '打开菜单'}
           aria-expanded={open}
         >
-          <span
-            className="block h-0.5 w-6 bg-current transition-transform"
-            style={{ transform: open ? 'translateY(4px) rotate(45deg)' : 'none' }}
-          />
-          <span
-            className="block h-0.5 w-6 bg-current transition-transform"
-            style={{ transform: open ? 'translateY(-4px) rotate(-45deg)' : 'none' }}
-          />
+          <span className="block h-0.5 w-6 bg-current transition-transform" style={{ transform: open ? 'translateY(4px) rotate(45deg)' : 'none' }} />
+          <span className="block h-0.5 w-6 bg-current transition-transform" style={{ transform: open ? 'translateY(-4px) rotate(-45deg)' : 'none' }} />
         </button>
       </div>
 
       {open && (
-        <nav className="md:hidden hairline-t bg-[var(--bg)]">
-          <div className="container-x py-4 flex flex-col gap-1">
+        <nav className="md:hidden hairline-t" style={{ background: 'var(--bg)' }}>
+          <div className="container-x flex flex-col gap-1 py-4">
             {LINKS.map((l) => (
               <NavLink
                 key={l.to}
                 to={l.to}
-              onClick={() => setOpen(false)}
                 end={l.to === '/'}
+                onClick={() => setOpen(false)}
                 className={({ isActive }) => `nav-link ${isActive ? 'is-active' : ''}`}
               >
                 {l.label}
               </NavLink>
             ))}
-            <a href={WEB_APP_URL} className="nav-link" onClick={() => setOpen(false)}>网页版</a>
-            <Link to="/download" className="btn btn-primary mt-2 justify-center" onClick={() => setOpen(false)}>
-              下载 App
-            </Link>
+            <a href={WEB_APP_URL} className="btn btn--primary mt-2" onClick={() => setOpen(false)}>
+              打开网页版（免安装）
+            </a>
           </div>
         </nav>
       )}

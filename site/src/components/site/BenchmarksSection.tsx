@@ -1,48 +1,10 @@
-import { Link } from 'react-router'
 import Reveal from './Reveal'
+import SectionHead from './SectionHead'
 
 // 云端引擎（LecSync）官方基准与质量评测数据。
 // 数字与口径来自上游引擎的公开基准页；知习经自有网关接入，客户端不内嵌任何密钥。
 
 const NOTE = '基于 LecSync 引擎官方基准测试；实际表现会因音质、口音、语言和专业词汇而有所不同。'
-
-function StatNumber({ value, unit, label, accent }: { value: string; unit?: string; label: string; accent?: string }) {
-  return (
-    <div className="rounded-2xl px-6 py-7" style={{ background: 'var(--dark-2)', border: '1px solid var(--dark-line)' }}>
-      <p style={{ fontSize: 'clamp(38px, 4.6vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', color: accent ?? '#fff', lineHeight: 1.05 }}>
-        {value}
-        {unit && <span style={{ fontSize: '0.42em', fontWeight: 700, color: '#777', marginLeft: 4 }}>{unit}</span>}
-      </p>
-      <p style={{ fontSize: 12.5, fontWeight: 700, color: '#aaa', marginTop: 10 }}>{label}</p>
-    </div>
-  )
-}
-
-/** 首页显眼数据带：两个核心数字 + 完整评测入口。 */
-export function LatencyStrip() {
-  return (
-    <section style={{ background: 'var(--dark)' }}>
-      <div className="container-x py-14">
-        <Reveal>
-          <p className="mono-label" style={{ color: '#888' }}>ENGINE BENCHMARKS · 云端引擎实测</p>
-          <div className="grid gap-4 sm:grid-cols-2 mt-6">
-            <StatNumber value="<200" unit="ms" label="实时转录延迟 —— 快到可以跟读" accent="var(--brand)" />
-            <StatNumber value="1.25" unit="%WER" label="行业领先词错误率 —— 准到可以直接使用" accent="var(--brand)" />
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 mt-6">
-            <p style={{ fontSize: 11.5, color: '#666' }}>{NOTE}</p>
-            <Link
-              to="/features"
-              style={{ fontSize: 13, fontWeight: 800, color: 'var(--brand)', whiteSpace: 'nowrap' }}
-            >
-              看完整评测数据 →
-            </Link>
-          </div>
-        </Reveal>
-      </div>
-    </section>
-  )
-}
 
 const TRANSLATION_CARDS = [
   {
@@ -84,71 +46,79 @@ const WIN_RATE_ROWS = [
 /** 功能页完整评测区：转写性能 + 翻译质量评测（含方法论与口径说明）。 */
 export function BenchmarksSection() {
   return (
-    <section id="benchmarks" style={{ background: 'var(--dark)' }} className="hairline-t">
-      <div className="container-x py-20">
-        <Reveal>
-          <p className="mono-label" style={{ color: '#888' }}>BENCHMARKS · 云端引擎实测</p>
-          <h2 className="display mt-4" style={{ fontSize: 'clamp(30px, 4.4vw, 50px)', color: '#fff' }}>
-            快到可以跟读，
-            <br />
-            准到可以直接使用。
-          </h2>
-          <p className="mt-5 max-w-xl" style={{ fontSize: 15.5, lineHeight: 1.8, color: '#aaa' }}>
-            低延迟让文字紧跟说话节奏，行业领先的识别准确率让你少返工，把注意力留给正在发生的内容。
-          </p>
-        </Reveal>
+    <section id="benchmarks" className="band band--dark radar-bg-dark">
+      <div className="container-x section">
+        <SectionHead
+          eyebrow="BENCHMARKS"
+          title={<>快到可以跟读，<br />准到可以直接使用。</>}
+          lead="低延迟让文字紧跟说话节奏，行业领先的识别准确率让你少返工，把注意力留给正在发生的内容。"
+        />
 
-        <Reveal delay={0.1}>
-          <div className="grid gap-4 sm:grid-cols-2 mt-10">
-            <StatNumber value="<200" unit="ms" label="实时转录延迟" accent="var(--brand)" />
-            <StatNumber value="1.25" unit="%WER" label="行业领先词错误率" accent="var(--brand)" />
+        <Reveal delay={0.08}>
+          <div className="mt-10 grid gap-5 sm:grid-cols-2">
+            {[
+              { v: '<200', unit: 'ms', label: '实时转录延迟 —— 快到可以跟读' },
+              { v: '1.25', unit: '%WER', label: '行业领先词错误率 —— 准到可以直接使用' },
+            ].map((s) => (
+              <div key={s.label} className="card card--dark">
+                <div className="stat">
+                  <p className="stat__value" style={{ color: 'var(--brand)', fontSize: 'clamp(34px, 4vw, 48px)' }}>
+                    {s.v}
+                    <span className="stat__unit">{s.unit}</span>
+                  </p>
+                  <p className="stat__label">{s.label}</p>
+                </div>
+              </div>
+            ))}
           </div>
-          <p style={{ fontSize: 11.5, color: '#666', marginTop: 12 }}>{NOTE}</p>
+          <p className="tiny mt-3">{NOTE}</p>
         </Reveal>
 
-        <Reveal delay={0.14}>
-          <div className="mt-16 rounded-3xl p-7" style={{ background: 'var(--dark-2)', border: '1px solid var(--dark-line)' }}>
-            <p className="mono-label" style={{ color: '#888' }}>TRANSLATION QUALITY · 云端翻译质量</p>
-            <h3 className="display mt-4" style={{ fontSize: 'clamp(22px, 3vw, 32px)', color: '#fff' }}>
-              质量结论以成对 AI 裁判为准
-            </h3>
-            <p className="mt-4" style={{ fontSize: 13.5, lineHeight: 1.9, color: '#aaa' }}>
+        <Reveal delay={0.12}>
+          <div className="card card--dark mt-14" style={{ padding: 28 }}>
+            <p className="eyebrow eyebrow--plain" style={{ color: 'var(--brand)' }}>TRANSLATION QUALITY · 云端翻译质量</p>
+            <h3 className="h3 mt-4">质量结论以成对 AI 裁判为准</h3>
+            <p className="body-2 mt-3" style={{ fontSize: 13.5 }}>
               裁判：Gemini 3.8 Flash，正反双判，冻结的课堂与会议试卷；生产对比取自 LecSync 线上流量的 407 段。
               除特别注明外，以下结果均为 1.7B 模型。
             </p>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 mt-7">
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {TRANSLATION_CARDS.map((card) => (
-                <div key={card.tag} className="rounded-2xl p-5" style={{ background: 'var(--dark)', border: '1px solid var(--dark-line)' }}>
-                  <p style={{ fontSize: 11, fontWeight: 800, color: '#888' }}>{card.tag}</p>
-                  <p style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--brand)', marginTop: 10, lineHeight: 1.05 }}>
+                <div
+                  key={card.tag}
+                  className="rounded-[var(--r-md)] p-5"
+                  style={{ background: 'var(--dark)', border: '1px solid var(--dark-line)' }}
+                >
+                  <p className="tiny" style={{ fontWeight: 700 }}>{card.tag}</p>
+                  <p className="num" style={{ fontSize: 32, fontWeight: 800, color: 'var(--brand)', marginTop: 10, lineHeight: 1.05 }}>
                     {card.stat}
-                    <span style={{ fontSize: '0.5em', color: '#777', marginLeft: 2 }}>{card.unit}</span>
+                    <span style={{ fontSize: '0.5em', color: 'var(--on-dark-3)', marginLeft: 2 }}>{card.unit}</span>
                   </p>
-                  <p style={{ fontSize: 13, fontWeight: 800, color: '#e8e8e8', marginTop: 8 }}>{card.label}</p>
-                  <p style={{ fontSize: 11.5, lineHeight: 1.8, color: '#999', marginTop: 8 }}>{card.body}</p>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: '#e8e8e8', marginTop: 8 }}>{card.label}</p>
+                  <p className="tiny mt-2" style={{ lineHeight: 1.8 }}>{card.body}</p>
                 </div>
               ))}
             </div>
-            <div className="mt-7 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--dark-line)' }}>
+            <div className="mt-6 overflow-hidden rounded-[var(--r-md)]" style={{ border: '1px solid var(--dark-line)' }}>
               <div className="grid grid-cols-2 px-5 py-3" style={{ background: 'rgba(255,255,255,.04)' }}>
-                <p style={{ fontSize: 11.5, fontWeight: 800, color: '#888' }}>题组</p>
-                <p style={{ fontSize: 11.5, fontWeight: 800, color: '#888' }}>LecSync-MT 胜率</p>
+                <p className="tiny" style={{ fontWeight: 700 }}>题组</p>
+                <p className="tiny" style={{ fontWeight: 700 }}>LecSync-MT 胜率</p>
               </div>
               {WIN_RATE_ROWS.map((row) => (
                 <div key={row.group} className="grid grid-cols-2 px-5 py-3.5" style={{ borderTop: '1px solid var(--dark-line)' }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: '#ddd' }}>{row.group}</p>
-                  <p style={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>{row.rate}</p>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--on-dark-2)' }}>{row.group}</p>
+                  <p className="num" style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{row.rate}</p>
                 </div>
               ))}
             </div>
-            <p className="mt-5" style={{ fontSize: 11.5, lineHeight: 1.8, color: '#666' }}>
+            <p className="tiny mt-4" style={{ lineHeight: 1.8 }}>
               官方 BLEU 只作对外可引用的参考数字——它曾在三套冻结试卷上与裁判方向相反，因此质量结论以成对 AI 裁判为准。
             </p>
           </div>
         </Reveal>
 
-        <Reveal delay={0.18}>
-          <p className="mt-8 max-w-3xl" style={{ fontSize: 12, lineHeight: 1.9, color: '#666' }}>
+        <Reveal delay={0.16}>
+          <p className="tiny mt-6 max-w-3xl" style={{ lineHeight: 1.9 }}>
             以上为知习云端链路（云端听课与云端翻译）所用 LecSync 引擎的官方基准与质量评测数据；
             知习经自有网关接入该引擎，客户端不内嵌任何密钥。本地离线识别为独立模型，
             实际课堂体验会因音质、口音、语言和专业词汇而有所不同。
@@ -158,3 +128,5 @@ export function BenchmarksSection() {
     </section>
   )
 }
+
+export default BenchmarksSection

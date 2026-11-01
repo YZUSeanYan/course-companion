@@ -7,7 +7,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, newUid, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
 import { ClassroomController, type ClassroomSnapshot } from "../lib/classroom";
 import { TranslationQueue, lineTranslationOf } from "../lib/translate-queue";
-import { loadGatewayUrl } from "../lib/api/client";
+import { describeError, isActivationError, loadGatewayUrl } from "../lib/api/client";
+import ActivationNotice from "../components/ActivationNotice";
 import { retranscribeWav, type TranscriptSegment } from "../lib/audio/transcribe-job";
 import { generatePackForSession } from "../lib/generate";
 import AccountCard from "../components/AccountCard";
@@ -61,6 +62,7 @@ export default function ClassroomPage() {
   const [courseId, setCourseId] = useState<string>("");
   const [doubtNote, setDoubtNote] = useState("");
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
+  const [needsActivation, setNeedsActivation] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [liveMinutes, setLiveMinutes] = useState(false);
   const [mode, setMode] = useState<"cloud" | "offline">("cloud");
@@ -136,17 +138,24 @@ export default function ClassroomPage() {
     }
   };
 
+  // 统一错误出口：额度未激活时给出可点击的「去激活」入口。
+  const reportError = (error: unknown) => {
+    setGenerateStatus(describeError(error));
+    setNeedsActivation(isActivationError(error));
+  };
+
   const markDoubt = async () => {
     try {
       await controller.markDoubt(doubtNote.trim());
       setDoubtNote("");
     } catch (error) {
-      setGenerateStatus(error instanceof Error ? error.message : String(error));
+      reportError(error);
     }
   };
 
   const generatePack = async () => {
     if (snapshot.sessionId == null) return;
+    setNeedsActivation(false);
     setGenerateStatus("正在创建生成任务…");
     try {
       const outcome = await generatePackForSession({
@@ -155,7 +164,7 @@ export default function ClassroomPage() {
       });
       setGenerateStatus(`已生成 ${outcome.itemCount} 项学习内容、${outcome.cardCount} 张复习卡`);
     } catch (error) {
-      setGenerateStatus(error instanceof Error ? error.message : String(error));
+      reportError(error);
     }
   };
 
@@ -216,7 +225,7 @@ export default function ClassroomPage() {
       setGenerateStatus(`补转写完成：${outcome.segments.length} 行，正在重新翻译…`);
       void translationQueue.enqueueSession(sessionId);
     } catch (error) {
-      setGenerateStatus(error instanceof Error ? error.message : String(error));
+      reportError(error);
     } finally {
       setRetranscribing(false);
     }
@@ -348,7 +357,7 @@ export default function ClassroomPage() {
               查看课程
             </button>
           </div>
-          {generateStatus && <p className="muted" style={{ marginBottom: 0 }}>{generateStatus}</p>}
+          {generateStatus && <ActivationNotice text={generateStatus} needsActivation={needsActivation} />}
         </div>
       )}
 
