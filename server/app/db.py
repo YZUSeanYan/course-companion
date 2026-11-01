@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+APP_CONFIG_KEY = "app_config"
+
 
 class QuotaExceeded(RuntimeError):
     def __init__(
@@ -262,6 +264,11 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS sync_records_account_entity
                     ON sync_records(account_id, entity);
+                CREATE TABLE IF NOT EXISTS app_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -1630,3 +1637,38 @@ class Database:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_app_config(self) -> dict | None:
+        """运营后台保存的 App 公告/标语 JSON 文档；未配置时返回 None。"""
+        import json
+
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM app_config WHERE key = ?", (APP_CONFIG_KEY,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            document = json.loads(row["value"])
+        except (TypeError, ValueError):
+            return None
+        return document if isinstance(document, dict) else None
+
+    def set_app_config(self, document: dict) -> str:
+        """整文档覆盖写 App 配置，返回 updated_at（UTC ISO）。"""
+        import json
+
+        updated_at = self._now()
+        stored = dict(document)
+        stored["updated_at"] = updated_at
+        payload = json.dumps(stored, ensure_ascii=False)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (APP_CONFIG_KEY, payload, updated_at),
+            )
+        return updated_at

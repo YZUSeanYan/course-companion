@@ -56,6 +56,14 @@ class AccountBatchRequest(BaseModel):
     maxDevices: int = Field(default=3, ge=0, le=100)
 
 
+class AppConfigWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    announcementEnabled: bool = False
+    announcementTitle: str = Field(default="", max_length=80)
+    announcementBody: str = Field(default="", max_length=2000)
+    taglines: list[str] = Field(default_factory=list, max_length=8)
+
+
 def _validate_date(value: str | None) -> str | None:
     if value is None or value == "":
         return None
@@ -481,3 +489,51 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
             or bool(getattr(app.state, "lecsync", None) and app.state.lecsync.configured),
             "adminEnabled": settings.admin_enabled,
         }
+
+    def _admin_app_config_payload() -> dict:
+        document = database.get_app_config() or {}
+        announcement = document.get("announcement")
+        if not isinstance(announcement, dict):
+            announcement = {}
+        taglines = document.get("taglines")
+        if not isinstance(taglines, list):
+            taglines = []
+        return {
+            "announcementEnabled": bool(announcement.get("enabled", False)),
+            "announcementTitle": str(announcement.get("title", "")),
+            "announcementBody": str(announcement.get("body", "")),
+            "taglines": [str(item) for item in taglines],
+            "updatedAt": document.get("updated_at"),
+        }
+
+    @app.get("/admin/api/app-config")
+    def admin_get_app_config(_: int = Depends(require_session)) -> dict:
+        return _admin_app_config_payload()
+
+    @app.patch("/admin/api/app-config")
+    def admin_update_app_config(
+        payload: AppConfigWriteRequest,
+        request: Request,
+        _: int = Depends(require_session),
+    ) -> dict:
+        require_csrf(request)
+        taglines: list[str] = []
+        for raw in payload.taglines:
+            item = str(raw).strip()
+            if not item:
+                continue
+            if len(item) > 40:
+                raise HTTPException(status_code=422, detail="标语每条不超过 40 字")
+            taglines.append(item)
+        if len(taglines) > 8:
+            raise HTTPException(status_code=422, detail="标语最多 8 条")
+        title = payload.announcementTitle.strip()
+        body = payload.announcementBody.strip()
+        enabled = bool(payload.announcementEnabled) and bool(title or body)
+        database.set_app_config(
+            {
+                "announcement": {"enabled": enabled, "title": title, "body": body},
+                "taglines": taglines,
+            }
+        )
+        return _admin_app_config_payload()
