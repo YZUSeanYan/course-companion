@@ -160,6 +160,13 @@ class ZhixiWebDatabase extends Dexie {
       reviewLogs: "++id, cardId, reviewedAtMillis",
       analysisRuns: "++id, courseId, createdAtMillis",
     });
+    // v2：补 targetLang/status 索引——课堂页与译文队列按它们 where()，
+    // 缺索引会让 Dexie 抛 SchemaError 并在渲染期炸掉整棵 React 树（线上白屏根因）。
+    this.version(2)
+      .stores({
+        translations: "++id, transcriptLineId, targetLang, status, [transcriptLineId+targetLang]",
+      })
+      .upgrade(() => undefined);
   }
 }
 
