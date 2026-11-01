@@ -36,6 +36,7 @@ server/              FastAPI 自有网关
   tests/             pytest
 admin/               运营后台（React + Vite，构建后由网关托管在 /admin/）
 site/                官网（React + Vite）
+webapp/              网页版（React + Vite + Dexie；一期云端版，见 webapp/README.md）
 docs/                产品、验收、上线说明
 scripts/             本地检查与开发辅助
 ```
