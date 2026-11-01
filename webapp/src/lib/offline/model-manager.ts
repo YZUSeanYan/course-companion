@@ -27,6 +27,8 @@ export interface ModelLoadProgress {
   totalBytes: number;
 }
 
+export const DEFAULT_MODEL_BASE_URL = "https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/";
+
 export const OFFLINE_ASR_MODEL: OfflineModelSpec = {
   version: "sherpa-onnx-wasm-simd-v1.13.7-zh-en-asr-zipformer",
   get baseUrl(): string {
@@ -61,11 +63,12 @@ export const OFFLINE_ASR_MODEL: OfflineModelSpec = {
 
 const MODEL_BASE_OVERRIDE_KEY = "zhixi.web.modelBaseUrl";
 
-/** 允许用 localStorage 覆盖镜像根地址（本地联调/内网镜像）；空值用默认镜像。 */
+/** 允许用 localStorage 覆盖镜像根地址（本地联调/内网镜像）；空值用默认镜像。
+ *  兜底必须是常量——不能回引 OFFLINE_ASR_MODEL.baseUrl（getter 会递归爆栈）。 */
 export function resolveModelBaseUrl(): string {
   const override = localStorage.getItem(MODEL_BASE_OVERRIDE_KEY);
   if (override && override.trim()) return override.trim().replace(/\/+$/, "") + "/";
-  return OFFLINE_ASR_MODEL.baseUrl;
+  return DEFAULT_MODEL_BASE_URL;
 }
 
 export function saveModelBaseUrlOverride(url: string): void {
