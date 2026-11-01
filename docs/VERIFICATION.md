@@ -203,6 +203,14 @@
 - **发布**：overlay 到 `/opt/shuike-site`（发布前备份 `index.html.bak-20261102-063055`，未使用 `--delete`）。线上 `index.html` 已指向 `index-B4TgGr84.js`（317,241 字节）/`index-D8kWGp15.css`（102,166 字节），旧 bundle `index-LIWFeimc.js` 不再被引用；`downloads/` 470M、`models/` 298M 未受影响，`/downloads/zhixi-v2.0.7.apk`、`/models/zhixi/web/asr-zh-en-v1/sherpa-onnx-wasm-main-asr.js` 均 200；`zhixi.seanyan.store/web/` 与 `/health` 均 200。**回滚 = 还原 `index.html.bak-20261102-063055` 与对应 assets。**
 - **边界**：装在手机上的是 V2.0.5 及更早版本时 App 内没有自助开通入口，需走网页版；官网下载页始终给最新版，新装用户不受影响。App 的自助开通只做了代码路径与线上接口核对，未走真实短信端到端。nginx 的 `/api/trial/*` 片段已无调用方，属无害残留，未改动生产配置。Mimosa 深度审计仍未完成，不得据此声称通过安全审计。
 
+## 网页版译文方向与学习包正文显示（2026-11-02，r26 已发布）
+
+- **译文不显示（中文课方向）**：课堂页展示译文时写死按中文目标查（`"zh"` / `"zh-CN"`），但目标语言随讲师语言变化——选中文讲师时会话方向是 zh→en，服务端回的 `targetLanguage` 是 `"en"`。本地假网关实测：DB 里 3 条 `en` 译文齐全，页面 `visibleTranslations` 为空；en→zh 方向一直正常，所以只有中文课受影响。**修法**：新增 `pickLineTranslation`（先按会话目标语言匹配 → 再取任何「非原文语种」的译文 → 最后取第一条），语种代号按主语言归一；课堂页按讲师语言推出目标语言；补翻队列原先写死 `TranslationQueue("zh-CN")`，中文课结束后会把整节中文行再翻成中文，改为跟随讲师语言（en→`zh-CN`、zh→`en-US`）。
+- **学习包正文看不到**：课程详情页只渲染条目标题，正文要等「展开」，而展开按钮只在分类超过 3 项时出现。学习包每类通常 1–2 条（纪要 1、疑问 1、词汇 2…），于是纪要正文、疑问解答、词条释义与例句全部无法查看，页面上只有一串标题。**修法**：不超过 3 项时直接展开；正文改由 `ItemBody` 按行渲染，`#` 开头渲染成小标题（旧 prompt 会给纪要小节写 `## 标题`，直接当纯文本会连井号显示），释义与例句里的 `**加粗**` 与行内代码反引号一并去掉标记。
+- **验证**：`translate-queue.test.ts` 新增 6 项（英文课取 zh、中文课取 en、`en-US` 与 `en` 互通、多语种优先级、pending 不当作译文、无译文返回 undefined），全量 **94 项通过**（13 文件）；`tsc --noEmit`、`vite build` 通过。**生产构建**用假网关 + 合成麦克风各复测一遍：中文课 3 句均显示英文译文；课程详情三张分类卡正文完整、页面无 `##` 与 `**` 残留。
+- **发布**：`/opt/zhixi-webapp/r26`，`current` 从 `r25` 切到 `r26`（`r24`/`r25` 保留）。线上 `index-BhvtVEj3.js` 与本地验证产物 SHA-256 完全一致（`e5a5dd68…`）。**回滚 = `ln -sfn /opt/zhixi-webapp/r25 /opt/zhixi-webapp/current`**。
+- **边界**：只改网页版两个页面与译文工具，未改网关、协议与数据结构；未做真实短信与真实课堂的端到端。Mimosa 深度审计仍未完成，不得据此声称通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
