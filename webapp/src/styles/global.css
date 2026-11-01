@@ -913,9 +913,13 @@ select.text-input {
   line-height: 1.55;
 }
 
-/* 无时间戳的条目（学习包分类内容）沿用单列 */
-.transcript-line--plain {
+/* 无时间戳的条目（学习包分类内容）用单列。
+   这里必须写成双类选择器：下面的移动端断点里有 `.transcript-line { 44px 1fr }`，
+   单类特异性相同且位置更靠后，会把单列模板盖回去——表现为手机上正文被压进
+   44px 的时间戳列、变成一词一行，而桌面端完全看不出来。 */
+.transcript-line.transcript-line--plain {
   grid-template-columns: minmax(0, 1fr);
+  gap: 0;
 }
 
 /* 空状态提示：一条短横线 + 灰字，不带边框，避免和真实转写条目混淆 */

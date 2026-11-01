@@ -18,6 +18,29 @@ export async function hasExistingPack(courseId: number, targetType: "SESSION" | 
   );
 }
 
+/**
+ * 讲义页 → 学习包分片。
+ *
+ * 页面文本字段不保证存在：扫描版 PDF 可能只有图像；旧版本解析结果里文本存在
+ * nativeText / ocrText，没有合并后的 pageText；个别记录甚至整个 pages 缺失。
+ * 早先直接 `page.pageText.trim()`，遇到缺失字段就抛
+ * "Cannot read properties of undefined (reading 'trim')"，用户只在讲义卡上看到这一行。
+ */
+export function materialChunks(
+  pages: { pageIndex?: number; pageText?: string | null; nativeText?: string | null; ocrText?: string | null }[] | undefined,
+): { sourceId: string; text: string; page: number }[] {
+  return (pages ?? [])
+    .map((page, index) => {
+      const pageNumber = (page.pageIndex ?? index) + 1;
+      return {
+        sourceId: `page-${pageNumber}`,
+        text: (page.pageText ?? page.nativeText ?? page.ocrText ?? "").trim(),
+        page: pageNumber,
+      };
+    })
+    .filter((chunk) => chunk.text.length > 0);
+}
+
 export async function generatePackForSession(options: {
   sessionId: number;
   onStatus?: (status: string) => void;
@@ -52,7 +75,9 @@ export async function generatePackForSession(options: {
     endMs: line.endMs ?? undefined,
   }));
   const manualDoubts: ManualDoubtInput[] = doubts
-    .filter((doubt) => doubt.sourceText.trim())
+    // sourceText 可能是空的（只备注没打点），存量数据里也可能是 null，
+    // 直接 .trim() 会抛 "Cannot read properties of undefined"，用户只看到一行报错。
+    .filter((doubt) => (doubt.sourceText ?? "").trim())
     .map((doubt, index) => ({
       doubtId: `doubt-${doubt.id ?? index}`,
       sourceText: doubt.sourceText,
@@ -79,15 +104,9 @@ export async function generatePackForMaterial(options: {
   const course = await db.courses.get(material.courseId);
   if (!course) throw new Error("课程不存在");
   const asset = JSON.parse(material.documentJson) as {
-    pages: { pageIndex: number; pageText: string }[];
+    pages?: { pageIndex?: number; pageText?: string; nativeText?: string; ocrText?: string }[];
   };
-  const chunks = asset.pages
-    .filter((page) => page.pageText.trim())
-    .map((page) => ({
-      sourceId: `page-${page.pageIndex + 1}`,
-      text: page.pageText,
-      page: page.pageIndex + 1,
-    }));
+  const chunks = materialChunks(asset.pages);
   if (!chunks.length) throw new Error("该讲义没有可提取的文本，复杂版式请等待视觉解析支持");
   return runJob({
     course,
