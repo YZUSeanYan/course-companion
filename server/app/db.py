@@ -249,6 +249,19 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS activation_codes_phone
                     ON activation_codes(phone_hash, created_at);
+                CREATE TABLE IF NOT EXISTS sync_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL,
+                    entity TEXT NOT NULL,
+                    client_uid TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    client_updated_at INTEGER NOT NULL,
+                    deleted INTEGER NOT NULL DEFAULT 0,
+                    server_updated_at TEXT NOT NULL,
+                    UNIQUE(account_id, entity, client_uid)
+                );
+                CREATE INDEX IF NOT EXISTS sync_records_account_entity
+                    ON sync_records(account_id, entity);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -1130,6 +1143,76 @@ class Database:
                     self._now(),
                 ),
             )
+
+    def upsert_sync_records(self, account_id: str, changes: list[dict]) -> list[bool]:
+        """Apply last-write-wins upserts; returns one accepted flag per change, in order.
+
+        Each change dict carries entity, client_uid, payload (serialized JSON text),
+        client_updated_at (epoch millis) and deleted. A change is ignored when the
+        stored row already has client_updated_at >= the incoming value.
+        """
+        now = self._now()
+        connection = self.connect()
+        results: list[bool] = []
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for change in changes:
+                entity = str(change["entity"])
+                client_uid = str(change["client_uid"])
+                client_updated_at = int(change["client_updated_at"])
+                row = connection.execute(
+                    "SELECT client_updated_at FROM sync_records "
+                    "WHERE account_id = ? AND entity = ? AND client_uid = ?",
+                    (account_id, entity, client_uid),
+                ).fetchone()
+                if row is not None and int(row["client_updated_at"]) >= client_updated_at:
+                    results.append(False)
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO sync_records(
+                        account_id, entity, client_uid, payload,
+                        client_updated_at, deleted, server_updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(account_id, entity, client_uid) DO UPDATE SET
+                        payload = excluded.payload,
+                        client_updated_at = excluded.client_updated_at,
+                        deleted = excluded.deleted,
+                        server_updated_at = excluded.server_updated_at
+                    """,
+                    (
+                        account_id,
+                        entity,
+                        client_uid,
+                        str(change["payload"]),
+                        client_updated_at,
+                        1 if change["deleted"] else 0,
+                        now,
+                    ),
+                )
+                results.append(True)
+            connection.commit()
+            return results
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def list_sync_records(self, account_id: str, entities: list[str]) -> list[dict]:
+        query = (
+            "SELECT entity, client_uid, payload, client_updated_at, deleted "
+            "FROM sync_records WHERE account_id = ?"
+        )
+        params: list[object] = [account_id]
+        if entities:
+            placeholders = ", ".join("?" for _ in entities)
+            query += f" AND entity IN ({placeholders})"
+            params.extend(entities)
+        query += " ORDER BY id ASC"
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
 
     def list_accounts(self) -> list[dict]:
         today = self.today()

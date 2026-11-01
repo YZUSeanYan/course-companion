@@ -45,6 +45,7 @@ from .schemas import (
     LearningPackage,
 )
 from .security import new_device_token, phone_digest, token_digest
+from .sync_routes import register_sync_routes
 from .v2_routes import register_v2_routes
 from .v2_documents import register_document_routes
 
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from .trial_routes import register_trial_routes
     register_trial_routes(app, settings)
     register_activation_routes(app, settings)
+    register_sync_routes(app, settings)
     app.state.register_limiter = SlidingWindowRateLimiter(
         settings.register_rate_limit, settings.register_rate_window_seconds
     )
