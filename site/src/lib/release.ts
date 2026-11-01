@@ -1,4 +1,4 @@
-export const APK_SHA256 = '113ca867d04dc763bb5d772e29c8a1acddd1a4eb642b5ff0ecd52115c3e7e5e0'
+export const APK_SHA256 = 'c8997c12fcfc60200d95865d39f75d0b06ea925ab9eb253f795e376241d642c5'
 
 /** 网页版入口（与网关同源部署，无需配置即可使用） */
 export const WEB_APP_URL = 'https://zhixi.seanyan.store/web/'
