@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { db, newUid } from "./db/db";
-import { TranslationQueue, lineTranslationOf } from "./translate-queue";
+import { TranslationQueue, lineTranslationOf, pickLineTranslation } from "./translate-queue";
 import type { TranscriptLineRecord } from "./db/db";
 
 async function addLine(sessionId: number, text: string): Promise<number> {
@@ -115,5 +115,71 @@ describe("TranslationQueue.enqueueSession 去重", () => {
     const rows = await db.translations.toArray();
     // 已有 failed 行之外会新增一条 pending，供重试。
     expect(rows.filter((row) => row.status === "pending")).toHaveLength(1);
+  });
+});
+
+describe("pickLineTranslation（课堂页展示）", () => {
+  function row(lineId: number, lang: string, text: string, status: "done" | "pending" = "done") {
+    return {
+      transcriptLineId: lineId,
+      targetLang: lang,
+      sourceHash: "",
+      translatedText: text,
+      status,
+      updatedAtMillis: Date.now(),
+    };
+  }
+
+  it("英文课（→中文）：能取到实时通道落库的 zh 译文", async () => {
+    const lineId = await addLine(6, "A lathe removes material.");
+    const line = (await db.transcriptLines.get(lineId))!;
+    const rows = await db.translations.bulkAdd([row(lineId, "zh", "车床用来去除材料。")], { allKeys: true });
+    void rows;
+    expect(pickLineTranslation(await db.translations.toArray(), line, "zh")?.translatedText).toBe(
+      "车床用来去除材料。",
+    );
+  });
+
+  it("中文课（→英文）：目标语言是 en 时也要取到，而不是返回 undefined", async () => {
+    const lineId = await addLine(7, "车床用来去除材料。");
+    const line = { ...(await db.transcriptLines.get(lineId))!, language: "zh" };
+    await db.translations.add(row(lineId, "en", "The lathe removes material."));
+    expect(pickLineTranslation(await db.translations.toArray(), line, "en")?.translatedText).toBe(
+      "The lathe removes material.",
+    );
+  });
+
+  it("目标语言写的是 en-US（队列口径）也能匹配实时通道的 en", async () => {
+    const lineId = await addLine(8, "车床用来去除材料。");
+    const line = (await db.transcriptLines.get(lineId))!;
+    await db.translations.add(row(lineId, "en", "The lathe removes material."));
+    expect(pickLineTranslation(await db.translations.toArray(), line, "en-US")?.translatedText).toBe(
+      "The lathe removes material.",
+    );
+  });
+
+  it("同一行有多语种译文时，优先返回本次会话的目标语言", async () => {
+    const lineId = await addLine(9, "mixed");
+    const line = (await db.transcriptLines.get(lineId))!;
+    await db.translations.bulkAdd([
+      row(lineId, "zh", "中文版本"),
+      row(lineId, "en", "English version"),
+    ]);
+    const rows = await db.translations.toArray();
+    expect(pickLineTranslation(rows, line, "en")?.translatedText).toBe("English version");
+    expect(pickLineTranslation(rows, line, "zh")?.translatedText).toBe("中文版本");
+  });
+
+  it("没有完成态译文时返回 undefined（不会把 pending 当译文显示）", async () => {
+    const lineId = await addLine(10, "pending only");
+    const line = (await db.transcriptLines.get(lineId))!;
+    await db.translations.add(row(lineId, "zh", "", "pending"));
+    expect(pickLineTranslation(await db.translations.toArray(), line, "zh")).toBeUndefined();
+  });
+
+  it("没有译文时返回 undefined", async () => {
+    const lineId = await addLine(11, "no translation");
+    const line = (await db.transcriptLines.get(lineId))!;
+    expect(pickLineTranslation(await db.translations.toArray(), line, "zh")).toBeUndefined();
   });
 });

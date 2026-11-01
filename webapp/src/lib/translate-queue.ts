@@ -12,7 +12,7 @@ export class TranslationQueue {
   private cancelled = false;
   private progress: TranslationProgress | null = null;
 
-  constructor(private readonly targetLang: "zh-CN" | "en-US" = "zh-CN") {}
+  constructor(readonly targetLang: "zh-CN" | "en-US" = "zh-CN") {}
 
   /** 为尚未翻译的定稿行创建 pending 记录并启动队列。 */
   async enqueueSession(sessionId: number, progress: TranslationProgress | null = null): Promise<void> {
@@ -124,4 +124,33 @@ export function lineTranslationOf(
   return translations.find(
     (t) => t.transcriptLineId === line.id && t.targetLang === targetLang && t.status === "done",
   );
+}
+
+/** 语种代号归一化到主语言：服务端实时通道用 "zh"/"en"，翻译队列用 "zh-CN"/"en-US"。 */
+function baseLang(code: string): string {
+  return code.split("-")[0].toLowerCase();
+}
+
+/**
+ * 取某一行的译文，用于课堂页展示。
+ *
+ * 不能只按固定代号查：实时通道落库的 targetLang 是服务端给的 "zh"/"en"，翻译队列写的是
+ * "zh-CN"/"en-US"；而且目标语言随讲师语言变化（英文课→中文，中文课→英文）。
+ * 早先写死按 "zh-CN" 查，导致中文课的英文译文一条都不显示。
+ *
+ * 顺序：先按本次会话的目标语言找 → 再退而取任何「不是原文语种」的译文 → 最后取第一条。
+ */
+export function pickLineTranslation(
+  translations: TranslationRecord[],
+  line: TranscriptLineRecord,
+  targetLang: string,
+): TranslationRecord | undefined {
+  const forLine = translations.filter((t) => t.transcriptLineId === line.id && t.status === "done");
+  if (forLine.length === 0) return undefined;
+  const want = baseLang(targetLang);
+  const exact = forLine.find((t) => baseLang(t.targetLang) === want);
+  if (exact) return exact;
+  const sourceLang = line.language ? baseLang(line.language) : "";
+  const other = forLine.find((t) => baseLang(t.targetLang) !== sourceLang);
+  return other ?? forLine[0];
 }
