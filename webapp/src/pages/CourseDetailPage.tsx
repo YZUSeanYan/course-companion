@@ -153,6 +153,9 @@ export default function CourseDetailPage() {
               {groups.map((group) => {
                 const meta = LEARNING_CATEGORIES.find((category) => category.type === group.type);
                 const open = openType === group.type;
+                // 不超过 3 项时没有「收起」的意义，直接全部展开——否则纪要/疑问/释义这类
+                // 每类只有 1–2 条的正文永远看不到（展开按钮原本只在超过 3 项时出现）。
+                const showBody = open || group.items.length <= 3;
                 const visible = open ? group.items : group.items.slice(0, 3);
                 return (
                   <div className="glass-card" key={group.type}>
@@ -165,9 +168,13 @@ export default function CourseDetailPage() {
                       <div className="transcript-line transcript-line--plain" key={item.id}>
                         <div className="zh">
                           <strong style={{ fontWeight: 650 }}>{item.title}</strong>
-                          {open && <div style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>{item.content}</div>}
-                          {open && item.translation && <div className="en">EN：{item.translation}</div>}
-                          {open && item.example && <div className="en">例：{item.example}</div>}
+                          {showBody && item.content && <ItemBody text={item.content} />}
+                          {showBody && item.translation && (
+                            <div className="en">EN：{stripInlineMarkdown(item.translation)}</div>
+                          )}
+                          {showBody && item.example && (
+                            <div className="en">例：{stripInlineMarkdown(item.example)}</div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -261,5 +268,45 @@ export default function CourseDetailPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * 去掉行内 Markdown 标记（加粗、行内代码）。
+ * 服务端产出的释义与例句里偶尔带这些标记，当纯文本显示会把星号铺在页面上。
+ */
+function stripInlineMarkdown(value: string): string {
+  return value.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1");
+}
+
+/**
+ * 学习条目正文。
+ * 旧 prompt 会给纪要小节加 `## 标题`，当纯文本显示会把井号原样铺在页面上。
+ * 这里按行拆开：`#` 开头的行渲染成小标题，其余行作为段落。
+ */
+function ItemBody({ text }: { text: string }) {
+  return (
+    <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
+      {text.split("\n").map((raw, index) => {
+        const trimmed = raw.trimStart();
+        if (trimmed.startsWith("#")) {
+          const title = stripInlineMarkdown(trimmed.replace(/^#+\s*/, "")).trim();
+          if (title) {
+            return (
+              <div key={index} style={{ marginTop: 4, fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)" }}>
+                {title}
+              </div>
+            );
+          }
+        }
+        const line = stripInlineMarkdown(raw).trimEnd();
+        if (!line.trim()) return <div key={index} aria-hidden style={{ height: 2 }} />;
+        return (
+          <div key={index} style={{ fontSize: 13.5, lineHeight: 1.7, color: "var(--ink-2)" }}>
+            {line}
+          </div>
+        );
+      })}
+    </div>
   );
 }

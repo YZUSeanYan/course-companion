@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, newUid, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
 import { ClassroomController, loadSaveAudio, saveSaveAudio, type ClassroomSnapshot } from "../lib/classroom";
-import { TranslationQueue, lineTranslationOf } from "../lib/translate-queue";
+import { TranslationQueue, pickLineTranslation } from "../lib/translate-queue";
 import { describeError, isActivationError, loadGatewayUrl } from "../lib/api/client";
 import ActivationNotice from "../components/ActivationNotice";
 import { retranscribeWav, type TranscriptSegment } from "../lib/audio/transcribe-job";
@@ -58,7 +58,17 @@ function clockOf(timestampMillis: number, baseMillis: number | null): string {
 export default function ClassroomPage() {
   const navigate = useNavigate();
   const controller = useMemo(() => new ClassroomController(), []);
-  const translationQueue = useMemo(() => new TranslationQueue("zh-CN"), []);
+  // 补翻队列的目标语言跟着讲师语言走：英文课翻成中文，中文课翻成英文。
+  // 早先写死 "zh-CN"，中文课结束后会把整节中文行再翻成中文（失败行还会被这样重试）。
+  const queueRef = useRef<TranslationQueue | null>(null);
+  const sessionSourceLangRef = useRef("en");
+  const queueFor = (sourceLanguage: string): TranslationQueue => {
+    const target: "zh-CN" | "en-US" = sourceLanguage === "en" ? "zh-CN" : "en-US";
+    if (!queueRef.current || queueRef.current.targetLang !== target) {
+      queueRef.current = new TranslationQueue(target);
+    }
+    return queueRef.current;
+  };
   const [snapshot, setSnapshot] = useState<ClassroomSnapshot>({
     phase: "idle",
     sessionId: null,
@@ -162,6 +172,7 @@ export default function ClassroomPage() {
       return;
     }
     try {
+      sessionSourceLangRef.current = sourceLang;
       await controller.start({
         courseId: courseId ? Number(courseId) : null,
         courseName: courses?.find((course) => String(course.id) === courseId)?.name ?? "",
@@ -181,7 +192,7 @@ export default function ClassroomPage() {
   const stop = async () => {
     await controller.stop();
     if (snapshot.sessionId != null) {
-      void translationQueue.enqueueSession(snapshot.sessionId);
+      void queueFor(sessionSourceLangRef.current).enqueueSession(snapshot.sessionId);
     }
   };
 
@@ -270,7 +281,7 @@ export default function ClassroomPage() {
         );
       });
       setGenerateStatus(`补转写完成：${outcome.segments.length} 行，正在重新翻译…`);
-      void translationQueue.enqueueSession(sessionId);
+      void queueFor(sessionSourceLangRef.current).enqueueSession(sessionId);
     } catch (error) {
       reportError(error);
     } finally {
@@ -279,6 +290,8 @@ export default function ClassroomPage() {
   };
 
   const digest = parseDigestSections(digestJson);
+  // 译文目标语言：与 translateDirection 保持一致（英文课→中文，中文课→英文）。
+  const sessionTargetLang = sessionSourceLangRef.current === "en" ? "zh" : "en";
   const hasTranscript = session != null && lines != null && lines.length > 0;
   // 默认只渲染最近 60 行（Android 端窗口是 30 行），需要时展开全部。
   const WINDOW = 60;
@@ -418,10 +431,9 @@ export default function ClassroomPage() {
               )}
               <div className="transcript__body" ref={listRef} onScroll={onTranscriptScroll} style={{ maxHeight: "min(58vh, 620px)" }}>
                 {visibleLines.map((line) => {
-                  // 语种代号在两条通道里不一致（实时用 "zh"，补翻队列用 "zh-CN"），两个都试。
-                  const translation =
-                    lineTranslationOf(translations ?? [], line, "zh") ??
-                    lineTranslationOf(translations ?? [], line, "zh-CN");
+                  // 目标语言随讲师语言变化（英文课→中文、中文课→英文），且两条通道的
+                  // 语种代号不一致（"zh"/"zh-CN"），交给 pickLineTranslation 统一处理。
+                  const translation = pickLineTranslation(translations ?? [], line, sessionTargetLang);
                   return (
                     <div className="transcript-line" key={line.id}>
                       <span className="ts">{clockOf(line.timestampMillis, sessionBase)}</span>
