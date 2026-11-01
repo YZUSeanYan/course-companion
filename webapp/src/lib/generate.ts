@@ -1,6 +1,6 @@
 // 学习包生成：从课堂会话或讲义材料构建 LearningPackRequest 并轮询任务。
 
-import { db, type CourseRecord } from "./db/db";
+import { db, newUid, type CourseRecord } from "./db/db";
 import { zhixi } from "./api/client";
 import { parseGlossary, saveLearningPackage } from "./pack";
 import type { ManualDoubtInput } from "./api/types";
@@ -27,6 +27,7 @@ export async function generatePackForSession(options: {
   let course = session.courseId != null ? await db.courses.get(session.courseId) : undefined;
   if (!course) {
     const courseId = await db.courses.add({
+      uid: newUid(),
       name: session.title.replace(/\s*课堂记录$/, "") || "未命名课堂",
       teacher: "",
       language: "中英双语",

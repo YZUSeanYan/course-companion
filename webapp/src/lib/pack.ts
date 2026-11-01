@@ -1,9 +1,10 @@
 // 学习内容分类与学习包落库，逻辑对齐 Android 端
 // learning/LearningCategories.kt 与 LearningPresenter 的 saveLearningPackage。
 
-import { db, type LearningItemRecord, type ReviewCardRecord, type CourseRecord } from "./db/db";
+import { db, newUid, type LearningItemRecord, type ReviewCardRecord, type CourseRecord } from "./db/db";
 import type { LearningPackV2 } from "./api/types";
 import { newCardSchedule } from "./fsrs/scheduler";
+import { fullSync } from "./sync/sync";
 
 export interface LearningCategory {
   type: LearningItemRecord["type"];
@@ -160,6 +161,7 @@ export async function saveLearningPackage(options: {
     example: string | null = null,
   ) => {
     items.push({
+      uid: newUid(),
       courseId: course.id!,
       type,
       title,
@@ -204,6 +206,7 @@ export async function saveLearningPackage(options: {
   for (const item of items) {
     if (!reviewable.has(item.type)) continue;
     cards.push({
+      uid: newUid(),
       learningItemId: 0, // 落库后回填
       itemType: item.type,
       courseId: course.id!,
@@ -239,6 +242,8 @@ export async function saveLearningPackage(options: {
     completedAtMillis: Date.now(),
   });
   void analysisId;
+  // 学习包落库成功后静默触发一次云空间同步（fire-and-forget；失败不影响主流程，也不弹提示）。
+  void fullSync().catch(() => undefined);
   return { items: items.length, cards: cards.length };
 }
 

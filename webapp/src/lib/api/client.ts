@@ -5,12 +5,17 @@
 
 import type {
   AccountStatus,
+  ActivationCodeResult,
   DeviceRegistration,
   DocumentAsset,
   LearningPackJob,
   LearningPackJobCreate,
   LearningPackRequest,
   LearningPackResponse,
+  SyncChange,
+  SyncEntity,
+  SyncPullResponse,
+  SyncPushResponse,
   TranslateResponse,
 } from "./types";
 
@@ -22,6 +27,12 @@ export type ErrorCode =
   | "device_limit_reached"
   | "quota_exceeded"
   | "sms_not_configured"
+  | "cooldown"
+  | "rate_limited"
+  | "code_mismatch"
+  | "code_expired"
+  | "too_many_attempts"
+  | "activation_code_required"
   | "unauthorized"
   | "network"
   | "server"
@@ -62,6 +73,20 @@ export class ZhixiApiError extends Error {
         return "账号已停用，请联系管理员。";
       case "account_not_found":
         return "未找到该手机号的试用额度，请联系管理员添加。";
+      case "sms_not_configured":
+        return "短信服务未配置，请联系管理员开通。";
+      case "cooldown":
+        return "验证码发送过于频繁，请稍等片刻再试。";
+      case "rate_limited":
+        return "操作过于频繁，请稍后再试。";
+      case "code_mismatch":
+        return this.message || "验证码不正确，请检查后重试。";
+      case "code_expired":
+        return "验证码已过期，请重新获取验证码。";
+      case "too_many_attempts":
+        return "验证码尝试次数过多，请重新获取验证码后再试。";
+      case "activation_code_required":
+        return "该账号需要短信验证码激活，请先获取验证码。";
       case "device_limit_reached":
         return `设备数量已达上限（${this.quotaLimit ?? "?"} 台），请先在后台解绑设备。`;
       case "quota_exceeded": {
@@ -246,6 +271,38 @@ export class ZhixiClient {
     return this.requestJson("/v1/accounts/activate", {
       method: "POST",
       body: JSON.stringify({ phone }),
+    });
+  }
+
+  /** 两步激活第 1 步：请求短信验证码。429 时读 X-Zhixi-Error-Code（cooldown/限流）。 */
+  async requestActivationCode(phone: string): Promise<ActivationCodeResult> {
+    return this.requestJson("/v1/accounts/activate/request-code", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    });
+  }
+
+  /** 两步激活第 2 步：凭 6 位验证码激活。code_mismatch 的 detail 含剩余尝试次数。 */
+  async activateAccountWithCode(phone: string, code: string): Promise<AccountStatus> {
+    return this.requestJson("/v1/accounts/activate", {
+      method: "POST",
+      body: JSON.stringify({ phone, code }),
+    });
+  }
+
+  /** 云空间同步：推送一批本地变更（服务端限 ≤500 条/批，调用方负责分批）。 */
+  async syncPush(changes: SyncChange[]): Promise<SyncPushResponse> {
+    return this.requestJson("/v1/sync/push", {
+      method: "POST",
+      body: JSON.stringify({ changes }),
+    });
+  }
+
+  /** 云空间同步：拉取远端记录；entities 为空数组表示全部实体。 */
+  async syncPull(entities: SyncEntity[]): Promise<SyncPullResponse> {
+    return this.requestJson("/v1/sync/pull", {
+      method: "POST",
+      body: JSON.stringify({ entities }),
     });
   }
 

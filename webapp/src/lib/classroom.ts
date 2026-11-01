@@ -1,7 +1,7 @@
 // 课堂听课控制器：协调麦克风采集、云端实时转写 WebSocket、本地落库、译文队列与实时纪要。
 // 事件口径与 Android LecsyncRealtimeEngine 一致；浏览器离线识别（sherpa-onnx WASM）在 offline 引擎中单独实现。
 
-import { db } from "./db/db";
+import { db, newUid } from "./db/db";
 import { zhixi } from "./api/client";
 import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason } from "./audio/realtime";
@@ -120,6 +120,7 @@ export class ClassroomController {
       }
       this.stream = await requestMicrophone();
       const sessionId = await db.sessions.add({
+        uid: newUid(),
         startedAtMillis: Date.now(),
         endedAtMillis: null,
         title: options.courseName ? `${options.courseName} 课堂记录` : "课堂记录",
@@ -195,6 +196,7 @@ export class ClassroomController {
     if (sessionId == null) return;
     const now = Date.now();
     const lineId = await db.transcriptLines.add({
+      uid: newUid(),
       sessionId,
       timestampMillis: now,
       text: segment.text,
@@ -230,6 +232,7 @@ export class ClassroomController {
     const sourceText = this.snapshot.partialText.trim();
     const now = Date.now();
     const doubtId = await db.doubts.add({
+      uid: newUid(),
       sessionId,
       transcriptLineId: null,
       timestampMillis: now,
@@ -320,6 +323,7 @@ export class ClassroomController {
         if (!text || !segment) return;
         const now = Date.now();
         const lineId = await db.transcriptLines.add({
+          uid: newUid(),
           sessionId,
           timestampMillis: now,
           text,

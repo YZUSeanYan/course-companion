@@ -34,6 +34,60 @@ export interface AccountStatus {
   usage: AccountUsage;
 }
 
+/** POST /v1/accounts/activate/request-code 响应。 */
+export interface ActivationCodeResult {
+  sent: boolean;
+  phoneMasked: string;
+  cooldownSeconds: number;
+}
+
+// ---------- 云空间同步（/v1/sync） ----------
+
+/** 参与同步的实体；与 webapp/src/lib/db/db.ts 的 8 张表一一对应。 */
+export type SyncEntity =
+  | "courses"
+  | "learning_items"
+  | "review_cards"
+  | "review_logs"
+  | "sessions"
+  | "transcript_lines"
+  | "doubts"
+  | "materials";
+
+export interface SyncChange {
+  entity: SyncEntity;
+  /** 跨设备同步身份（uuid v4），与本地自增 id 无关。 */
+  clientUid: string;
+  /** 记录内容；不含音频（audioBlob/audioMime 排除）、不含任何密钥。 */
+  payload: Record<string, unknown>;
+  /** 最后更新时间（毫秒），LWW 合并依据。 */
+  updatedAt: number;
+  deleted: boolean;
+}
+
+export interface SyncPushResultItem {
+  clientUid: string;
+  status: "accepted" | "ignored";
+}
+
+export interface SyncPushResponse {
+  results: SyncPushResultItem[];
+  serverTime: number;
+}
+
+export interface SyncPullRecord {
+  entity: SyncEntity;
+  clientUid: string;
+  payload: Record<string, unknown>;
+  updatedAt: number;
+  deleted: boolean;
+}
+
+export interface SyncPullResponse {
+  records: SyncPullRecord[];
+  serverTime: number;
+}
+
 export interface TranslateResponse {
   lineId: number;
   translation: string;

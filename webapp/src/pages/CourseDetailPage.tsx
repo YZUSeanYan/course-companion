@@ -4,7 +4,7 @@
 import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "../lib/db/db";
+import { db, newUid } from "../lib/db/db";
 import { groupLearningItems, LEARNING_CATEGORIES } from "../lib/pack";
 import { generatePackForMaterial } from "../lib/generate";
 import { importCet6Csv } from "../lib/cet6";
@@ -49,6 +49,7 @@ export default function CourseDetailPage() {
     try {
       const asset: DocumentAsset = await zhixi.analyzeDocument(file);
       await db.materials.add({
+        uid: newUid(),
         courseId: courseIdNumber,
         title: file.name,
         mimeType: asset.mimeType,

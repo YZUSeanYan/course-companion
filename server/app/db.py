@@ -236,6 +236,32 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS trial_applications_phone
                     ON trial_applications(phone_hash, created_at);
+                CREATE TABLE IF NOT EXISTS activation_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    phone_hash TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+                    consumed_at TEXT,
+                    request_ip_hash TEXT,
+                    device_id TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS activation_codes_phone
+                    ON activation_codes(phone_hash, created_at);
+                CREATE TABLE IF NOT EXISTS sync_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL,
+                    entity TEXT NOT NULL,
+                    client_uid TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    client_updated_at INTEGER NOT NULL,
+                    deleted INTEGER NOT NULL DEFAULT 0,
+                    server_updated_at TEXT NOT NULL,
+                    UNIQUE(account_id, entity, client_uid)
+                );
+                CREATE INDEX IF NOT EXISTS sync_records_account_entity
+                    ON sync_records(account_id, entity);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -1007,6 +1033,94 @@ class Database:
                 (self._now(), code_id),
             )
 
+    def create_activation_code(
+        self,
+        phone_hash: str,
+        code_hash: str,
+        expires_at: str,
+        request_ip_hash: str | None,
+        device_id: str | None,
+    ) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO activation_codes(
+                    phone_hash, code_hash, expires_at, request_ip_hash, device_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (phone_hash, code_hash, expires_at, request_ip_hash, device_id, self._now()),
+            )
+            return int(cursor.lastrowid)
+
+    def last_activation_code_created_at(self, phone_hash: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT created_at FROM activation_codes "
+                "WHERE phone_hash = ? ORDER BY id DESC LIMIT 1",
+                (phone_hash,),
+            ).fetchone()
+        return None if row is None else str(row["created_at"])
+
+    def check_activation_code(
+        self,
+        phone_hash: str,
+        code_hash: str,
+        max_attempts: int,
+    ) -> tuple[str, dict | None]:
+        """Atomically consume a matching activation code and count failed attempts."""
+        import hmac
+
+        now = self._now()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT * FROM activation_codes
+                WHERE phone_hash = ? ORDER BY id DESC LIMIT 1
+                """,
+                (phone_hash,),
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return "not_found", None
+            current = dict(row)
+            if current["consumed_at"] is not None:
+                connection.commit()
+                return "consumed", current
+            if str(current["expires_at"]) < now:
+                connection.commit()
+                return "expired", current
+            if int(current["attempts"]) >= max_attempts:
+                connection.commit()
+                return "attempts_exhausted", current
+            if not hmac.compare_digest(str(current["code_hash"]), code_hash):
+                connection.execute(
+                    "UPDATE activation_codes SET attempts = attempts + 1 WHERE id = ?",
+                    (current["id"],),
+                )
+                connection.commit()
+                return "mismatch", current
+            connection.execute(
+                "UPDATE activation_codes SET consumed_at = ? WHERE id = ?",
+                (now, current["id"]),
+            )
+            connection.commit()
+            return "ok", current
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def invalidate_activation_code(self, code_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE activation_codes SET consumed_at = ? "
+                "WHERE id = ? AND consumed_at IS NULL",
+                (self._now(), code_id),
+            )
+
     def record_trial_application(
         self,
         application_id: str,
@@ -1029,6 +1143,76 @@ class Database:
                     self._now(),
                 ),
             )
+
+    def upsert_sync_records(self, account_id: str, changes: list[dict]) -> list[bool]:
+        """Apply last-write-wins upserts; returns one accepted flag per change, in order.
+
+        Each change dict carries entity, client_uid, payload (serialized JSON text),
+        client_updated_at (epoch millis) and deleted. A change is ignored when the
+        stored row already has client_updated_at >= the incoming value.
+        """
+        now = self._now()
+        connection = self.connect()
+        results: list[bool] = []
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for change in changes:
+                entity = str(change["entity"])
+                client_uid = str(change["client_uid"])
+                client_updated_at = int(change["client_updated_at"])
+                row = connection.execute(
+                    "SELECT client_updated_at FROM sync_records "
+                    "WHERE account_id = ? AND entity = ? AND client_uid = ?",
+                    (account_id, entity, client_uid),
+                ).fetchone()
+                if row is not None and int(row["client_updated_at"]) >= client_updated_at:
+                    results.append(False)
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO sync_records(
+                        account_id, entity, client_uid, payload,
+                        client_updated_at, deleted, server_updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(account_id, entity, client_uid) DO UPDATE SET
+                        payload = excluded.payload,
+                        client_updated_at = excluded.client_updated_at,
+                        deleted = excluded.deleted,
+                        server_updated_at = excluded.server_updated_at
+                    """,
+                    (
+                        account_id,
+                        entity,
+                        client_uid,
+                        str(change["payload"]),
+                        client_updated_at,
+                        1 if change["deleted"] else 0,
+                        now,
+                    ),
+                )
+                results.append(True)
+            connection.commit()
+            return results
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def list_sync_records(self, account_id: str, entities: list[str]) -> list[dict]:
+        query = (
+            "SELECT entity, client_uid, payload, client_updated_at, deleted "
+            "FROM sync_records WHERE account_id = ?"
+        )
+        params: list[object] = [account_id]
+        if entities:
+            placeholders = ", ".join("?" for _ in entities)
+            query += f" AND entity IN ({placeholders})"
+            params.extend(entities)
+        query += " ORDER BY id ASC"
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
 
     def list_accounts(self) -> list[dict]:
         today = self.today()

@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type ReviewCardRecord } from "../lib/db/db";
+import { db, newUid, type ReviewCardRecord } from "../lib/db/db";
 import { summarizeReviewCategories, learningTypeLabel } from "../lib/pack";
 import { reviewCard, type ReviewRating } from "../lib/fsrs/scheduler";
 
@@ -97,6 +97,7 @@ function ReviewSession({ type }: { type: string }) {
     await db.transaction("rw", db.reviewCards, db.reviewLogs, async () => {
       await db.reviewCards.update(current.id!, outcome.card);
       await db.reviewLogs.add({
+        uid: newUid(),
         cardId: current.id!,
         rating: outcome.log.rating,
         reviewedAtMillis: outcome.log.reviewedAtMillis,

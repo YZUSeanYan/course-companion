@@ -7,6 +7,19 @@ from .schemas import StrictModel
 
 class AccountActivateRequest(StrictModel):
     phone: str = Field(min_length=3, max_length=32)
+    code: str | None = Field(
+        default=None, min_length=6, max_length=6, pattern=r"^\d{6}$"
+    )
+
+
+class ActivationCodeRequest(StrictModel):
+    phone: str = Field(min_length=3, max_length=32)
+
+
+class ActivationCodeResponse(StrictModel):
+    sent: bool
+    phone_masked: str = Field(alias="phoneMasked")
+    cooldown_seconds: int = Field(alias="cooldownSeconds")
 
 
 class AccountLimitsResponse(StrictModel):

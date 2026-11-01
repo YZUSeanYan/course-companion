@@ -22,7 +22,8 @@ const params = generatorParameters({ enable_fuzz: false });
 const scheduler = fsrs(params);
 
 export interface ReviewOutcome {
-  card: Omit<ReviewCardRecord, "id" | "learningItemId" | "itemType" | "courseId" | "front" | "back">;
+  // uid 属于同步身份，由创建点/更新方持有，调度结果不携带。
+  card: Omit<ReviewCardRecord, "id" | "uid" | "learningItemId" | "itemType" | "courseId" | "front" | "back">;
   log: {
     rating: number;
     reviewedAtMillis: number;
@@ -87,7 +88,7 @@ export function reviewCard(record: ReviewCardRecord, rating: ReviewRating, nowMi
 /** 新卡片的初始调度状态：立即到期。 */
 export function newCardSchedule(nowMillis: number): Omit<
   ReviewCardRecord,
-  "id" | "learningItemId" | "itemType" | "courseId" | "front" | "back" | "lastReviewedAtMillis" | "lastRating"
+  "id" | "uid" | "learningItemId" | "itemType" | "courseId" | "front" | "back" | "lastReviewedAtMillis" | "lastRating"
 > {
   const card = createEmptyCard(new Date(nowMillis));
   const stepField = (card as { learning_steps?: number }).learning_steps;

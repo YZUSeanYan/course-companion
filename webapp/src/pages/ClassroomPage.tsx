@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
+import { db, newUid, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
 import { ClassroomController, type ClassroomSnapshot } from "../lib/classroom";
 import { TranslationQueue, lineTranslationOf } from "../lib/translate-queue";
 import { loadGatewayUrl } from "../lib/api/client";
@@ -201,6 +201,7 @@ export default function ClassroomPage() {
         const base = sessionRecord.startedAtMillis;
         await db.transcriptLines.bulkAdd(
           outcome.segments.map((segment: TranscriptSegment, index: number) => ({
+            uid: newUid(),
             sessionId,
             timestampMillis: base + (segment.startMs || index * 1000),
             text: segment.text,
