@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- 图标直接复用 App 的启动图标（app/src/main/res/drawable-nodpi/ic_brand_square.png）。
+         产物挂在 /web/ 子路径，所以用相对路径 ./；这样不必等 JS 启动就能显示正确的
+         标签页 / 主屏图标（原先靠运行时注入，脚本加载前是空的）。 -->
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./favicon-16.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <meta name="description" content="知习网页版：云端听课转写、AI 学习包与间隔复习" />
     <title>知习 · 网页版</title>
   </head>
