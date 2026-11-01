@@ -11,6 +11,7 @@ export default function LearningPage() {
   const [name, setName] = useState("");
   const [teacher, setTeacher] = useState("");
   const [nature, setNature] = useState("");
+  const [examProfile, setExamProfile] = useState<"FOREIGN_CLASS" | "CET6" | "GENERAL_EXAM">("FOREIGN_CLASS");
   const [glossaryText, setGlossaryText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +32,7 @@ export default function LearningPage() {
       name: name.trim(),
       teacher: teacher.trim(),
       language: "中英双语",
-      examProfile: "FOREIGN_CLASS",
+      examProfile,
       courseNature: nature.trim(),
       glossaryJson: glossary.length ? JSON.stringify(glossary) : "",
       createdAtMillis: Date.now(),
@@ -39,6 +40,7 @@ export default function LearningPage() {
     setName("");
     setTeacher("");
     setNature("");
+    setExamProfile("FOREIGN_CLASS");
     setGlossaryText("");
     setCreating(false);
     setError(null);
@@ -62,6 +64,12 @@ export default function LearningPage() {
             <input className="text-input" value={teacher} onChange={(event) => setTeacher(event.target.value)} />
             <label className="field-label">课程性质（可选，进入生成请求）</label>
             <input className="text-input" value={nature} onChange={(event) => setNature(event.target.value)} placeholder="例如：公选课 / 专业课" />
+            <label className="field-label">课程类型</label>
+            <select className="text-input" value={examProfile} onChange={(event) => setExamProfile(event.target.value as typeof examProfile)}>
+              <option value="FOREIGN_CLASS">外教课堂</option>
+              <option value="CET6">六级备考（支持标准词表导入）</option>
+              <option value="GENERAL_EXAM">通用备考</option>
+            </select>
             <label className="field-label">术语表（每行一条：术语：释义，可选）</label>
             <textarea className="textarea" value={glossaryText} onChange={(event) => setGlossaryText(event.target.value)} placeholder={"mitosis：有丝分裂"} />
             {error && <p className="banner banner-warn">{error}</p>}

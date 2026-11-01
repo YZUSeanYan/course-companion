@@ -122,7 +122,7 @@ export interface ReviewLogRecord {
 export interface AnalysisRunRecord {
   id?: number;
   courseId: number;
-  targetType: "SESSION" | "MATERIAL";
+  targetType: string; // SESSION | MATERIAL | GLOSSARY
   targetId: number;
   inputSha256: string;
   promptVersion: string;

@@ -1,4 +1,4 @@
-// 课程详情页：分类学习内容、讲义导入、生成学习包、导出 Markdown。
+// 课程详情页：分类学习内容、讲义导入、CET6 词表导入、生成学习包、导出 Markdown。
 // 分类口径与 Android LearningCategories.kt 一致：固定顺序、空分类不显示。
 
 import { useRef, useState } from "react";
@@ -7,6 +7,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../lib/db/db";
 import { groupLearningItems, LEARNING_CATEGORIES } from "../lib/pack";
 import { generatePackForMaterial } from "../lib/generate";
+import { importCet6Csv } from "../lib/cet6";
 import { exportCourseMarkdown } from "../lib/export";
 import { zhixi } from "../lib/api/client";
 import type { DocumentAsset } from "../lib/api/types";
@@ -26,6 +27,7 @@ export default function CourseDetailPage() {
     [],
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cet6InputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [openType, setOpenType] = useState<string | null>(null);
@@ -73,6 +75,17 @@ export default function CourseDetailPage() {
     }
   };
 
+  const importCet6 = async (file: File) => {
+    setStatus(`正在解析 ${file.name}…`);
+    try {
+      const text = await file.text();
+      const count = await importCet6Csv(courseIdNumber, text);
+      setStatus(`已导入 ${count} 个 CET6 词条，重复词条已跳过`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <main>
       <Link className="backlink" to="/learning">← 返回学习</Link>
@@ -81,6 +94,11 @@ export default function CourseDetailPage() {
       <div className="glass-card">
         <div className="card-title">
           讲义与学习包
+          {course.examProfile === "CET6" && (
+            <button className="btn btn-sm" onClick={() => cet6InputRef.current?.click()} disabled={uploading}>
+              导入 CET6 词表
+            </button>
+          )}
           <button
             className="btn btn-sm btn-primary"
             onClick={() => fileInputRef.current?.click()}
@@ -98,6 +116,17 @@ export default function CourseDetailPage() {
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void uploadDocument(file);
+            event.target.value = "";
+          }}
+        />
+        <input
+          ref={cet6InputRef}
+          type="file"
+          accept=".csv,.tsv,.txt"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void importCet6(file);
             event.target.value = "";
           }}
         />
