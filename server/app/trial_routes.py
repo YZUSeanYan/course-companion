@@ -24,6 +24,7 @@ from .trial_schemas import (
     TrialCodeRequest,
     TrialCodeResponse,
     TrialLimitsResponse,
+    TrialStatusResponse,
 )
 
 
@@ -77,6 +78,19 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
                 "试用申请服务尚未配置",
             )
         return settings.token_pepper
+
+    @app.get("/v1/trial/status", response_model=TrialStatusResponse)
+    def trial_status() -> TrialStatusResponse:
+        return TrialStatusResponse(
+            smsConfigured=app.state.sms_sender is not None,
+            defaults=TrialLimitsResponse(
+                aiPacksPerDay=settings.trial_default_ai_packs,
+                audioMinutesPerDay=settings.trial_default_audio_minutes,
+                textCharactersPerDay=settings.account_default_text_chars_daily_limit,
+                documentsPerDay=settings.account_default_document_daily_limit,
+                maxDevices=settings.account_default_max_devices,
+            ),
+        )
 
     @app.post("/v1/trial/request-code", response_model=TrialCodeResponse)
     async def request_code(payload: TrialCodeRequest, request: Request) -> TrialCodeResponse:

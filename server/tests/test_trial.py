@@ -158,8 +158,13 @@ def test_cooldown_existing_phone_and_consent(settings):
 def test_invalid_phone_and_unconfigured_sms(settings):
     client, _ = make_trial_client(settings)
     assert request_code(client, "12345").status_code == 422
+    configured = client.get("/v1/trial/status").json()
+    assert configured["smsConfigured"] is True
+    assert configured["defaults"]["aiPacksPerDay"] == 5
 
     unconfigured = TestClient(create_app(settings))
+    status = unconfigured.get("/v1/trial/status").json()
+    assert status["smsConfigured"] is False
     response = request_code(unconfigured, "13900000104")
     assert response.status_code == 503
     assert response.headers["X-Zhixi-Error-Code"] == "sms_not_configured"
