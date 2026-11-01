@@ -21,8 +21,9 @@ describe("parseGlossaryCsv（对齐 Android GlossaryImporter）", () => {
     ]);
   });
 
-  it("释义中的逗号保留（limit 2 切分）", () => {
-    expect(parseGlossaryCsv("word,a,b")).toEqual([{ term: "word", definition: "a,b" }]);
+  it("释义中的逗号保留（limit 2 切分；首列 word/term 视为表头，与 Android 一致）", () => {
+    expect(parseGlossaryCsv("mitosis,a,b")).toEqual([{ term: "mitosis", definition: "a,b" }]);
+    expect(() => parseGlossaryCsv("word,a,b")).toThrow("没有有效词条");
   });
 
   it("拒绝缺释义行、空表、超限", () => {
