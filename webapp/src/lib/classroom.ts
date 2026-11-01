@@ -2,7 +2,7 @@
 // 事件口径与 Android LecsyncRealtimeEngine 一致；浏览器离线识别（sherpa-onnx WASM）在 offline 引擎中单独实现。
 
 import { db, newUid } from "./db/db";
-import { zhixi } from "./api/client";
+import { zhixi, sleep } from "./api/client";
 import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason } from "./audio/realtime";
 import { encodeWav } from "./audio/wav";
@@ -56,6 +56,32 @@ function defaultConfig(options: ClassroomStartOptions): RealtimeConfig {
   };
 }
 
+/** 连接存活时长追踪起点（onOpen 时刷新），用于判断是否为短命异常连接。 */
+export const SHORT_LIVED_MS = 30_000;
+export const MAX_RECONNECT_ATTEMPTS = 3;
+
+/** 云课堂断开后是否自动重连：非用户停止、非语义性拒绝（鉴权/额度/限流/时长）、未超次数即重试。 */
+export function shouldReconnectAfterClose(input: {
+  code: number;
+  livedMs: number;
+  userStopped: boolean;
+  attempts: number;
+  maxAttempts?: number;
+}): boolean {
+  if (input.userStopped) return false;
+  // 4401 鉴权 / 4403 额度 / 4429 限流 / 4408 4 小时上限：重连也会被拒，直接结束并给指引。
+  const fatal = new Set([4401, 4403, 4429, 4408]);
+  if (fatal.has(input.code)) return false;
+  // 正常关闭且课堂已持续较久：视为真实结束，不重连。
+  if (input.code === 1000 && input.livedMs >= SHORT_LIVED_MS) return false;
+  if (input.attempts >= (input.maxAttempts ?? MAX_RECONNECT_ATTEMPTS)) return false;
+  return true;
+}
+
+export function reconnectDelayMs(attempt: number): number {
+  return 1000 * 2 ** Math.max(0, attempt - 1);
+}
+
 export class ClassroomController {
   private snapshot: ClassroomSnapshot = {
     phase: "idle",
@@ -82,6 +108,11 @@ export class ClassroomController {
   private mode: "cloud" | "offline" = "cloud";
   private offlineCallbacks: OfflineCallbacks | null = null;
   private offlineSessionId: number | null = null;
+  private cloudOptions: ClassroomStartOptions | null = null;
+  private cloudSessionId: number | null = null;
+  private cloudOpenedAt = 0;
+  private reconnectAttempts = 0;
+  private reconnectGeneration = 0;
 
   subscribe(callbacks: ClassroomCallbacks): ClassroomSnapshot {
     this.callbacks = callbacks;
@@ -108,6 +139,8 @@ export class ClassroomController {
     });
     try {
       this.mode = options.mode;
+      this.reconnectAttempts = 0;
+      this.reconnectGeneration += 1;
       let token: string | null = null;
       if (options.mode === "cloud") {
         // 云端：先注册设备并确认账号可用；未激活/过期时网关会在 WS 握手阶段直接拒绝，
@@ -169,10 +202,16 @@ export class ClassroomController {
   }
 
   private startCloud(sessionId: number, options: ClassroomStartOptions, token: string): void {
+    this.cloudOptions = options;
+    this.cloudSessionId = sessionId;
+    this.cloudOpenedAt = Date.now();
     this.realtime = new RealtimeSession(zhixi.realtimeUrl(), token, defaultConfig(options), {
       onEvent: (event) => void this.handleEvent(sessionId, event),
       onClose: (code, reason) => void this.handleClose(sessionId, code, reason),
       onError: (error) => this.emit({ statusMessage: error.message }),
+      onOpen: () => {
+        this.cloudOpenedAt = Date.now();
+      },
     });
     this.realtime.connect();
   }
@@ -247,6 +286,7 @@ export class ClassroomController {
   async stop(): Promise<void> {
     if (this.snapshot.phase === "idle" || this.snapshot.phase === "ended") return;
     this.emit({ phase: "stopping", statusMessage: "正在结束课堂…" });
+    this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // 用户主动停止：禁用自动重连
     if (this.ticker !== null) {
       window.clearInterval(this.ticker);
       this.ticker = null;
@@ -270,9 +310,46 @@ export class ClassroomController {
     if (this.snapshot.phase === "stopping" || this.snapshot.phase === "ended" || this.snapshot.phase === "idle") {
       return;
     }
+    // 瞬时断开自动重连（最多 3 次，指数退避）：非用户停止、非语义性拒绝。
+    if (
+      this.mode === "cloud" &&
+      shouldReconnectAfterClose({
+        code,
+        livedMs: Date.now() - this.cloudOpenedAt,
+        userStopped: false,
+        attempts: this.reconnectAttempts,
+      })
+    ) {
+      this.reconnectAttempts += 1;
+      const delay = reconnectDelayMs(this.reconnectAttempts);
+      const generation = this.reconnectGeneration;
+      this.emit({
+        phase: "listening",
+        partialText: "",
+        statusMessage: `连接中断，${Math.round(delay / 1000)} 秒后自动重连（${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}）…`,
+      });
+      await sleep(delay);
+      if (
+        this.snapshot.phase !== "listening" ||
+        this.mode !== "cloud" ||
+        generation !== this.reconnectGeneration
+      ) {
+        return; // 重连等待期间用户已停止或开启了新课。
+      }
+      try {
+        const token = await zhixi.deviceToken();
+        if (this.cloudSessionId != null && this.cloudOptions) {
+          this.startCloud(this.cloudSessionId, this.cloudOptions, token);
+          return;
+        }
+      } catch (error) {
+        // 取 token 失败也走正常结束路径，把错误带给用户。
+        this.emit({ statusMessage: error instanceof Error ? error.message : String(error) });
+      }
+    }
     const message = closeReason(code) ?? (reason || null);
     await this.finishSession();
-    this.emit({ phase: "ended", statusMessage: message ?? "课堂连接已结束" });
+    this.emit({ phase: "ended", statusMessage: message ?? this.snapshot.statusMessage ?? "课堂连接已结束" });
     void sessionId;
   }
 
@@ -312,6 +389,9 @@ export class ClassroomController {
   private async handleEvent(sessionId: number, event: RealtimeEvent): Promise<void> {
     switch (event.type) {
       case "session.ready":
+        // 重连成功：重置重连计数并清掉状态提示。
+        this.reconnectAttempts = 0;
+        this.cloudOpenedAt = Date.now();
         this.emit({ statusMessage: null });
         break;
       case "transcript.partial":
