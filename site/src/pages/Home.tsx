@@ -6,6 +6,9 @@ import ClassroomDemo from '../components/site/ClassroomDemo'
 import PageHero from '../components/site/PageHero'
 import SectionHead from '../components/site/SectionHead'
 import CtaBand from '../components/site/CtaBand'
+import DarkBand from '../components/site/DarkBand'
+import Ribbon from '../components/site/Ribbon'
+import { useCountUp } from '../hooks/use-count-up'
 import { WEB_APP_URL } from '../lib/release'
 
 /* ---------- 内联 SVG 图标 ---------- */
@@ -83,10 +86,32 @@ const MANIFESTO = [
 ]
 
 const STATS = [
-  { v: '<200', unit: 'ms', label: '云端实时转写延迟（引擎实测）' },
-  { v: '1.25', unit: '%WER', label: '词错误率，行业领先水平' },
-  { v: '71.9', unit: '%', label: '课堂段落翻译胜率（AI 成对裁判）' },
+  { v: 200, prefix: '<', unit: 'ms', decimals: 0, label: '云端实时转写延迟（引擎实测）' },
+  { v: 1.25, prefix: '', unit: '%WER', decimals: 2, label: '词错误率，行业领先水平' },
+  { v: 71.9, prefix: '', unit: '%', decimals: 1, label: '课堂段落翻译胜率（AI 成对裁判）' },
 ]
+
+/** 单个实测数字：进入视口后从 0 计到目标值，保留原本的小数位 */
+function StatValue({
+  value,
+  prefix,
+  unit,
+  decimals,
+}: {
+  value: number
+  prefix: string
+  unit: string
+  decimals: number
+}) {
+  const { ref, formatted } = useCountUp(value, decimals)
+  return (
+    <p className="stat__value accent">
+      {prefix}
+      <span ref={ref} className="num">{formatted}</span>
+      <span className="stat__unit">{unit}</span>
+    </p>
+  )
+}
 
 const SCREENS = [
   { key: 'live-class', label: '实时听课 · 转写与翻译' },
@@ -154,16 +179,13 @@ export default function Home() {
       </PageHero>
 
       {/* ============ 引擎实测数据 ============ */}
-      <section className="band--surface band">
+      <section className="band band--surface">
         <div className="container-x">
           <div className="grid gap-6 border-b border-[var(--line)] py-8 sm:grid-cols-3">
             {STATS.map((s, i) => (
-              <Reveal key={s.label} delay={i * 0.06}>
+              <Reveal key={s.label} delay={i * 0.08}>
                 <div className="stat">
-                  <p className="stat__value accent">
-                    {s.v}
-                    <span className="stat__unit">{s.unit}</span>
-                  </p>
+                  <StatValue value={s.v} prefix={s.prefix} unit={s.unit} decimals={s.decimals} />
                   <p className="stat__label">{s.label}</p>
                 </div>
               </Reveal>
@@ -178,17 +200,20 @@ export default function Home() {
         </div>
       </section>
 
+      <Ribbon />
+
       {/* ============ 痛点 ============ */}
       <section className="band band--section">
         <div className="container-x section">
           <SectionHead
+            index="01"
             eyebrow="THE PROBLEM"
             title={<>课堂上的三道坎，<br className="hidden sm:block" />卡在每个认真学习的人身上</>}
           />
           <div className="mt-12 grid gap-5 md:grid-cols-3">
             {PAIN_POINTS.map((p, i) => (
               <Reveal key={p.n} delay={i * 0.07} className="h-full">
-                <div className="card card--hover h-full">
+                <div className="card card--hover card--sheen h-full">
                   <p className="num-card__index">{p.n}</p>
                   <p className="h3 mt-4">{p.t}</p>
                   <p className="body-2 mt-3" style={{ fontSize: 14.5 }}>{p.d}</p>
@@ -200,15 +225,17 @@ export default function Home() {
       </section>
 
       {/* ============ 工作原理 ============ */}
-      <section id="how" className="band band--dark radar-bg-dark">
+      <DarkBand id="how" className="radar-bg-dark">
         <div className="container-x section">
           <SectionHead
+            index="02"
             eyebrow="HOW IT WORKS"
             align="center"
             title="一节课，从听到复习的完整闭环"
             lead="从老师开口，到复习卡片进入计划——看一遍就懂。"
           />
-          <Reveal delay={0.1} className="mt-14">
+          <div className="rule-scan mt-10 mb-2" aria-hidden />
+          <Reveal delay={0.1} variant="scale" className="mt-10">
             <ClassroomDemo />
           </Reveal>
           <div className="mt-14 grid gap-5 sm:grid-cols-3">
@@ -227,12 +254,13 @@ export default function Home() {
             ))}
           </div>
         </div>
-      </section>
+      </DarkBand>
 
       {/* ============ 核心功能 ============ */}
       <section className="band">
         <div className="container-x section">
           <SectionHead
+            index="03"
             eyebrow="FEATURES"
             title={<>为课堂而生，<br className="hidden sm:block" />为隐私而设计</>}
             lead="六个能力串成一条链路：听课、整理、复习都在同一个应用里完成。"
@@ -241,7 +269,7 @@ export default function Home() {
           <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f, i) => (
               <Reveal key={f.t} delay={(i % 3) * 0.07} className="h-full">
-                <div className="card card--soft card--hover h-full">
+                <div className="card card--soft card--hover card--sheen h-full">
                   <span className="card__icon wiggle">
                     <span className="wiggle-target">{f.icon}</span>
                   </span>
@@ -271,12 +299,13 @@ export default function Home() {
         <div className="section">
           <div className="container-x">
             <SectionHead
+              index="04"
               eyebrow="SCREENS"
               title="界面速览"
               lead="真实产品截图，不是示意图。"
             />
           </div>
-          <Reveal delay={0.1}>
+          <Reveal delay={0.1} variant="mask">
             <div className="h-scroll mt-10">
               <div className="mx-auto flex items-start gap-6 px-6 pb-4" style={{ width: 'max-content' }}>
                 {SCREENS.map((s) => (
@@ -292,9 +321,10 @@ export default function Home() {
       </section>
 
       {/* ============ 隐私原则 ============ */}
-      <section className="band band--dark">
+      <DarkBand>
         <div className="container-x section">
           <SectionHead
+            index="05"
             eyebrow="PRIVACY PRINCIPLES"
             title={<>数据先落地，<br />联网你说了算。</>}
           />
@@ -302,8 +332,7 @@ export default function Home() {
             {MANIFESTO.map((m, i) => (
               <Reveal key={m.n} delay={i * 0.05}>
                 <div
-                  className="grid items-baseline gap-3 py-8 md:grid-cols-[110px_1fr_1.3fr] md:gap-10"
-                  style={{ borderTop: '1px solid var(--dark-line)' }}
+                  className="grid items-baseline gap-3 py-8 md:grid-cols-[110px_1fr_1.3fr] md:gap-10 privacy-row"
                 >
                   <p className="num" style={{ fontSize: 30, fontWeight: 800, color: 'var(--brand)', lineHeight: 1 }}>{m.n}</p>
                   <p className="h3">{m.t}</p>
@@ -319,7 +348,7 @@ export default function Home() {
             </Link>
           </Reveal>
         </div>
-      </section>
+      </DarkBand>
 
       <CtaBand />
     </div>

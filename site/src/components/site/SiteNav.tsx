@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router'
 import LogoMark from './LogoMark'
+import ScrollRail from './ScrollRail'
 import { WEB_APP_URL } from '../../lib/release'
 
 const LINKS = [
@@ -24,6 +25,7 @@ export default function SiteNav() {
 
   return (
     <header className={`nav-shell ${scrolled ? 'is-scrolled' : ''}`}>
+      <ScrollRail />
       <div className="container-x flex items-center justify-between" style={{ height: 66 }}>
         <Link to="/" className="wiggle flex items-center gap-3" aria-label="知习首页" onClick={() => setOpen(false)}>
           <LogoMark size={32} />
@@ -64,7 +66,7 @@ export default function SiteNav() {
       </div>
 
       {open && (
-        <nav className="md:hidden hairline-t" style={{ background: 'var(--bg)' }}>
+        <nav className="md:hidden hairline-t nav-drawer" style={{ background: 'var(--bg)' }}>
           <div className="container-x flex flex-col gap-1 py-4">
             {LINKS.map((l) => (
               <NavLink

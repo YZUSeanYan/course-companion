@@ -356,6 +356,7 @@ export default function Apply() {
       <section className="band band--surface">
         <div className="container-x section">
           <SectionHead
+            index="01"
             eyebrow="TRIAL RULES"
             title="试用规则"
             lead="额度按每日次数与有效期管理，多台设备与网页版共用同一份额度。"
@@ -363,7 +364,7 @@ export default function Apply() {
           <div className="mt-10 grid gap-5 sm:grid-cols-2">
             {RULES.map((rule, index) => (
               <Reveal key={rule.t} delay={index * 0.05} className="h-full">
-                <div className="card card--soft card--hover h-full">
+                <div className="card card--soft card--hover card--sheen h-full">
                   <p className="h3" style={{ fontSize: 17 }}>{rule.t}</p>
                   <p className="body-2 mt-2" style={{ fontSize: 14 }}>{rule.d}</p>
                 </div>

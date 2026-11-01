@@ -109,13 +109,14 @@ export default function Feedback() {
       <section className="band band--surface">
         <div className="container-x section">
           <SectionHead
+            index="01"
             eyebrow="CONTACT"
             title="问题反馈"
             lead="描述得越具体，修得越快：机型或浏览器版本、发生时间、当时的操作步骤。"
           />
           <div className="mt-10 grid gap-5 md:grid-cols-3">
             <Reveal className="h-full">
-              <div className="card card--soft card--hover h-full">
+              <div className="card card--soft card--hover card--sheen h-full">
                 <span className="card__icon">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 0 1-8 8c-1.2 0-2.4-.3-3.4-.7L4 20l.9-4.2A7.6 7.6 0 0 1 4 12a8 8 0 0 1 8-8 8 8 0 0 1 9 8Z" transform="translate(-1 0)" /><path d="M8.5 11h.01M12.5 11h.01M16.5 11h.01" /></svg>
                 </span>
@@ -134,7 +135,7 @@ export default function Feedback() {
             </Reveal>
 
             <Reveal delay={0.05} className="h-full">
-              <div className="card card--soft card--hover h-full">
+              <div className="card card--soft card--hover card--sheen h-full">
                 <span className="card__icon">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M9.5 9.2a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1 1-1.1 1.8v.3" /><path d="M12 17.2h.01" /></svg>
                 </span>
@@ -145,7 +146,7 @@ export default function Feedback() {
             </Reveal>
 
             <Reveal delay={0.1} className="h-full">
-              <div className="card card--soft card--hover h-full">
+              <div className="card card--soft card--hover card--sheen h-full">
                 <span className="card__icon">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9Z" /></svg>
                 </span>
@@ -165,7 +166,7 @@ export default function Feedback() {
 
       <section id="faq" className="band">
         <div className="container-x section">
-          <SectionHead eyebrow="FAQ" title="常见问题" />
+          <SectionHead index="02" eyebrow="FAQ" title="常见问题" />
           <div className="mt-10 grid items-start gap-3 md:grid-cols-2">
             {FAQS.map((f, i) => (
               <FaqItem key={f.q} q={f.q} a={f.a} delay={(i % 2) * 0.04} />

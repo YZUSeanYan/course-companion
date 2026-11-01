@@ -4,6 +4,7 @@ import Waveform from '../components/site/Waveform'
 import PageHero from '../components/site/PageHero'
 import SectionHead from '../components/site/SectionHead'
 import CtaBand from '../components/site/CtaBand'
+import Ribbon from '../components/site/Ribbon'
 import BenchmarksSection from '../components/site/BenchmarksSection'
 import { Link } from 'react-router'
 import { WEB_APP_URL } from '../lib/release'
@@ -342,7 +343,11 @@ export default function Features() {
           <div className="container-x section">
             <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
               <Reveal className={i % 2 === 1 ? 'lg:order-2' : ''}>
-                <p className="eyebrow eyebrow--brand">{s.label}</p>
+                <p className="eyebrow eyebrow--brand">
+                  <span style={{ color: 'var(--ink-3)' }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ opacity: 0.35 }}>/</span>
+                  {s.label}
+                </p>
                 <h2 className="h2 mt-4">{s.title}</h2>
                 <p className="body-2 mt-4">{s.body}</p>
                 <ul className="mt-6 flex flex-col gap-2.5">
@@ -354,13 +359,17 @@ export default function Features() {
                   ))}
                 </ul>
               </Reveal>
-              <Reveal delay={0.1} className={i % 2 === 1 ? 'lg:order-1' : ''}>
+              <Reveal delay={0.1} variant="scale" className={i % 2 === 1 ? 'lg:order-1' : ''}>
                 {s.illustration}
               </Reveal>
             </div>
           </div>
         </section>
       ))}
+
+      <Ribbon
+        items={['8 项能力', '倾听', '转写', '翻译', '标记', '归档', '复习', '导出', '一条链路']}
+      />
 
       <section className="band band--surface">
         <div className="container-x section--tight">

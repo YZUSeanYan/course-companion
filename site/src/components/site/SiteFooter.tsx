@@ -4,7 +4,7 @@ import { CURRENT_RELEASE, WEB_APP_URL } from '../../lib/release'
 
 export default function SiteFooter() {
   return (
-    <footer className="band band--surface" style={{ borderTop: '1px solid var(--line)' }}>
+    <footer className="band band--surface site-footer">
       <div className="container-x grid gap-10 py-14 md:grid-cols-4">
         <div className="md:col-span-2">
           <div className="flex items-center gap-3">
@@ -27,22 +27,27 @@ export default function SiteFooter() {
         <div>
           <p className="tagline mb-4" style={{ letterSpacing: '0.14em' }}>产品</p>
           <ul className="flex flex-col gap-2.5" style={{ fontSize: 14, fontWeight: 600 }}>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/features">功能介绍</Link></li>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/download">下载与安装</Link></li>
-            <li><a className="hover:text-[var(--brand-deep)]" href={WEB_APP_URL}>网页版</a></li>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/apply">试用额度</Link></li>
+            <li><Link className="footer-link" to="/features">功能介绍</Link></li>
+            <li><Link className="footer-link" to="/download">下载与安装</Link></li>
+            <li><a className="footer-link" href={WEB_APP_URL}>网页版</a></li>
+            <li><Link className="footer-link" to="/apply">试用额度</Link></li>
           </ul>
         </div>
 
         <div>
           <p className="tagline mb-4" style={{ letterSpacing: '0.14em' }}>协议与支持</p>
           <ul className="flex flex-col gap-2.5" style={{ fontSize: 14, fontWeight: 600 }}>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/privacy">隐私政策</Link></li>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/privacy#terms">使用条款</Link></li>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/privacy#permissions">权限说明</Link></li>
-            <li><Link className="hover:text-[var(--brand-deep)]" to="/feedback">问题反馈</Link></li>
+            <li><Link className="footer-link" to="/privacy">隐私政策</Link></li>
+            <li><Link className="footer-link" to="/privacy#terms">使用条款</Link></li>
+            <li><Link className="footer-link" to="/privacy#permissions">权限说明</Link></li>
+            <li><Link className="footer-link" to="/feedback">问题反馈</Link></li>
           </ul>
         </div>
+      </div>
+
+      {/* 页脚的大字水印：产品名压在最底部，作为收尾的品牌节奏 */}
+      <div className="container-x">
+        <p className="footer-wordmark" aria-hidden>ZHIXI</p>
       </div>
 
       <div className="hairline-t">
@@ -52,7 +57,7 @@ export default function SiteFooter() {
               href="https://beian.miit.gov.cn/"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-[var(--brand-deep)]"
+              className="footer-link"
               style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-3)' }}
             >
               苏ICP备2026057230号
@@ -62,7 +67,7 @@ export default function SiteFooter() {
               href="https://beian.mps.gov.cn/"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 hover:text-[var(--brand-deep)]"
+              className="footer-link inline-flex items-center gap-1.5"
               style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-3)' }}
             >
               <img src="/gongan-logo.png" alt="" style={{ height: 18, display: 'inline-block', verticalAlign: 'middle' }} />
