@@ -10,8 +10,67 @@ from .provider import AIProvider, ProviderError, ProviderInvalidResponse, Provid
 from .provider_catalog import vision_endpoints_from_env
 from .v2_schemas import LearningPackRequest, LearningPackV2, TranslateRequest
 
-PROMPT_VERSION_V2 = "learning-minutes-v2"
+PROMPT_VERSION_V2 = "learning-minutes-v3"
 SCHEMA_VERSION_V2 = "2.0"
+
+# Per-category budgets enforced after generation regardless of prompt compliance.
+ITEM_BUDGETS = {
+    "vocabulary": 12,
+    "phrases": 6,
+    "keyPoints": 12,
+    "questions": 8,
+    "quizCards": 10,
+}
+
+
+def _dedupe_key(value: str) -> str:
+    """Normalize an item title for duplicate detection (case/space/punctuation safe)."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(value)).lower()
+    return "".join(char for char in text if char.isalnum())
+
+
+def _dedupe_and_cap(pack: dict) -> dict:
+    """Drop duplicated or near-duplicated items and enforce per-category budgets.
+
+    Runs after alias normalization, so providers that ignore the prompt still
+    yield a compact, non-repetitive learning pack. Phrases duplicating a
+    vocabulary term are dropped across categories.
+    """
+    title_fields = {
+        "vocabulary": "term",
+        "phrases": "phrase",
+        "keyPoints": "text",
+        "questions": "question",
+        "quizCards": "front",
+    }
+    vocabulary_keys: set[str] = set()
+    for name, field in title_fields.items():
+        items = pack.get(name)
+        if not isinstance(items, list):
+            continue
+        seen: set[str] = set()
+        kept: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = _dedupe_key(str(item.get(field, "")))
+            if not key:
+                continue
+            if key in seen:
+                continue
+            if name == "phrases" and key in vocabulary_keys:
+                continue
+            seen.add(key)
+            if name == "vocabulary":
+                vocabulary_keys.add(key)
+            kept.append(item)
+            if len(kept) >= ITEM_BUDGETS[name]:
+                break
+        pack[name] = kept
+    return pack
+
 
 
 def _alias(item: dict, *names: str, default=""):
@@ -120,7 +179,7 @@ def _normalize_learning_pack(data: dict) -> dict:
                 })
         minutes["sections"] = sections
         pack["minutes"] = minutes
-    return pack
+    return _dedupe_and_cap(pack)
 
 
 class V2Provider(AIProvider):
@@ -156,8 +215,19 @@ class V2Provider(AIProvider):
             "task": (
                 mode_instructions[request.analysis_mode]
                 + " Ground every statement in the provided chunks. Manual doubts belong to the student, "
-                "not the teacher. Answer doubts with references. Include bilingual vocabulary and phrases "
-                "with definitions and examples, keyPoints, self-test questions and quizCards. Return JSON only."
+                "not the teacher. Answer doubts with references."
+                + " First infer the subject type from courseName/courseNature and the chunk content."
+                + " For technical or STEM material (engineering, science, math, medicine, etc.), vocabulary must be"
+                + " a glossary of professional terms (term + Chinese definition + English definition + an example"
+                + " taken from the text); phrases only when the text truly contains fixed collocations, at most 5;"
+                + " put the emphasis on keyPoints, questions and quizCards."
+                + " Only for language-learning material may vocabulary contain general words and phrases contain"
+                + " common expressions."
+                + " Hard budget: at most 12 vocabulary, 6 phrases, 12 keyPoints, 8 questions, 10 quizCards."
+                + " Quality over quantity: every item must carry distinct information; never repeat or paraphrase"
+                + " the same content within one list or across lists (a phrase must not duplicate a vocabulary"
+                + " term, a quizCard must not restate a question). Omit a list entirely rather than padding it."
+                + " Return JSON only."
             ),
             "input": input_data,
             "outputSchema": LearningPackV2.model_json_schema(),

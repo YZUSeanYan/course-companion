@@ -170,6 +170,7 @@ import com.classroomradar.app.learning.CloudAudioPresenter
 import com.classroomradar.app.learning.CloudAudioScreen
 import com.classroomradar.app.learning.CloudListeningSettingsScreen
 import com.classroomradar.app.learning.CourseEntity
+import com.classroomradar.app.learning.OfflineSyncManager
 import com.classroomradar.app.learning.AccountSettingsCard
 import com.classroomradar.app.learning.api.AccountStatusDto
 import com.classroomradar.app.learning.LiveMinutesCard
@@ -194,6 +195,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.OutputStreamWriter
 import java.io.IOException
@@ -358,6 +362,11 @@ class MainActivity : ComponentActivity() {
                 // 每次冷启动联网拉取公告与首页标语；失败静默，离线走内置默认。
                 LaunchedEffect(Unit) {
                     learningPresenter.fetchAppConfig()
+                }
+
+                // 离线课堂的云端补转写：启动时重试上次因配额/网络失败的队列。
+                LaunchedEffect(Unit) {
+                    OfflineSyncManager.get(context.applicationContext).retryPending()
                 }
 
                 LaunchedEffect(appConfig) {
@@ -654,6 +663,8 @@ class MainActivity : ComponentActivity() {
                             accountStatus = accountStatus,
                             accountSupported = accountSupported,
                             onCreateCourse = learningPresenter::createCourse,
+                            onRenameCourse = { id, name, nature -> learningPresenter.renameCourse(id, name, nature) },
+                            onDeleteCourse = learningPresenter::deleteCourse,
                             onOpenHistory = { page = AppPage.History },
                             onOpenCourse = { courseId ->
                                 learningPresenter.loadCourse(courseId)
@@ -760,6 +771,10 @@ class MainActivity : ComponentActivity() {
                             onOpenPrivacyPolicy = { page = AppPage.PrivacyPolicy },
                             onOpenCloudListening = { page = AppPage.CloudListening },
                             onOpenCloudAudio = { page = AppPage.CloudAudio },
+                            onForceOfflineChanged = presenter::setForceOfflineRecording,
+                            onAutoOfflineChanged = presenter::setAutoOfflineOnNetworkLoss,
+                            onOfflineFirstChanged = presenter::setOfflineFirstStart,
+                            onAutoCloudSyncChanged = presenter::setAutoCloudSync,
                             onDownloadModels = presenter::downloadModels,
                             onRestoreModels = presenter::restoreModels,
                             onUninstallModels = presenter::uninstallModels,
@@ -933,6 +948,10 @@ private data class SettingsState(
     val translationNoticeAccepted: Boolean = false,
     val cloudListeningEnabled: Boolean = false,
     val cloudNoticeAccepted: Boolean = false,
+    val forceOfflineRecording: Boolean = false,
+    val autoOfflineOnNetworkLoss: Boolean = true,
+    val offlineFirstStart: Boolean = false,
+    val autoCloudSync: Boolean = true,
     val modelStatusText: String = "",
     val modelCanRestore: Boolean = false,
     val modelCanUninstall: Boolean = false,
@@ -951,6 +970,8 @@ private class ClassroomPresenter(private val appContext: Context) {
     private var detailJob: Job? = null
     private var minutesJob: Job? = null
     private var activeSessionJob: Job? = null
+    private var liveTranslationJob: Job? = null
+    private var detailTranslationJob: Job? = null
 
     private val _dashboard = MutableStateFlow(DashboardState())
     val dashboard: StateFlow<DashboardState> = _dashboard.asStateFlow()
@@ -987,6 +1008,8 @@ private class ClassroomPresenter(private val appContext: Context) {
                         cloudMetrics = RecorderDashboardMetrics(event.recognitionLatencyMs, event.translationLatencyMs),
                     )
                     is RecorderEvent.Failure -> _dashboard.value = _dashboard.value.copy(failureMessage = event.message, liveTranscript = "", liveTranslation = null)
+                    is RecorderEvent.ConnectionRestored -> _dashboard.value = _dashboard.value.copy(failureMessage = null)
+                    is RecorderEvent.CloudSyncCompleted -> Unit
                 }
             }
         }
@@ -1020,14 +1043,19 @@ private class ClassroomPresenter(private val appContext: Context) {
                 )
             }
         }
-        scope.launch {
-            repository.observeTranscript(sessionId).collect { lines ->
-                repository.observeTranslations(lines.map { it.id }).collect { translations ->
+        // flatMapLatest re-subscribes when the line set grows; a nested collect froze the
+        // first (usually empty) id list and translations of later lines never arrived.
+        liveTranslationJob?.cancel()
+        liveTranslationJob = scope.launch {
+            repository.observeTranscript(sessionId)
+                .map { lines -> lines.map { it.id } }
+                .distinctUntilChanged()
+                .flatMapLatest { lineIds -> repository.observeTranslations(lineIds) }
+                .collect { translations ->
                     _dashboard.value = _dashboard.value.copy(
                         translations = translations.associateBy { it.transcriptLineId },
                     )
                 }
-            }
         }
         scope.launch {
             repository.observeLiveMinutes(sessionId).collect { minutes ->
@@ -1039,6 +1067,8 @@ private class ClassroomPresenter(private val appContext: Context) {
     fun close() {
         activeSessionJob?.cancel()
         minutesJob?.cancel()
+        liveTranslationJob?.cancel()
+        detailTranslationJob?.cancel()
         scope.cancel()
     }
 
@@ -1079,14 +1109,17 @@ private class ClassroomPresenter(private val appContext: Context) {
                 SessionDetailState(session, transcript, emptyMap(), questions, doubts)
             }.collect { _detail.value = it }
         }
-        scope.launch {
-            repository.observeTranscript(sessionId).collect { lines ->
-                repository.observeTranslations(lines.map { it.id }).collect { translations ->
+        detailTranslationJob?.cancel()
+        detailTranslationJob = scope.launch {
+            repository.observeTranscript(sessionId)
+                .map { lines -> lines.map { it.id } }
+                .distinctUntilChanged()
+                .flatMapLatest { lineIds -> repository.observeTranslations(lineIds) }
+                .collect { translations ->
                     _detail.value = _detail.value.copy(
                         translations = translations.associateBy { it.transcriptLineId },
                     )
                 }
-            }
         }
     }
 
@@ -1191,6 +1224,26 @@ private class ClassroomPresenter(private val appContext: Context) {
 
     fun setCloudListeningEnabled(enabled: Boolean) {
         preferences.cloudListeningEnabled = enabled
+        refreshSettings()
+    }
+
+    fun setForceOfflineRecording(enabled: Boolean) {
+        preferences.forceOfflineRecording = enabled
+        refreshSettings()
+    }
+
+    fun setAutoOfflineOnNetworkLoss(enabled: Boolean) {
+        preferences.autoOfflineOnNetworkLoss = enabled
+        refreshSettings()
+    }
+
+    fun setOfflineFirstStart(enabled: Boolean) {
+        preferences.offlineFirstStart = enabled
+        refreshSettings()
+    }
+
+    fun setAutoCloudSync(enabled: Boolean) {
+        preferences.autoCloudSync = enabled
         refreshSettings()
     }
 
@@ -1308,9 +1361,14 @@ private class ClassroomPresenter(private val appContext: Context) {
         translationNoticeAccepted = preferences.translationNoticeAccepted,
         cloudListeningEnabled = preferences.cloudListeningEnabled,
         cloudNoticeAccepted = preferences.cloudNoticeAccepted,
+        forceOfflineRecording = preferences.forceOfflineRecording,
+        autoOfflineOnNetworkLoss = preferences.autoOfflineOnNetworkLoss,
+        offlineFirstStart = preferences.offlineFirstStart,
+        autoCloudSync = preferences.autoCloudSync,
         modelStatusText = modelManager.status().let { status ->
             when {
                 status.managedInstalled -> "受管离线模型已安装 · ${status.bytes / 1024 / 1024} MB"
+                status.corrupt -> "离线模型文件不完整，请重新下载"
                 status.bundledInstalled -> "内置离线模型可用 · 无需下载"
                 status.recycled -> "模型已移入回收站，可恢复或重新下载"
                 else -> "未安装离线识别模型，请下载或从回收站恢复"
@@ -1404,11 +1462,11 @@ private fun AppScaffold(
                     }
                 }
                 if (page == AppPage.Home) {
-                    // App icon shares the launcher's centered open-book mark.
+                    // Header uses the same peach rounded square as the launcher icon.
                     Image(
-                        painter = painterResource(R.drawable.ic_launcher_foreground),
+                        painter = painterResource(R.drawable.ic_brand_square),
                         contentDescription = null,
-                        modifier = Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(RadarBrand),
+                        modifier = Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)),
                     )
                 }
             }
@@ -1686,6 +1744,8 @@ private fun HomeScreen(
     modifier: Modifier = Modifier,
     twoPane: Boolean = false,
 ) {
+    // 录音中（含暂停）收窄关联卡与状态卡，把空间让给实时课堂记录。
+    val liveMode = state.isRecording || state.isPaused
     // The list itself owns the bottom padding, so transcript cards slide under the glass
     // dock and navigation bar and are refracted by them as they pass.
     val bottomPad = if (LocalConfiguration.current.screenWidthDp >= 600) 148.dp else 208.dp
@@ -1700,13 +1760,17 @@ private fun HomeScreen(
                     courses = courses,
                     selectedCourseId = selectedCourseId,
                     onCourseSelected = onCourseSelected,
+                    compact = liveMode,
                 )
-                StatusCard(state.isRecording, state.elapsedSeconds, state.isPaused)
+                StatusCard(state.isRecording, state.elapsedSeconds, state.isPaused, compact = liveMode)
                 TranscriptCard(
                     transcript = state.transcript,
                     liveTranscript = state.liveTranscript,
+                    liveTranslation = state.liveTranslation,
                     failureMessage = state.failureMessage,
                     translations = state.translations,
+                    cloudMetrics = state.cloudMetrics,
+                    expanded = liveMode,
                 )
                 Spacer(Modifier.height(bottomPad))
                 state.liveMinutes?.let { LiveMinutesCard(it) }
@@ -1732,9 +1796,10 @@ private fun HomeScreen(
                 courses = courses,
                 selectedCourseId = selectedCourseId,
                 onCourseSelected = onCourseSelected,
+                compact = liveMode,
             )
         }
-        item { StatusCard(state.isRecording, state.elapsedSeconds, state.isPaused) }
+        item { StatusCard(state.isRecording, state.elapsedSeconds, state.isPaused, compact = liveMode) }
         item {
             TranscriptCard(
                 transcript = state.transcript,
@@ -1743,6 +1808,7 @@ private fun HomeScreen(
                 failureMessage = state.failureMessage,
                 translations = state.translations,
                 cloudMetrics = state.cloudMetrics,
+                expanded = liveMode,
             )
         }
         item { QuestionSectionHeader(state, onOpenTimeline) }
@@ -1928,13 +1994,16 @@ private fun DockPauseButton(paused: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatusCard(recording: Boolean, seconds: Long, paused: Boolean = false) {
+private fun StatusCard(recording: Boolean, seconds: Long, paused: Boolean = false, compact: Boolean = false) {
     GlassPanel(
         modifier = Modifier.fillMaxWidth(),
         tone = if (recording) GlassTone.AlertSoft else GlassTone.Neutral,
         effect = GlassEffect.Static,
-        shape = RoundedCornerShape(18.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(if (compact) 14.dp else 18.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 16.dp,
+            vertical = if (compact) 7.dp else 12.dp,
+        ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1943,18 +2012,32 @@ private fun StatusCard(recording: Boolean, seconds: Long, paused: Boolean = fals
         ) {
             val foreground = if (recording) RadarAlert else LiquidTextPrimary
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                val pulse = rememberInfiniteTransition(label = "recordDot")
-                val dotAlpha by pulse.animateFloat(
-                    initialValue = 1f,
-                    targetValue = 0.3f,
-                    animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
-                    label = "recordDotAlpha",
+                if (compact) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(foreground))
+                } else {
+                    val pulse = rememberInfiniteTransition(label = "recordDot")
+                    val dotAlpha by pulse.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.3f,
+                        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+                        label = "recordDotAlpha",
+                    )
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background((if (recording) RadarAlert else LiquidTextPrimary).copy(alpha = if (recording) dotAlpha else 1f)))
+                }
+                Text(
+                    if (paused) "已暂停" else if (recording) "正在录音" else "准备开始",
+                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = foreground,
                 )
-                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background((if (recording) RadarAlert else LiquidTextPrimary).copy(alpha = if (recording) dotAlpha else 1f)))
-                Text(if (paused) "已暂停" else if (recording) "正在录音" else "准备开始", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = foreground)
             }
             if (recording) {
-                Text(formatDuration(seconds), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = foreground)
+                Text(
+                    formatDuration(seconds),
+                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = foreground,
+                )
             }
         }
     }
@@ -1982,7 +2065,14 @@ private fun TranscriptCard(
     failureMessage: String?,
     cloudMetrics: RecorderDashboardMetrics? = null,
     liveTranslation: String? = null,
+    expanded: Boolean = false,
 ) {
+    // While recording/paused the transcript owns most of the screen; idle keeps the compact card.
+    val viewportHeight = if (expanded) {
+        (LocalConfiguration.current.screenHeightDp * 0.48f).coerceIn(320f, 560f).dp
+    } else {
+        236.dp
+    }
     GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2013,7 +2103,7 @@ private fun TranscriptCard(
                 scrollState.animateScrollTo(scrollState.maxValue)
             }
             Column(
-                modifier = Modifier.fillMaxWidth().height(236.dp).verticalScroll(scrollState),
+                modifier = Modifier.fillMaxWidth().height(viewportHeight).verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (transcript.isEmpty() && liveTranscript.isEmpty()) {
@@ -2539,6 +2629,10 @@ private fun SettingsScreen(
     onSaveAudioChanged: (Boolean) -> Unit,
     onTranslationChanged: (Boolean) -> Unit,
     onCloudListeningChanged: (Boolean) -> Unit,
+    onForceOfflineChanged: (Boolean) -> Unit,
+    onAutoOfflineChanged: (Boolean) -> Unit,
+    onOfflineFirstChanged: (Boolean) -> Unit,
+    onAutoCloudSyncChanged: (Boolean) -> Unit,
     onOpenCloudListening: () -> Unit,
     onOpenCloudAudio: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -2566,6 +2660,43 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 104.dp),
     ) {
+        // ---------- 我的：账号与额度 ----------
+        item { Text("我的", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
+        item {
+            AccountSettingsCard(
+                status = accountStatus,
+                supported = accountSupported,
+                busy = accountBusy,
+                message = accountMessage,
+                codeCooldownUntilMs = accountCodeCooldownUntilMs,
+                onRequestCode = onRequestCode,
+                onActivate = onActivateAccount,
+                onRefresh = onRefreshAccount,
+            )
+        }
+        item { Text("AI 服务连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = LiquidTextPrimary) }
+        item {
+            GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+                var editedUrl by remember(aiServiceUrl) { mutableStateOf(aiServiceUrl) }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlassTextInput(editedUrl, { editedUrl = it }, "AI 服务地址")
+                    Text(
+                        if (BuildConfig.DEBUG) {
+                            "电脑模拟器填 http://10.0.2.2:8765；真机填电脑局域网地址或已部署的 HTTPS 地址。"
+                        } else {
+                            "正式版本仅允许 HTTPS。地址不能包含账号、密码或查询参数。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiquidTextSecondary,
+                    )
+                    GlassTextAction("保存地址并检查", { onSaveAiServiceUrl(editedUrl) }, Modifier.fillMaxWidth(), Icons.Outlined.Settings)
+                    GlassTextAction("重新检查后端状态", onCheckAiService, Modifier.fillMaxWidth(), Icons.Outlined.Lightbulb)
+                    Text(aiServiceStatus, color = LiquidTextSecondary)
+                }
+            }
+        }
+
+        // ---------- 课堂与翻译 ----------
         item { Text("课堂与翻译", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
         item {
             SettingRow(
@@ -2590,157 +2721,53 @@ private fun SettingsScreen(
         }
         item { GlassTextAction("双语、纪要与术语设置", onOpenCloudListening, Modifier.fillMaxWidth(), Icons.Outlined.Settings) }
         item { GlassTextAction("导入音频，整理成课堂记录", onOpenCloudAudio, Modifier.fillMaxWidth(), Icons.Outlined.FileDownload) }
-        item { GlassDivider() }
         item {
-            SettingRow("保存原始录音", "默认关闭；开启后仅保存到应用私有目录", state.saveAudioEnabled, onSaveAudioChanged, Icons.Outlined.Lock)
-        }
-        item {
-            GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Accent, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Outlined.PrivacyTip, null, tint = LiquidCyan)
-                    Spacer(Modifier.width(10.dp))
-                    Text("录音与转写默认只保存在本机。只有主动生成 AI 学习包时，才会发送你选择的讲义或字幕文本；原始录音默认不上传。", color = LiquidTextSecondary)
-                }
-            }
-        }
-        item { Text("AI 服务连接", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
-        item {
-            GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
-                var editedUrl by remember(aiServiceUrl) { mutableStateOf(aiServiceUrl) }
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GlassTextInput(editedUrl, { editedUrl = it }, "AI 服务地址")
-                    Text(
-                        if (BuildConfig.DEBUG) {
-                            "电脑模拟器填 http://10.0.2.2:8765；真机填电脑局域网地址或已部署的 HTTPS 地址。"
-                        } else {
-                            "正式版本仅允许 HTTPS。地址不能包含账号、密码或查询参数。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LiquidTextSecondary,
-                    )
-                    GlassTextAction("保存地址并检查", { onSaveAiServiceUrl(editedUrl) }, Modifier.fillMaxWidth(), Icons.Outlined.Settings)
-                    GlassTextAction("重新检查后端状态", onCheckAiService, Modifier.fillMaxWidth(), Icons.Outlined.Lightbulb)
-                    Text(aiServiceStatus, color = LiquidTextSecondary)
-                }
-            }
-        }
-        item { Text("试用额度", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
-        item {
-            AccountSettingsCard(
-                status = accountStatus,
-                supported = accountSupported,
-                busy = accountBusy,
-                message = accountMessage,
-                codeCooldownUntilMs = accountCodeCooldownUntilMs,
-                onRequestCode = onRequestCode,
-                onActivate = onActivateAccount,
-                onRefresh = onRefreshAccount,
+            OfflineModeCard(
+                state = state,
+                onForceOfflineChanged = onForceOfflineChanged,
+                onAutoOfflineChanged = onAutoOfflineChanged,
+                onOfflineFirstChanged = onOfflineFirstChanged,
+                onDownloadModels = onDownloadModels,
+                onRestoreModels = onRestoreModels,
+                onUninstallModels = onUninstallModels,
             )
         }
-        item { Text("离线识别模型", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
+        // ---------- 使用与隐私（橙色，置底） ----------
+        item { Text("使用与隐私", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = RadarBrandDeep) }
         item {
-            GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(state.modelStatusText, color = LiquidTextSecondary)
+            GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Accent, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ToggleRow("保存原始录音", "默认关闭；开启后仅保存到应用私有目录", state.saveAudioEnabled, onSaveAudioChanged)
+                    ToggleRow(
+                        "自动同步到云端",
+                        "本地或离线课堂结束后，联网自动上传录音重新转写；按录音时长扣除音频配额，配额不足时本地保留并稍后重试",
+                        state.autoCloudSync,
+                        onAutoCloudSyncChanged,
+                    )
+                    GlassDivider()
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Outlined.PrivacyTip, null, tint = LiquidCyan)
+                        Spacer(Modifier.width(10.dp))
+                        Text("录音与转写默认只保存在本机。只有主动生成 AI 学习包或开启自动同步时，才会发送你选择的讲义、字幕文本或录音；原始录音默认不上传。", color = LiquidTextSecondary)
+                    }
+                    PrivacyLinkRow("隐私说明", onOpenPrivacyPolicy)
+                    PrivacyLinkRow("隐私政策", onOpenPrivacyPolicy)
+                    GlassDivider()
+                    GlassTextAction("打开系统电池优化设置", onOpenBatterySettings, Modifier.fillMaxWidth(), Icons.Outlined.BatteryChargingFull)
+                    GlassTextAction("打开实时通知设置", onOpenNotificationSettings, Modifier.fillMaxWidth(), Icons.Outlined.NotificationsActive)
                     Text(
-                        "下载优先尝试知习国内高速镜像，网络异常时回退 sherpa-onnx 官方源；共 3 个包，压缩包与全部模型文件均校验 SHA-256。",
+                        "录音时请保持前台服务通知可见；部分国产系统还需要在系统设置中允许自启动或取消电池限制。",
                         style = MaterialTheme.typography.bodySmall,
                         color = LiquidTextSecondary,
-                    )
-                    state.modelDownloadProgress?.let { progress ->
-                        Text(
-                            when (progress.stage) {
-                                ModelDownloadStage.DOWNLOADING -> "${progress.label} · 第 ${progress.packageIndex}/${progress.packageCount} 个"
-                                ModelDownloadStage.EXTRACTING -> "正在解压 ${progress.label}…"
-                                ModelDownloadStage.VERIFYING -> "正在校验模型文件与 SHA-256…"
-                                ModelDownloadStage.ACTIVATING -> "正在启用已校验模型…"
-                            },
-                            color = RadarBrandDeep,
-                        )
-                        val fraction = progress.fraction
-                        if (fraction != null) {
-                            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth(), color = RadarBrand)
-                        } else {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = RadarBrand)
-                        }
-                        if (progress.stage == ModelDownloadStage.DOWNLOADING) {
-                            Text(
-                                buildString {
-                                    append("已下载 ")
-                                    append(formatModelBytes(progress.downloadedBytes))
-                                    progress.totalBytes?.let { total ->
-                                        append(" / ")
-                                        append(formatModelBytes(total))
-                                    }
-                                    fraction?.let {
-                                        append(" · ")
-                                        append((it * 100).roundToInt())
-                                        append('%')
-                                    }
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = LiquidTextSecondary,
-                            )
-                        }
-                    }
-                    state.modelDownloadMessage?.let { message ->
-                        Text(message, color = if (message.startsWith("下载失败")) RadarAlert else RadarBrandDeep)
-                    }
-                    GlassTextAction(
-                        if (state.modelDownloadInProgress) "正在下载模型" else "下载/更新模型",
-                        onDownloadModels,
-                        Modifier.fillMaxWidth(),
-                        enabled = !state.modelDownloadInProgress,
-                    )
-                    if (state.modelCanRestore) {
-                        GlassTextAction("从回收站恢复模型", onRestoreModels, Modifier.fillMaxWidth(), enabled = !state.modelDownloadInProgress)
-                    }
-                    GlassTextAction(
-                        "卸载模型（移入回收站）",
-                        onUninstallModels,
-                        Modifier.fillMaxWidth(),
-                        enabled = state.modelCanUninstall && !state.modelDownloadInProgress,
                     )
                 }
             }
         }
-        item {
-            Text("卸载只处理模型文件，不删除课堂、讲义或复习数据；需要时可恢复或重新下载。", color = LiquidTextSecondary)
-        }
-        item {
-            Text("只有主动开启实时翻译、检查 AI 服务或生成学习包时才联网；原始录音默认不上传。", color = LiquidTextSecondary)
-        }
-        item { GlassDivider() }
-        item { Text("使用与保活", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary) }
-        item {
-            GlassTextAction("打开系统电池优化设置", onOpenBatterySettings, Modifier.fillMaxWidth(), Icons.Outlined.BatteryChargingFull)
-        }
-        item {
-            GlassTextAction("打开实时通知设置", onOpenNotificationSettings, Modifier.fillMaxWidth(), Icons.Outlined.NotificationsActive)
-        }
-        item {
-            Text("录音时请保持前台服务通知可见；部分国产系统还需要在系统设置中允许自启动或取消电池限制。", color = LiquidTextSecondary)
-        }
-        item { GlassDivider() }
         item {
             val context = LocalContext.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("知习 v2.0.4 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
+                Text("知习 v2.0.6 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
                 Text("包含 sherpa-onnx 与 Silero VAD 等开源组件，详情见应用随附的第三方声明。", color = LiquidTextSecondary)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onOpenPrivacyPolicy() }
-                        .padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.PrivacyTip, null, modifier = Modifier.size(18.dp), tint = RadarBrandDeep)
-                    Spacer(Modifier.width(8.dp))
-                    Text("隐私政策", fontWeight = FontWeight.SemiBold, color = RadarBrandDeep)
-                    Spacer(Modifier.weight(1f))
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, modifier = Modifier.size(16.dp).rotate(180f), tint = LiquidTextSecondary)
-                }
                 GlassTextAction(
                     "访问官网",
                     { openWebsite(context) },
@@ -2787,6 +2814,186 @@ private fun SettingRow(
 private fun GlassDivider() = Box(
     modifier = Modifier.fillMaxWidth().height(1.dp).background(LiquidTextSecondary.copy(alpha = 0.24f)),
 )
+
+/** Panel-free toggle row used inside grouped cards (offline mode / privacy board). */
+@Composable
+private fun ToggleRow(
+    title: String,
+    supporting: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                title,
+                fontWeight = FontWeight.SemiBold,
+                color = if (enabled) LiquidTextPrimary else LiquidTextSecondary,
+            )
+            Text(supporting, style = MaterialTheme.typography.bodySmall, color = LiquidTextSecondary)
+        }
+        Spacer(Modifier.width(10.dp))
+        GlassToggle(checked = checked, onCheckedChange = onCheckedChange, label = title, enabled = enabled)
+    }
+}
+
+@Composable
+private fun PrivacyLinkRow(label: String, onOpen: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.PrivacyTip, null, modifier = Modifier.size(18.dp), tint = RadarBrandDeep)
+        Spacer(Modifier.width(8.dp))
+        Text(label, fontWeight = FontWeight.SemiBold, color = RadarBrandDeep)
+        Spacer(Modifier.weight(1f))
+        Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, modifier = Modifier.size(16.dp).rotate(180f), tint = RadarBrandDeep)
+    }
+}
+
+/** 离线模式卡片：说明 + 三开关 + 离线模型（可展开管理）。 */
+@Composable
+private fun OfflineModeCard(
+    state: SettingsState,
+    onForceOfflineChanged: (Boolean) -> Unit,
+    onAutoOfflineChanged: (Boolean) -> Unit,
+    onOfflineFirstChanged: (Boolean) -> Unit,
+    onDownloadModels: () -> Unit,
+    onRestoreModels: () -> Unit,
+    onUninstallModels: () -> Unit,
+) {
+    var showModels by remember { mutableStateOf(false) }
+    GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.Lock, null, tint = RadarBrandDeep)
+                Text("离线模式", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+            }
+            Text(
+                "断网时手机本地模型继续转录和翻译；联网后自动同步到云端。同步会按录音时长扣除音频配额；配额不足时本地保留，充值后自动重试。",
+                style = MaterialTheme.typography.bodySmall,
+                color = LiquidTextSecondary,
+            )
+            GlassDivider()
+            ToggleRow(
+                "强制离线录音",
+                "开启后点击录音将全程使用本地转录，不连接云端，结束后联网自动同步。",
+                state.forceOfflineRecording,
+                onForceOfflineChanged,
+            )
+            ToggleRow(
+                "断网时自动开启离线转录",
+                "录音中断网后不再询问，直接用本地模型继续出字幕。本地转录更耗电、机身会发热。",
+                state.autoOfflineOnNetworkLoss,
+                onAutoOfflineChanged,
+            )
+            ToggleRow(
+                "极速启动（offline-first）",
+                "点击录音后立即用本地模型出字，云端连接成功后无感切换。关闭则等待云端就绪后才开始转录。",
+                state.offlineFirstStart,
+                onOfflineFirstChanged,
+            )
+            GlassDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { showModels = !showModels }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("离线模型", fontWeight = FontWeight.SemiBold, color = LiquidTextPrimary)
+                    Text(state.modelStatusText, style = MaterialTheme.typography.bodySmall, color = LiquidTextSecondary)
+                }
+                Text(if (showModels) "收起" else "管理", style = MaterialTheme.typography.labelLarge, color = RadarBrandDeep)
+                Icon(
+                    Icons.AutoMirrored.Outlined.ArrowBack,
+                    null,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .rotate(if (showModels) 90f else 180f)
+                        .padding(start = 2.dp),
+                    tint = RadarBrandDeep,
+                )
+            }
+            if (showModels) {
+                Text(
+                    "转录模型与翻译语言包；下载优先尝试知习国内高速镜像，网络异常时回退 sherpa-onnx 官方源，压缩包与全部模型文件均校验 SHA-256。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LiquidTextSecondary,
+                )
+                state.modelDownloadProgress?.let { progress ->
+                    Text(
+                        when (progress.stage) {
+                            ModelDownloadStage.DOWNLOADING -> "${progress.label} · 第 ${progress.packageIndex}/${progress.packageCount} 个"
+                            ModelDownloadStage.EXTRACTING -> "正在解压 ${progress.label}…"
+                            ModelDownloadStage.VERIFYING -> "正在校验模型文件与 SHA-256…"
+                            ModelDownloadStage.ACTIVATING -> "正在启用已校验模型…"
+                        },
+                        color = RadarBrandDeep,
+                    )
+                    val fraction = progress.fraction
+                    if (fraction != null) {
+                        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth(), color = RadarBrand)
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = RadarBrand)
+                    }
+                    if (progress.stage == ModelDownloadStage.DOWNLOADING) {
+                        Text(
+                            buildString {
+                                append("已下载 ")
+                                append(formatModelBytes(progress.downloadedBytes))
+                                progress.totalBytes?.let { total ->
+                                    append(" / ")
+                                    append(formatModelBytes(total))
+                                }
+                                fraction?.let {
+                                    append(" · ")
+                                    append((it * 100).roundToInt())
+                                    append('%')
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LiquidTextSecondary,
+                        )
+                    }
+                }
+                state.modelDownloadMessage?.let { message ->
+                    Text(message, color = if (message.startsWith("下载失败")) RadarAlert else RadarBrandDeep)
+                }
+                GlassTextAction(
+                    if (state.modelDownloadInProgress) "正在下载模型" else "下载/更新模型",
+                    onDownloadModels,
+                    Modifier.fillMaxWidth(),
+                    enabled = !state.modelDownloadInProgress,
+                )
+                if (state.modelCanRestore) {
+                    GlassTextAction("从回收站恢复模型", onRestoreModels, Modifier.fillMaxWidth(), enabled = !state.modelDownloadInProgress)
+                }
+                GlassTextAction(
+                    "卸载模型（移入回收站）",
+                    onUninstallModels,
+                    Modifier.fillMaxWidth(),
+                    enabled = state.modelCanUninstall && !state.modelDownloadInProgress,
+                )
+                Text(
+                    "卸载只处理模型文件，不删除课堂、讲义或复习数据；需要时可恢复或重新下载。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LiquidTextSecondary,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun CrashReportDialog(report: String, onDismiss: () -> Unit) {

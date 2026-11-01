@@ -26,7 +26,11 @@ class LearningRepository private constructor(private val dao: LearningDao) {
     )
 
     fun getCourse(courseId: Long) = dao.getCourse(courseId)
-    fun deleteCourse(courseId: Long) = dao.deleteCourse(courseId)
+    fun updateCourseMeta(courseId: Long, name: String, nature: String) {
+        val cleaned = name.trim()
+        if (cleaned.isNotEmpty()) dao.updateCourseMeta(courseId, cleaned, nature.trim())
+    }
+    fun deleteCourse(courseId: Long) = dao.deleteCourseCascade(courseId)
     fun insertMaterial(material: MaterialEntity) = dao.insertMaterial(material)
     fun getMaterial(materialId: Long) = dao.getMaterial(materialId)
     fun deleteMaterial(materialId: Long) = dao.deleteMaterial(materialId)

@@ -91,9 +91,9 @@ fun AccountSettingsCard(
                 Icon(Icons.Outlined.Badge, contentDescription = null, tint = RadarBrandDeep)
                 Text(
                     when {
-                        activated -> "已激活试用额度"
-                        blocked -> "试用额度不可用"
-                        else -> "试用额度"
+                        activated -> "账号与额度"
+                        blocked -> "账号额度不可用"
+                        else -> "账号与额度"
                     },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,

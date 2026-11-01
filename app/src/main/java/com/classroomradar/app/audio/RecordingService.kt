@@ -25,6 +25,7 @@ import com.classroomradar.app.RadarCrashHandler
 import com.classroomradar.app.data.AppPreferences
 import com.classroomradar.app.data.ClassroomRepository
 import com.classroomradar.app.detection.QuestionDetector
+import com.classroomradar.app.learning.OfflineSyncManager
 import com.classroomradar.app.widget.WaterClassWidgetProvider
 import java.io.File
 import java.util.concurrent.Executors
@@ -41,6 +42,11 @@ class RecordingService : Service() {
     private var detector = QuestionDetector()
     private var recorder: AudioRecord? = null
     private var engine: TranscriptionEngine? = null
+    // Offline-first: local preview engine runs immediately while the cloud stream connects.
+    @Volatile private var cloudEngine: LecsyncRealtimeEngine? = null
+    @Volatile private var previewMode = false
+    private val previewSegments = mutableListOf<TranscriptSegment>()
+    @Volatile private var offlineFirstSession = false
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioLock = Any()
     private val transcriptLock = Any()
@@ -159,29 +165,182 @@ class RecordingService : Service() {
             recorder = localRecorder
             try {
                 if (!recording) return@execute
-                val localEngine = if (preferences.cloudListeningEnabled) {
-                    LecsyncRealtimeEngine(applicationContext, preferences.realtimeConfig()).also { it.attachSession(sessionId) }
-                } else {
-                    SherpaTwoPassEngine(applicationContext, modelManager.installedDirectory())
+                val forceOffline = preferences.forceOfflineRecording
+                val wantCloud = preferences.cloudListeningEnabled && !forceOffline
+                if (!wantCloud && !modelManager.canRecognize()) {
+                    // A corrupt/missing model would abort inside sherpa-native; refuse gracefully.
+                    recording = false
+                    finishingRecording = true
+                    updateActiveSnapshot { null }
+                    RecordingBus.emit(RecorderEvent.Status(isRecording = false, elapsedSeconds = 0))
+                    RecordingBus.emit(RecorderEvent.Failure("离线模型不可用或已损坏，请在设置 → 离线模式 → 离线模型 中重新下载"))
+                    stopSelf()
+                    return@execute
                 }
-                engine = localEngine
-                localEngine.start(object : TranscriptionEngine.Listener {
-                    override fun onPartialText(text: String) = handlePartialTranscript(text)
-                    override fun onPartialTranslation(text: String?) = handlePartialTranslation(text)
-                    override fun onFinalText(text: String) = handleFinalTranscript(text)
-                    override fun onFinalSegment(segment: TranscriptSegment) = handleFinalSegment(segment)
-                    override fun onError(error: Throwable) = handleEngineFailure(error)
-                })
+                val offlineFirst = wantCloud && preferences.offlineFirstStart && modelManager.canRecognize()
+                offlineFirstSession = offlineFirst
+                if (offlineFirst) {
+                    startOfflineFirst(sessionId)
+                } else {
+                    val activeEngine = if (wantCloud) {
+                        LecsyncRealtimeEngine(applicationContext, preferences.realtimeConfig()).also { it.attachSession(sessionId) }
+                    } else {
+                        SherpaTwoPassEngine(applicationContext, modelManager.installedDirectory())
+                    }
+                    engine = activeEngine
+                    activeEngine.start(standardListener())
+                }
                 if (!recording) return@execute
                 localRecorder.startRecording()
-                runCaptureLoop(localRecorder, localEngine)
+                runCaptureLoop(localRecorder)
             } catch (error: Throwable) {
                 if (recording && !paused) handleEngineFailure(error)
             }
         }
     }
 
-    private fun runCaptureLoop(localRecorder: AudioRecord, localEngine: TranscriptionEngine) {
+    /** Standard listener for a single active engine (cloud or device). */
+    private fun standardListener() = object : TranscriptionEngine.Listener {
+        override fun onPartialText(text: String) = handlePartialTranscript(text)
+        override fun onPartialTranslation(text: String?) = handlePartialTranslation(text)
+        override fun onFinalText(text: String) = handleFinalTranscript(text)
+        override fun onFinalSegment(segment: TranscriptSegment) = handleFinalSegment(segment)
+        override fun onError(error: Throwable) = handleEngineFailure(error)
+    }
+
+    /** Local engine's listener while it only produces an unpersisted preview. */
+    private fun previewListener() = object : TranscriptionEngine.Listener {
+        override fun onPartialText(text: String) = handlePartialTranscript(text)
+        override fun onPartialTranslation(text: String?) = Unit
+        override fun onFinalText(text: String) = Unit
+        override fun onFinalSegment(segment: TranscriptSegment) {
+            if (!previewMode) return
+            synchronized(previewSegments) {
+                previewSegments.add(segment)
+                handlePartialTranscript(previewSegments.takeLast(2).joinToString(" ") { it.text })
+            }
+        }
+        override fun onError(error: Throwable) {
+            // A broken preview engine must not kill the session; the cloud side carries on.
+            if (previewMode) abandonPreview(error)
+        }
+    }
+
+    /** Cloud side of offline-first: on fatal error the buffered local rows take over. */
+    private fun offlineFirstCloudListener() = object : TranscriptionEngine.Listener {
+        override fun onPartialText(text: String) {
+            if (!previewMode) handlePartialTranscript(text)
+        }
+
+        override fun onPartialTranslation(text: String?) {
+            if (!previewMode) handlePartialTranslation(text)
+        }
+
+        override fun onFinalText(text: String) {
+            if (!previewMode) handleFinalTranscript(text)
+        }
+
+        override fun onFinalSegment(segment: TranscriptSegment) {
+            if (!previewMode) handleFinalSegment(segment)
+        }
+
+        override fun onError(error: Throwable) {
+            if (previewMode) {
+                promoteLocal(error)
+            } else {
+                handleEngineFailure(error)
+            }
+        }
+    }
+
+    private fun startOfflineFirst(sessionId: Long) {
+        val local = SherpaTwoPassEngine(applicationContext, modelManager.installedDirectory())
+        val cloud = LecsyncRealtimeEngine(applicationContext, preferences.realtimeConfig()).also { it.attachSession(sessionId) }
+        cloudEngine = cloud
+        engine = local
+        previewMode = true
+        local.start(previewListener())
+        cloud.start(offlineFirstCloudListener())
+        RecordingBus.emit(RecorderEvent.Failure("已用本机模型开始识别，正在连接云端…"))
+        scheduleCloudPromotion(8_000)
+    }
+
+    /** Polls the cloud stream; promotes it once ready, otherwise keeps the device engine. */
+    private fun scheduleCloudPromotion(remainingMs: Long) {
+        if (!previewMode) return
+        if (remainingMs <= 0) {
+            promoteLocal(null)
+            return
+        }
+        mainHandler.postDelayed({
+            if (!previewMode) return@postDelayed
+            if (cloudEngine?.isReady == true) {
+                promoteCloud()
+            } else {
+                scheduleCloudPromotion(remainingMs - 250)
+            }
+        }, 250)
+    }
+
+    private fun promoteCloud() {
+        if (!previewMode) return
+        previewMode = false
+        val cloud = cloudEngine ?: return promoteLocal(null)
+        val local = engine
+        engine = cloud
+        runCatching { local?.stop {} }
+        synchronized(previewSegments) { previewSegments.clear() }
+        RecordingBus.emit(RecorderEvent.ConnectionRestored)
+        RecordingBus.emit(RecorderEvent.Failure("云端已连接，正在接管识别"))
+        mainHandler.postDelayed({ RecordingBus.emit(RecorderEvent.ConnectionRestored) }, 600)
+    }
+
+    /** Keeps local recognition: buffered finals get persisted and continue normally. */
+    private fun promoteLocal(error: Throwable?) {
+        if (!previewMode) return
+        previewMode = false
+        runCatching { cloudEngine?.stop {} }
+        cloudEngine = null
+        val buffered = synchronized(previewSegments) {
+            val copy = previewSegments.toList()
+            previewSegments.clear()
+            copy
+        }
+        buffered.forEach { handleFinalSegment(it) }
+        RecordingBus.emit(
+            RecorderEvent.Failure(
+                if (error == null) "云端连接超时，本课继续使用本机识别；课后会自动同步到云端"
+                else "云端暂不可用，已切换本机识别；课堂继续进行",
+            ),
+        )
+    }
+
+    /** Preview engine failed before promotion; fall back to cloud-only streaming. */
+    private fun abandonPreview(error: Throwable) {
+        previewMode = false
+        cloudEngine?.let {
+            engine = it
+            synchronized(previewSegments) { previewSegments.clear() }
+        } ?: handleEngineFailure(error)
+    }
+
+    /** Stops an offline-first preview (stop or finish): buffer is persisted if not promoted. */
+    private fun settlePreviewForStop(): Boolean {
+        if (!previewMode) return false
+        previewMode = false
+        runCatching { cloudEngine?.stop {} }
+        cloudEngine = null
+        val buffered = synchronized(previewSegments) {
+            val copy = previewSegments.toList()
+            previewSegments.clear()
+            copy
+        }
+        // finishRecordingAfterFinalPass runs later; the rows are safe to append now.
+        buffered.forEach { handleFinalSegment(it) }
+        return true
+    }
+
+    private fun runCaptureLoop(localRecorder: AudioRecord) {
         if (paused) return
         check(localRecorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
             "The microphone did not enter the recording state."
@@ -196,7 +355,8 @@ class RecordingService : Service() {
                 read > 0 -> {
                     consecutiveEmptyReads = 0
                     synchronized(audioLock) { audioWriter?.runCatching { write(buffer, read) } }
-                    localEngine.acceptPcm(buffer, read)
+                    engine?.acceptPcm(buffer, read)
+                    if (previewMode) cloudEngine?.acceptPcm(buffer, read)
                 }
                 read == 0 -> {
                     consecutiveEmptyReads += 1
@@ -219,6 +379,8 @@ class RecordingService : Service() {
         releaseWakeLock()
         RecordingBus.emit(RecorderEvent.Status(isRecording = true, elapsedSeconds = elapsedSeconds(), isPaused = true))
         updateForegroundNotification()
+        engine?.setPaused(true)
+        cloudEngine?.setPaused(true)
         engine?.finalizePending()
         worker.execute { recorder?.runCatching { stop() } }
     }
@@ -232,11 +394,14 @@ class RecordingService : Service() {
         acquireWakeLock()
         RecordingBus.emit(RecorderEvent.Status(isRecording = true, elapsedSeconds = elapsedSeconds(), isPaused = false))
         updateForegroundNotification()
+        // Reconnect a stream the server closed during a long pause before audio resumes.
+        engine?.setPaused(false)
+        cloudEngine?.setPaused(false)
         worker.execute {
             runCatching {
                 recorder?.startRecording()
-                val localEngine = engine ?: return@runCatching
-                runCaptureLoop(recorder ?: return@runCatching, localEngine)
+                engine ?: return@runCatching
+                runCaptureLoop(recorder ?: return@runCatching)
             }.onFailure { error -> if (recording && !paused) handleEngineFailure(error) }
         }
     }
@@ -265,7 +430,11 @@ class RecordingService : Service() {
             if (lineId > 0) {
                 (engine as? LecsyncRealtimeEngine)?.registerTranscriptLine(segment.segmentKey, lineId, text)
                 RecordingBus.emit(RecorderEvent.Transcript(lineId, text, timestampMillis))
-                if (!preferences.cloudListeningEnabled) translationCoordinator.enqueue(lineId, text)
+                // Local rows keep translating even after a cloud session fell back to the device engine.
+                val usingDeviceEngine = !preferences.cloudListeningEnabled ||
+                    (engine as? LecsyncRealtimeEngine)?.isOfflineFallbackActive == true ||
+                    engine is SherpaTwoPassEngine
+                if (usingDeviceEngine) translationCoordinator.enqueue(lineId, text)
             }
         }
     }
@@ -285,7 +454,9 @@ class RecordingService : Service() {
 
     private fun handleEngineFailure(error: Throwable) {
         RecordingBus.emit(RecorderEvent.Failure(error.message ?: "离线识别引擎不可用"))
-        if (recording) stopRecording()
+        // While paused the session stays alive; resume() retries the engine and only
+        // a failure outside pause ends the recording.
+        if (recording && !paused) stopRecording()
     }
 
     private fun scheduleElapsedUpdate() {
@@ -326,6 +497,8 @@ class RecordingService : Service() {
                 audioWriter?.runCatching { close() }
                 audioWriter = null
             }
+            // Offline-first preview buffers its finals in memory; persist them before teardown.
+            settlePreviewForStop()
             val localEngine = engine
             engine = null
             if (localEngine != null) localEngine.stop(::finishRecordingAfterFinalPass)
@@ -336,14 +509,31 @@ class RecordingService : Service() {
     /** Stops the service only once Sherpa's queued Paraformer results are persisted. */
     private fun finishRecordingAfterFinalPass() {
         val sessionId = activeSessionId
-        persistenceWorker.execute {
+        val finish = Runnable {
             sessionId?.let { repository.finishSession(it, System.currentTimeMillis()) }
+            // Offline / on-device sessions hand their WAV to the cloud re-transcription queue.
+            val shouldSync = sessionId != null && preferences.autoCloudSync && (
+                !preferences.cloudListeningEnabled ||
+                    preferences.forceOfflineRecording ||
+                    offlineFirstSession
+                )
+            if (shouldSync && sessionId != null) {
+                repository.getSessionAudioPath(sessionId)?.let { relative ->
+                    OfflineSyncManager.get(applicationContext).schedule(sessionId, relative)
+                }
+            }
             activeSessionId = null
             finishingRecording = false
             mainHandler.post {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+        }
+        // onDestroy may already have shut the pool down (refusal / fast stop); run inline then.
+        try {
+            persistenceWorker.execute(finish)
+        } catch (rejected: java.util.concurrent.RejectedExecutionException) {
+            finish.run()
         }
     }
 
@@ -368,7 +558,7 @@ class RecordingService : Service() {
         )
         val expandedText = notificationExpandedTranscript()
         return NotificationCompat.Builder(this, CHANNEL_RECORDING)
-            .setSmallIcon(R.drawable.ic_stat_radar)
+            .setSmallIcon(R.drawable.ic_stat_zhixi)
             .setContentTitle(getString(R.string.notification_recording_title))
             .setContentText("${formatDuration(elapsedSeconds)} · ${notificationCollapsedTranscript()}")
             .setSubText(if (paused) "● 已暂停 · 课堂仍保留" else "● 正在录音 · ${notificationTranscriptState()} · ${if (preferences.cloudListeningEnabled) "云端听课" else "设备端识别"}")
@@ -396,7 +586,7 @@ class RecordingService : Service() {
         val openDoubao = questionActionPendingIntent(QuestionActionActivity.ACTION_OPEN_DOUBAO, question, 21)
         val openDeepSeek = questionActionPendingIntent(QuestionActionActivity.ACTION_OPEN_DEEPSEEK, question, 22)
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERT)
-            .setSmallIcon(R.drawable.ic_stat_radar)
+            .setSmallIcon(R.drawable.ic_stat_zhixi)
             .setContentTitle(getString(R.string.notification_question_title))
             .setContentText(question)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -521,7 +711,13 @@ class RecordingService : Service() {
     }
 
     private fun configureOptionalAudioCapture(sessionId: Long) {
-        if (!preferences.saveAudioEnabled) return
+        // Auto cloud sync needs the source WAV for local/offline sessions.
+        val syncMayNeedAudio = preferences.autoCloudSync && (
+            !preferences.cloudListeningEnabled ||
+                preferences.forceOfflineRecording ||
+                preferences.offlineFirstStart
+            )
+        if (!preferences.saveAudioEnabled && !syncMayNeedAudio) return
         val relativePath = "recordings/session_$sessionId.wav"
         val target = File(filesDir, relativePath)
         runCatching {

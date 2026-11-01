@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified Z + soundwave silhouette for Android 13 themed icons. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -6,13 +7,17 @@
     android:viewportHeight="108">
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M27,39Q39,32 52,40L52,75Q39,67 27,72ZM56,40Q69,32 81,39L81,72Q69,67 56,75Z" />
+        android:pathData="M34,30h34a7,7 0 0 1 0,14h-34a7,7 0 0 1 0,-14Z" />
     <path
-        android:pathData="M65,32Q72,26 79,31"
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,64h34a7,7 0 0 1 0,14h-34a7,7 0 0 1 0,-14Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M67.4,34.6L44.2,73.4a7,7 0 0 0 12,7l23.2,-38.8a7,7 0 0 0 -12,-7Z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M44,50h3.5M50.5,46.5v7M56,43v14M61.5,47v6M67,49.5h2.5"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="3"
         android:strokeLineCap="round" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M60,34a3,3 0 1,0 6,0a3,3 0 1,0 -6,0" />
 </vector>

@@ -25,6 +25,19 @@ interface LearningDao {
     @Query("DELETE FROM courses WHERE id = :courseId")
     fun deleteCourse(courseId: Long)
 
+    @Query("UPDATE courses SET name = :name, courseNature = :nature WHERE id = :courseId")
+    fun updateCourseMeta(courseId: Long, name: String, nature: String)
+
+    /** Detach classroom sessions before the course row disappears (sessions.courseId has no FK). */
+    @Query("UPDATE sessions SET courseId = NULL WHERE courseId = :courseId")
+    fun clearSessionCourseLinks(courseId: Long)
+
+    @Transaction
+    fun deleteCourseCascade(courseId: Long) {
+        clearSessionCourseLinks(courseId)
+        deleteCourse(courseId)
+    }
+
     @Insert
     fun insertMaterial(material: MaterialEntity): Long
 

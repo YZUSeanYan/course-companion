@@ -141,7 +141,7 @@ def test_create_job_returns_202_and_poll_succeeds(settings):
     assert job["result"]["inputSha256"] == canonical_learning_pack_sha256(
         LearningPackRequest.model_validate(learning_payload())
     )
-    assert job["result"]["promptVersion"] == "learning-minutes-v2"
+    assert job["result"]["promptVersion"] == "learning-minutes-v3"
     assert job["result"]["schemaVersion"] == "2.0"
     assert job["result"]["model"] == "mock-model"
     assert job["result"]["analysisId"]

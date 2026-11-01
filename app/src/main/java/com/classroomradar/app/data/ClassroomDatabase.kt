@@ -107,6 +107,20 @@ interface ClassroomDao {
     @Query("UPDATE sessions SET title = :title WHERE id = :sessionId")
     fun renameSession(sessionId: Long, title: String)
 
+    @Query("DELETE FROM transcript_lines WHERE sessionId = :sessionId")
+    fun deleteTranscriptLines(sessionId: Long)
+
+    @Query("UPDATE doubt_events SET transcriptLineId = NULL WHERE sessionId = :sessionId")
+    fun detachDoubtLineLinks(sessionId: Long)
+
+    /** Cloud re-transcription replaces the local provisional transcript in place. */
+    @Transaction
+    fun replaceSessionTranscript(sessionId: Long, lines: List<TranscriptLineEntity>) {
+        detachDoubtLineLinks(sessionId)
+        deleteTranscriptLines(sessionId)
+        lines.forEach { insertTranscript(it) }
+    }
+
     @Query("SELECT * FROM sessions WHERE id = :sessionId")
     fun observeSession(sessionId: Long): Flow<SessionEntity?>
 

@@ -22,7 +22,11 @@ data class ModelStorageStatus(
     val downloading: Boolean = false,
     val managedInstalled: Boolean = false,
     val bundledInstalled: Boolean = false,
+    val corrupt: Boolean = false,
 )
+
+/** Written after the SHA-256 pass; a directory without it must not be loaded natively. */
+internal const val MODEL_VERIFY_MARKER = ".verified"
 
 enum class ModelDownloadStage {
     DOWNLOADING,
@@ -240,6 +244,9 @@ internal class ModelPackageInstaller(
                 previous?.renameTo(activeDir)
                 error("无法启用下载的模型，原模型已保留")
             }
+            // Marker proves the directory passed the SHA-256 check above; without it a
+            // partially written model must never be handed to sherpa-native (it aborts).
+            runCatching { File(activeDir, MODEL_VERIFY_MARKER).writeText("sha256-ok") }
             return activeDir
         } catch (error: Throwable) {
             if (stagingDir.exists()) moveToQuarantine(stagingDir, quarantineDir)
@@ -273,12 +280,37 @@ class ModelPackageManager(private val context: Context, storageRoot: File = cont
             downloading = downloadActive,
             managedInstalled = managedInstalled,
             bundledInstalled = bundledInstalled,
+            corrupt = activeDir.isDirectory && !managedInstalled,
         )
     }
 
-    fun installedDirectory(): File? = activeDir.takeIf { directory ->
-        REQUIRED_FILES.all { File(directory, it).isFile }
+    fun installedDirectory(): File? {
+        if (!activeDir.isDirectory) return null
+        val marker = File(activeDir, MODEL_VERIFY_MARKER)
+        if (!marker.isFile) {
+            // One-time migration for installs predating the marker: verify the pinned
+            // hashes exactly once; a corrupt directory is refused instead of crashing sherpa.
+            if (!legacyMigrationChecked) {
+                legacyMigrationChecked = true
+                val healthy = REQUIRED_HASHES.all { (relative, expected) ->
+                    val file = File(activeDir, relative)
+                    file.isFile && file.length() > 0 &&
+                        runCatching { file.sha256().equals(expected, ignoreCase = true) }.getOrDefault(false)
+                }
+                legacyHealthy = healthy
+                if (healthy) runCatching { marker.writeText("sha256-ok") }
+            }
+            if (legacyHealthy != true) return null
+        }
+        return activeDir.takeIf { directory ->
+            REQUIRED_FILES.all { relative ->
+                File(directory, relative).let { it.isFile && it.length() > 0 }
+            }
+        }
     }
+
+    @Volatile private var legacyMigrationChecked = false
+    @Volatile private var legacyHealthy: Boolean? = null
 
     fun canRecognize(): Boolean = installedDirectory() != null || (
         !preferences.getBoolean(KEY_BUNDLED_DISABLED, false) && hasBundledModel()

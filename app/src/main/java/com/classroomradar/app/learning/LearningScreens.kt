@@ -1,7 +1,9 @@
 package com.classroomradar.app.learning
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -28,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.classroomradar.app.GlassConfirmDialog
 import com.classroomradar.app.GlassEffect
 import com.classroomradar.app.GlassPanel
 import com.classroomradar.app.GlassTextAction
@@ -45,6 +52,7 @@ import com.classroomradar.app.GlassTextInput
 import com.classroomradar.app.GlassTone
 import com.classroomradar.app.LiquidTextPrimary
 import com.classroomradar.app.LiquidTextSecondary
+import com.classroomradar.app.LocalLiquidBackdrop
 import com.classroomradar.app.RadarBrand
 import com.classroomradar.app.RadarBrandDeep
 import com.classroomradar.app.RadarBrandSoft
@@ -52,6 +60,7 @@ import com.classroomradar.app.learning.api.AccountStatusDto
 import java.text.DateFormat
 import java.util.Date
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LearningHomeScreen(
     courses: List<CourseEntity>,
@@ -59,6 +68,8 @@ fun LearningHomeScreen(
     accountStatus: AccountStatusDto?,
     accountSupported: Boolean,
     onCreateCourse: (String, String) -> Unit,
+    onRenameCourse: (Long, String, String) -> Unit,
+    onDeleteCourse: (Long) -> Unit,
     onOpenHistory: () -> Unit,
     onOpenCourse: (Long) -> Unit,
     onOpenAccountSettings: () -> Unit,
@@ -67,6 +78,9 @@ fun LearningHomeScreen(
 ) {
     var courseName by remember { mutableStateOf("") }
     var courseNature by remember { mutableStateOf("") }
+    var actionCourse by remember { mutableStateOf<CourseEntity?>(null) }
+    var renameTarget by remember { mutableStateOf<CourseEntity?>(null) }
+    var deleteTarget by remember { mutableStateOf<CourseEntity?>(null) }
     val accountGuidance = when {
         !accountSupported || accountStatus?.activated == true -> null
         accountStatus?.status == "disabled" ->
@@ -161,7 +175,13 @@ fun LearningHomeScreen(
             }
         } else {
             items(courses, key = { it.id }) { course ->
-                GlassPanel(modifier = Modifier.fillMaxWidth().clickable { onOpenCourse(course.id) }, tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+                val cardModifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = { onOpenCourse(course.id) },
+                        onLongClick = { actionCourse = course },
+                    )
+                GlassPanel(modifier = cardModifier, tone = GlassTone.Neutral, effect = GlassEffect.Static) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier.size(46.dp).clip(CircleShape).background(RadarBrandSoft),
@@ -188,6 +208,111 @@ fun LearningHomeScreen(
                             )
                         }
                         Icon(Icons.Outlined.MenuBook, contentDescription = null, tint = RadarBrand)
+                    }
+                }
+            }
+        }
+    }
+
+    actionCourse?.let { course ->
+        CourseActionDialog(
+            course = course,
+            onRename = {
+                actionCourse = null
+                renameTarget = course
+            },
+            onDelete = {
+                actionCourse = null
+                deleteTarget = course
+            },
+            onDismiss = { actionCourse = null },
+        )
+    }
+    renameTarget?.let { course ->
+        CourseEditDialog(
+            course = course,
+            onSave = { name, nature ->
+                renameTarget = null
+                onRenameCourse(course.id, name, nature)
+            },
+            onDismiss = { renameTarget = null },
+        )
+    }
+    deleteTarget?.let { course ->
+        GlassConfirmDialog(
+            title = "删除课程「${course.name}」？",
+            message = "课程下的讲义、学习内容、复习卡和生成记录都会一并删除，无法恢复；课堂录音与转写记录会保留。",
+            confirmLabel = "删除",
+            dismissLabel = "取消",
+            onConfirm = {
+                deleteTarget = null
+                onDeleteCourse(course.id)
+            },
+            onDismiss = { deleteTarget = null },
+            tone = GlassTone.Danger,
+        )
+    }
+}
+
+/** Long-press menu for a course card. */
+@Composable
+private fun CourseActionDialog(
+    course: CourseEntity,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        CompositionLocalProvider(LocalLiquidBackdrop provides null) {
+            GlassPanel(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp).padding(horizontal = 22.dp),
+                tone = GlassTone.Accent,
+                effect = GlassEffect.Elevated,
+                shape = RoundedCornerShape(28.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(course.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                    GlassTextAction("重命名 / 编辑课程", onRename, Modifier.fillMaxWidth(), Icons.Outlined.Style)
+                    GlassTextAction("删除课程", onDelete, Modifier.fillMaxWidth(), tone = GlassTone.Danger)
+                    GlassTextAction("取消", onDismiss, Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+}
+
+/** Rename / edit course name and nature. */
+@Composable
+private fun CourseEditDialog(
+    course: CourseEntity,
+    onSave: (String, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf(course.name) }
+    var nature by remember { mutableStateOf(course.courseNature) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        CompositionLocalProvider(LocalLiquidBackdrop provides null) {
+            GlassPanel(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp).padding(horizontal = 22.dp),
+                tone = GlassTone.Neutral,
+                effect = GlassEffect.Elevated,
+                shape = RoundedCornerShape(28.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("编辑课程", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                    GlassTextInput(name, { name = it }, "课程名称")
+                    GlassTextInput(nature, { nature = it }, "课程性质（可选）")
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        GlassTextAction("取消", onDismiss, Modifier.weight(1f))
+                        GlassTextAction(
+                            "保存",
+                            { if (name.isNotBlank()) onSave(name, nature) },
+                            Modifier.weight(1f),
+                            tone = GlassTone.Success,
+                            enabled = name.isNotBlank(),
+                        )
                     }
                 }
             }
@@ -346,6 +471,7 @@ fun RecordingCourseSelector(
     selectedCourseId: Long?,
     onCourseSelected: (Long?) -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedCourse = courses.firstOrNull { it.id == selectedCourseId }
@@ -354,18 +480,37 @@ fun RecordingCourseSelector(
             modifier = Modifier.fillMaxWidth().clickable { expanded = true },
             tone = GlassTone.Neutral,
             effect = GlassEffect.Static,
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(if (compact) 14.dp else 18.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 16.dp,
+                vertical = if (compact) 7.dp else 18.dp,
+            ),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.MenuBook, contentDescription = null, tint = RadarBrandDeep)
                 Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("本节课关联", style = MaterialTheme.typography.labelMedium, color = LiquidTextSecondary)
+                if (compact) {
                     Text(
-                        selectedCourse?.name ?: if (courses.isEmpty()) "不关联课程（可在学习页创建）" else "不关联课程",
+                        buildString {
+                            append("本节课关联 · ")
+                            append(selectedCourse?.name ?: "不关联课程")
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = LiquidTextPrimary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
+                } else {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("本节课关联", style = MaterialTheme.typography.labelMedium, color = LiquidTextSecondary)
+                        Text(
+                            selectedCourse?.name ?: if (courses.isEmpty()) "不关联课程（可在学习页创建）" else "不关联课程",
+                            fontWeight = FontWeight.SemiBold,
+                            color = LiquidTextPrimary,
+                        )
+                    }
                 }
                 Text("选择", color = RadarBrandDeep, fontWeight = FontWeight.SemiBold)
             }
