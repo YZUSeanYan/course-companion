@@ -2,13 +2,15 @@
 
 这份指南面向第一次参与 Android 项目、但会使用 AI agent 的同学。先按本指南把项目跑起来，再开始修改。
 
-## 1. 项目由三部分组成
+## 1. 项目由五部分组成
 
 | 目录 | 内容 | 需要的工具 |
 |---|---|---|
 | `app/` | 知习 Android App | JDK 17+、Android SDK 36 |
-| `server/` | FastAPI 学习服务网关 | Python 3.11+ |
-| `site/` | 知习官网 | Node.js 20.19+ 或 22.12+ |
+| `server/` | FastAPI 学习服务网关（App 与网页版共用） | Python 3.11+ |
+| `site/` | 知习官网（部署于 `shuike.seanyan.store`） | Node.js 20.19+ 或 22.12+ |
+| `admin/` | 运营后台（构建后由网关托管在 `/admin/`） | Node.js 20.19+ 或 22.12+ |
+| `webapp/` | 知习网页版（部署于 `zhixi.seanyan.store/web/`，与 App 共用网关和额度体系） | Node.js 20.19+ 或 22.12+ |
 
 官网源码已统一放入 `site/`。不要再修改其他目录里的历史网站文件。
 

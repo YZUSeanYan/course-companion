@@ -1,20 +1,26 @@
 # 知习
 
-面向外教课堂与备考场景的 Android 学习助手，覆盖听课转写与翻译、手动疑问、复杂讲义解析、AI 学习纪要和间隔复习。UI/录音与离线识别来自自有项目“水课雷达”离线版。
+面向外教课堂与备考场景的课堂学习助手，覆盖听课转写与翻译、手动疑问、复杂讲义解析、AI 学习纪要和间隔复习。提供 Android App 与免安装网页版两种形态，共用同一套网关与账号额度体系。UI/录音与离线识别来自自有项目"水课雷达"离线版。
+
+**在线使用**：
+
+- 网页版（免安装，电脑/手机浏览器直接打开）：<https://zhixi.seanyan.store/web/>
+- 官网（功能介绍 / 申请试用 / 下载 App）：<https://shuike.seanyan.store/>
+- 官网任意页面可进入网页版；申请成功后第 1 步引导即网页版，未激活额度时网页版也会反向引导申请。
 
 ![知习首页](docs/images/home.png)
 
 ## 协作开发
 
-私有协作仓库：`https://github.com/YZUSeanYan/course-companion`
+公开协作仓库：`https://github.com/YZUSeanYan/course-companion`
 
 当前仓库包含五个可独立运行的模块：
 
 - `app/`：Android App
 - `server/`：FastAPI 学习网关
 - `admin/`：运营后台（React + Vite，由网关托管在 `/admin/`）
-- `site/`：官网源码
-- `webapp/`：网页版（一期云端版：云端听课转写、AI 学习包与 FSRS 复习，见 `webapp/README.md`）
+- `site/`：官网源码（部署于 `shuike.seanyan.store`）
+- `webapp/`：网页版（云端听课转写 + 浏览器离线识别 + AI 学习包 + FSRS 复习，部署于 `zhixi.seanyan.store/web/`，见 `webapp/README.md`）
 
 第一次参与开发请先读：
 
@@ -45,6 +51,7 @@
 - 官网试用申请：`https://shuike.seanyan.store/#/apply` 填写姓名、昵称、手机号并完成短信验证码后，自动加入管理后台试用名单；默认每天 5 个 AI 学习包、30 分钟云端音频，有效期 2 个月，翻译字符/文档解析/设备数沿用默认配置。
 - 运营后台：管理员密码登录后可查看请求/学习包/音频/翻译用量、活跃设备与账号、错误率、每日趋势、接口和模型分布；可新增/批量添加手机号、配置额度与有效期、禁用/解绑/删除账号，并查看设备与最近请求（不记录请求正文）。
 - 设置内含正式隐私政策和 `https://shuike.seanyan.store` 官网入口。
+- 网页版（与 App 共用额度体系）：云端实时听课转写 + 双向翻译、手动标记疑问、AI 学习包、讲义上传、CET6 词库导入、FSRS 复习、课程/转写 Markdown 导出；**浏览器离线识别**（sherpa-onnx WASM 流式中英模型，首次自动从同源镜像下载约 200MB 并做 SHA-256 校验，之后完全本地识别、不消耗额度）。本地数据只存浏览器 IndexedDB；WAV 本地存档支持云端补转写。
 
 ## 尚未完成或需真实验收
 
@@ -111,6 +118,8 @@ npm run build
 
 - Android：86 项 JVM 单测，覆盖课堂、导入、DTO、FSRS、CET6 词表、地址校验、术语编辑格式、FastAPI 错误解析、文本 PDF 视觉需求、学习列表复合 key、学习内容分类与复习分类统计、试用手机号规范化与账号 DTO、模型下载进度/镜像回退与完整性校验、Realtime 重连码与云端延迟测量、纪要确认态解析；Room 2→9 迁移保留历史与复习卡。
 - 设备：25 项测试，覆盖中英文 ASR、模型隔离与回收站、暂停/继续、学习包后台任务轮询/失败/鉴权恢复、本地重复学习包去重、试用额度激活与错误码、Realtime 消息（含 partial 与流式译文）和云端失败→本机识别回退。
-- 服务端：103 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、PNVS `SendSmsVerifyCode` 参数与错误、管理后台登录/CSRF/账号 CRUD/统计、请求日志、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径。
+- 服务端：107 项 pytest，覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、PNVS `SendSmsVerifyCode` 参数与错误、管理后台登录/CSRF/账号 CRUD/统计、请求日志、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退、视觉复用现有密钥、PDF/图片页资产、SSRF 与失败路径，以及网页版 WebSocket 子协议鉴权与可选 CORS。
+- 网页版：32 项 vitest，覆盖分类映射、minutes 拼接、术语/CET6 词表解析、复习分类汇总、FSRS 评分与间隔、WAV 编码、补转写分段解析、模型管理器下载/校验/拒绝、镜像同源约束与离线解码循环（注入假识别器）。
+- 生产已上线：网关 `https://zhixi.seanyan.store`（R14）、网页版 `https://zhixi.seanyan.store/web/`、官网与运营后台；生产冒烟含 WSS 子协议握手全链路与离线模型管线的浏览器端到端（下载/校验/WASM 初始化/解码）。
 
 完整结果与未完成项见 `docs/VERIFICATION.md`，AI 数据流见 `docs/AI_IMPLEMENTATION.md`。
