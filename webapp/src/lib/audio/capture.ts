@@ -1,24 +1,68 @@
 // 麦克风采集：AudioWorklet 重采样为 16kHz 单声道 Int16 PCM。
 // 实时课堂 WebSocket 的音频分片按 0.2 秒（3200 样本 / 6400 字节）成帧，
-// 与网关 sent_seconds = bytes/32000 的口径一致。
+// 与网关 sent_seconds = bytes/32000 的口径一致（网关按 len(audio)/32000 计费并转给上游）。
 
 export const TARGET_SAMPLE_RATE = 16000;
 export const FRAME_SAMPLES = 3200; // 0.2s
 
-const WORKLET_SOURCE = `
-const TARGET = 16000;
-const FRAME_SAMPLES = 3200;
+/**
+ * worklet 模块源码。两个坑都在这里：
+ *
+ * 1. 降采样必须按比率丢样本。早先的写法是「每个输入采样都输出一个」，48kHz 下等于
+ *    每秒产出 48000 个样本却按 16kHz 打标——网关把它当 3 倍慢放的音频转给上游 ASR，
+ *    识别结果为空，额度还按 3 倍掉。正确做法是累加器每越过一次 ratio 才输出一个样本。
+ *
+ * 2. 这段必须是纯字符串常量，不能写成 `${SomeClass.toString()}` 拼出来：生产构建会
+ *    把类名压缩成 cS 之类，而字符串里手写的 `new PcmDownsampler(...)` 不会被重命名，
+ *    运行期直接 ReferenceError，录音在线上完全失效（开发模式反而是好的）。
+ *    代价是这份算术以文本形式存在，所以单测直接执行这串源码本身
+ *    （见 pcm-resample.test.ts），测的就是线上跑的那份。
+ */
+export const WORKLET_SOURCE = `
+const TARGET_SAMPLE_RATE = ${TARGET_SAMPLE_RATE};
+const FRAME_SAMPLES = ${FRAME_SAMPLES};
+class PcmDownsampler {
+  constructor(inputRate, emit) {
+    this.ratio = inputRate / TARGET_SAMPLE_RATE;
+    this.emit = emit;
+    this.frame = new Int16Array(FRAME_SAMPLES);
+    this.acc = 0;
+    this.prev = 0;
+    this.started = false;
+    this.fill = 0;
+  }
+  push(input) {
+    const ratio = this.ratio;
+    for (let i = 0; i < input.length; i++) {
+      const sample = input[i];
+      if (!this.started) {
+        // 首样本只作插值基准，不产出，否则起点会被多算一个。
+        this.prev = sample;
+        this.started = true;
+        continue;
+      }
+      this.acc += 1;
+      while (this.acc >= ratio) {
+        this.acc -= ratio;
+        // 在 prev→sample 之间按剩余相位线性插值（ratio=1 时退化为 prev，差一拍可忽略）。
+        const weight = this.acc / ratio;
+        const value = this.prev + (sample - this.prev) * weight;
+        const clamped = value < -1 ? -1 : value > 1 ? 1 : value;
+        this.frame[this.fill++] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+        if (this.fill >= this.frame.length) {
+          this.emit(this.frame.slice(0));
+          this.fill = 0;
+        }
+      }
+      this.prev = sample;
+    }
+  }
+}
 class PcmResampleProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.ratio = sampleRate / TARGET;
-    this.lerpPos = 0;
-    this.frame = new Int16Array(FRAME_SAMPLES);
-    this.frameFill = 0;
-    this.prevSample = 0;
-    this.nextSample = 0;
-    this.hasPrev = false;
     this.paused = false;
+    this.down = new PcmDownsampler(sampleRate, (frame) => this.port.postMessage(frame));
     this.port.onmessage = (event) => {
       if (event.data && typeof event.data.paused === "boolean") {
         this.paused = event.data.paused;
@@ -28,29 +72,7 @@ class PcmResampleProcessor extends AudioWorkletProcessor {
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
     if (!channel || this.paused) return true;
-    for (let i = 0; i < channel.length; i++) {
-      const sample = channel[i];
-      if (!this.hasPrev) {
-        this.prevSample = sample;
-        this.nextSample = sample;
-        this.hasPrev = true;
-        this.lerpPos = 0;
-        continue;
-      }
-      this.lerpPos += this.ratio;
-      while (this.lerpPos >= 1) {
-        this.lerpPos -= 1;
-        this.prevSample = this.nextSample;
-        this.nextSample = sample;
-      }
-      const value = this.prevSample + (this.nextSample - this.prevSample) * this.lerpPos;
-      const clamped = Math.max(-1, Math.min(1, value));
-      this.frame[this.frameFill++] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-      if (this.frameFill >= FRAME_SAMPLES) {
-        this.port.postMessage(this.frame.slice(0));
-        this.frameFill = 0;
-      }
-    }
+    this.down.push(channel);
     return true;
   }
 }
