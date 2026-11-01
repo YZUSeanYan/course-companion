@@ -184,7 +184,7 @@ export default function Apply() {
             <div className="mt-8 flex flex-col gap-4">
               {[
                 { n: '01', t: '填写姓名、昵称和手机号', d: '姓名与昵称只用于管理员识别和 App 内显示。' },
-                { n: '02', t: '获取并输入短信验证码', d: '验证码由阿里云短信发送，5 分钟内有效。' },
+                { n: '02', t: '获取并输入短信验证码', d: '验证码由阿里云号码认证短信发送，5 分钟内有效。受国内备案个人主体限制，短信签名开头显示【恒创联众】，请正常接收。' },
                 { n: '03', t: '自动加入试用名单', d: '申请成功后，用同一手机号在 App 设置中激活即可。' },
               ].map((step) => (
                 <div key={step.n} className="flex gap-4">
@@ -244,6 +244,16 @@ export default function Apply() {
                   <p className="body-2 mt-2" style={{ fontSize: 13 }}>
                     预计 1 分钟完成。验证码只发送一次，请确认手机号填写正确。
                   </p>
+                  <div
+                    className="mt-3 rounded-2xl px-4 py-3"
+                    style={{ background: 'rgba(255,255,255,.55)', border: '1px solid rgba(20,20,19,.08)' }}
+                  >
+                    <p style={{ fontSize: 12.5, lineHeight: 1.8, color: 'var(--ink-3)' }}>
+                      受国内备案个人主体限制，验证码短信签名开头显示为
+                      <strong style={{ color: 'var(--ink)' }}>【恒创联众】</strong>
+                      ，请正常接收，不要当作营销短信拦截。
+                    </p>
+                  </div>
                   {status && !status.smsConfigured ? (
                     <div className="mt-4 rounded-2xl px-4 py-3" style={{ background: 'var(--brand-soft)', border: '1px solid rgba(255,103,13,.18)' }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--brand-deep)', lineHeight: 1.8 }}>
