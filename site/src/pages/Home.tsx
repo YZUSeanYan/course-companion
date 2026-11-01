@@ -3,6 +3,7 @@ import Reveal from '../components/site/Reveal'
 import Waveform from '../components/site/Waveform'
 import PhoneMockup from '../components/site/PhoneMockup'
 import ClassroomDemo from '../components/site/ClassroomDemo'
+import { LatencyStrip } from '../components/site/BenchmarksSection'
 import { CURRENT_RELEASE, WEB_APP_URL } from '../lib/release'
 
 /* ---------- 内联 SVG 图标 ---------- */
@@ -149,6 +150,9 @@ export default function Home() {
           </Reveal>
         </div>
       </section>
+
+      {/* ============ 引擎实测数据带 ============ */}
+      <LatencyStrip />
 
       {/* ============ 痛点 ============ */}
       <section className="hairline-t" style={{ background: 'var(--surface)' }}>
