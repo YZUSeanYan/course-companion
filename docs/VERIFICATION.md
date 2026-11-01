@@ -182,6 +182,18 @@
 - **验证**：server 149 项 pytest 全绿（本机补装 `mutagen` 后含 `test_lecsync_admin`）；admin `tsc --noEmit` + `vite build` 通过；本地预览浏览器核对账号展开、匿名设备区、按账号调用记录与筛选；线上 `accounts` 返回 2 个账号 / 1 台设备，`devices?scope=all` 为 1 绑定 + 0 匿名，`requests` 为 0，概览「绑定设备 1 / 匿名 0」。
 - **回滚**：服务单元备份 `/etc/systemd/system/zhixi-gateway.service.bak-r17`，R17 目录保留；后台旧包 `admin-dist.bak-r18-20261102-044249`；数据库备份同目录。Mimosa 深度审计未完成，不得据此声称通过安全审计。
 
+## 网页版听课录不到内容（2026-11-02，r25 已发布）
+
+- **现象**：用户反馈「网页版好像录不上音」。
+- **定位**：麦克风采集本身正常（`getUserMedia` 拿到音轨、AudioWorklet 有帧产出、整链无报错）。根因在重采样：`PcmDownsampler` 每输入一个采样就输出一个，与 `ratio` 无关——`lerpPos` 累加后被 while 循环减回 0，但 push 无条件执行一次。48kHz 下等于每秒产出 48000 个样本却按 16kHz 打标，网关按 `len(audio)/32000` 计时（`lecsync_routes.py:474`）并转给上游 ASR，于是音频被当成 3 倍慢放播放、识别基本出不来，额度还按 3 倍扣（10 分钟的课记成约 30 分钟，14400 秒上限会在 80 分钟真实时长时提前触发）。该缺陷自网页版一期（PR #12）就存在，不是 UI 重做引入的。
+- **实测**：无头 Edge + 合成麦克风（`--use-fake-device-for-media-stream`）。修复前 1.61 秒真实时间产出 4.6 秒音频（speedRatio 2.86）；修复后网关侧 31,218 B/s 对期望 32,000 B/s（speedRatio 0.975，差额是缓冲里未凑满一帧的 0.2 秒）。
+- **修法**：累加器每越过一次 `ratio` 才输出一个样本，并在 `prev→sample` 之间线性插值。中途一度改成 `${PcmDownsampler.toString()}` 拼接 worklet，构建后类名被压成 `cS` 而字符串里手写的 `new PcmDownsampler(...)` 不会被重命名，线上会 `ReferenceError` 使录音彻底失效（开发模式反而正常）——已改回纯字符串常量并检查产物。
+- **测试**：新增 `pcm-resample.test.ts`，用 `new Function` 注入 `AudioWorkletProcessor`/`registerProcessor`/`sampleRate` 直接执行 `WORKLET_SOURCE` 本身，覆盖 48k/44.1k/16k 输出时长一致性、帧长、静音、440Hz 过零率、Int16 夹取、暂停不产出、空输入。
+- **端到端**：本地假网关（FastAPI，仅回环）+ 合成麦克风，dev 与 prod 构建各跑一遍——开始听课 → `session.ready` → 8.4 秒音频 / 8.61 秒墙钟、42 帧、页面零错误；暂停 4 秒期间字节增长 0，恢复后 3 秒补 3.0 秒音频。
+- **检查**：`tsc` 通过、vitest 88 项通过（13 文件）、`vite build` 通过。
+- **发布**：网页版发布到 `/opt/zhixi-webapp/r25`，`current` 从 `r24` 切到 `r25`（`r23`/`r24` 保留）。公网 `index-CjI9Zx__.js`（482,570 字节）与本地验证产物 SHA-256 完全一致；线上包内 worklet 源码实测 5 秒 48kHz 输入产出 4.8 秒音频、零错误。**回滚 = `ln -sfn /opt/zhixi-webapp/r24 /opt/zhixi-webapp/current`**。
+- **边界**：未改协议与网关；停止时缓冲中不足一帧（≤0.2 秒）的音频不 flush，属可接受损失。Mimosa 深度审计仍未完成，不得据此声称通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
