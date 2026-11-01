@@ -136,6 +136,13 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
                 "sms_delivery_failed",
                 "短信发送失败，请稍后重试或联系管理员",
             ) from exc
+        except Exception as exc:
+            database.invalidate_sms_code(code_id)
+            raise _trial_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "sms_delivery_failed",
+                "短信发送失败，请稍后重试或联系管理员",
+            ) from exc
         return TrialCodeResponse(
             sent=True,
             expiresInSeconds=settings.trial_code_ttl_seconds,
