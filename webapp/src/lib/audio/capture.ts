@@ -128,39 +128,3 @@ export async function requestMicrophone(): Promise<MediaStream> {
     },
   });
 }
-
-/** 可选的本地存档录音（webm/opus）。失败不阻塞听课。 */
-export function startArchiveRecorder(stream: MediaStream): { recorder: MediaRecorder; stop(): Promise<{ blob: Blob; mime: string } | null> } | null {
-  if (typeof MediaRecorder === "undefined") return null;
-  const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-    ? "audio/webm;codecs=opus"
-    : MediaRecorder.isTypeSupported("audio/webm")
-      ? "audio/webm"
-      : "";
-  try {
-    const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.start(4000);
-    return {
-      recorder,
-      stop() {
-        return new Promise((resolve) => {
-          if (recorder.state === "inactive") {
-            resolve(null);
-            return;
-          }
-          recorder.onstop = () => {
-            const type = recorder.mimeType || mime || "audio/webm";
-            resolve({ blob: new Blob(chunks, { type }), mime: type });
-          };
-          recorder.stop();
-        });
-      },
-    };
-  } catch {
-    return null;
-  }
-}

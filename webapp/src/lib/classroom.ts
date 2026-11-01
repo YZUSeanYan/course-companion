@@ -1,10 +1,11 @@
-// 课堂听课控制器：协调麦克风采集、云端实时转写 WebSocket、本地落库与译文队列。
-// 事件口径与 Android LecsyncRealtimeEngine 一致；本页不启用浏览器离线识别（二期）。
+// 课堂听课控制器：协调麦克风采集、云端实时转写 WebSocket、本地落库、译文队列与实时纪要。
+// 事件口径与 Android LecsyncRealtimeEngine 一致；浏览器离线识别（sherpa-onnx WASM）在 offline 引擎中单独实现。
 
 import { db } from "./db/db";
 import { zhixi } from "./api/client";
-import { startPcmCapture, requestMicrophone, startArchiveRecorder, type PcmCaptureHandle } from "./audio/capture";
+import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason } from "./audio/realtime";
+import { encodeWav } from "./audio/wav";
 import type { RealtimeConfig, RealtimeEvent } from "./api/types";
 import type { TranslationRecord } from "./db/db";
 
@@ -23,6 +24,8 @@ export interface ClassroomCallbacks {
   onSnapshot(snapshot: ClassroomSnapshot): void;
   /** 定稿新行落库后回调，供 UI 增量刷新。 */
   onLineSaved?(lineId: number): void;
+  /** 实时纪要更新（digest.update 原始 JSON）。 */
+  onDigest?(digestJson: string): void;
 }
 
 export interface ClassroomStartOptions {
@@ -62,7 +65,7 @@ export class ClassroomController {
 
   private capture: PcmCaptureHandle | null = null;
   private stream: MediaStream | null = null;
-  private archive: { stop(): Promise<{ blob: Blob; mime: string } | null> } | null = null;
+  private pcmFrames: Int16Array[] = [];
   private realtime: RealtimeSession | null = null;
   private segmentLines = new Map<string, number>();
   private pendingTranslations = new Map<string, RealtimeEvent>();
@@ -72,6 +75,7 @@ export class ClassroomController {
   private pauseStartedAt: number | null = null;
   private ticker: number | null = null;
   private callbacks: ClassroomCallbacks | null = null;
+  private digestJson = "";
 
   subscribe(callbacks: ClassroomCallbacks): ClassroomSnapshot {
     this.callbacks = callbacks;
@@ -107,9 +111,12 @@ export class ClassroomController {
         audioBlob: null,
         audioMime: "",
         courseId: options.courseId,
+        digestJson: "",
       });
       this.segmentLines.clear();
       this.pendingTranslations.clear();
+      this.pcmFrames = [];
+      this.digestJson = "";
       this.usageSeconds = 0;
       this.accumulatedMs = 0;
       this.pauseStartedAt = null;
@@ -120,9 +127,10 @@ export class ClassroomController {
         onError: (error) => this.emit({ statusMessage: error.message }),
       });
       this.realtime.connect();
-      this.archive = startArchiveRecorder(this.stream);
       this.capture = await startPcmCapture(this.stream, {
         onFrame: (frame) => {
+          // 原地累积 PCM 用于 WAV 存档（暂停时 worklet 不产帧，存档与转写时间轴一致）。
+          this.pcmFrames.push(frame);
           if (this.realtime?.isActive) this.realtime.sendPcm(frame);
         },
         onError: (error) => this.emit({ statusMessage: error.message }),
@@ -204,18 +212,20 @@ export class ClassroomController {
   private async finishSession(): Promise<void> {
     const sessionId = this.snapshot.sessionId;
     await this.capture?.stop().catch(() => undefined);
-    let audio: { blob: Blob; mime: string } | null = null;
+    // 从累积的 PCM 编码 WAV 存档（网关音频接口支持 .wav；暂停期间无帧，时间轴一致）。
+    let audioBlob: Blob | null = null;
     try {
-      audio = (await this.archive?.stop()) ?? null;
+      audioBlob = this.pcmFrames.length ? encodeWav(this.pcmFrames) : null;
     } catch {
-      audio = null;
+      audioBlob = null;
     }
     await this.releaseMedia();
     if (sessionId != null) {
       await db.sessions.update(sessionId, {
         endedAtMillis: Date.now(),
-        audioBlob: audio?.blob ?? null,
-        audioMime: audio?.mime ?? "",
+        audioBlob,
+        audioMime: audioBlob ? "audio/wav" : "",
+        digestJson: this.digestJson,
       });
     }
     this.realtime = null;
@@ -230,7 +240,6 @@ export class ClassroomController {
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
     this.capture = null;
-    this.archive = null;
   }
 
   private async handleEvent(sessionId: number, event: RealtimeEvent): Promise<void> {
@@ -280,6 +289,12 @@ export class ClassroomController {
       case "usage.update":
         this.usageSeconds = event.effectiveSeconds ?? this.usageSeconds;
         break;
+      case "digest.update": {
+        // 实时纪要：保存最新事件（含 sections），结束后随会话落库。
+        this.digestJson = JSON.stringify(event);
+        this.callbacks?.onDigest?.(this.digestJson);
+        break;
+      }
       case "session.error":
         this.emit({
           statusMessage: event.message ?? "云端课堂出现错误",
