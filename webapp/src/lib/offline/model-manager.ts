@@ -27,7 +27,7 @@ export interface ModelLoadProgress {
   totalBytes: number;
 }
 
-export const DEFAULT_MODEL_BASE_URL = "https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/";
+export const DEFAULT_MODEL_BASE_URL = "https://zhixi.seanyan.store/models/zhixi/web/asr-zh-en-v1/";
 
 export const OFFLINE_ASR_MODEL: OfflineModelSpec = {
   version: "sherpa-onnx-wasm-simd-v1.13.7-zh-en-asr-zipformer",
