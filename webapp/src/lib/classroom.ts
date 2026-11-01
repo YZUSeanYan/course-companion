@@ -113,6 +113,7 @@ export class ClassroomController {
   private cloudOpenedAt = 0;
   private reconnectAttempts = 0;
   private reconnectGeneration = 0;
+  private fatalSessionError = false;
 
   subscribe(callbacks: ClassroomCallbacks): ClassroomSnapshot {
     this.callbacks = callbacks;
@@ -140,6 +141,7 @@ export class ClassroomController {
     try {
       this.mode = options.mode;
       this.reconnectAttempts = 0;
+      this.fatalSessionError = false;
       this.reconnectGeneration += 1;
       let token: string | null = null;
       if (options.mode === "cloud") {
@@ -313,6 +315,7 @@ export class ClassroomController {
     // 瞬时断开自动重连（最多 3 次，指数退避）：非用户停止、非语义性拒绝。
     if (
       this.mode === "cloud" &&
+      !this.fatalSessionError &&
       shouldReconnectAfterClose({
         code,
         livedMs: Date.now() - this.cloudOpenedAt,
@@ -444,6 +447,11 @@ export class ClassroomController {
         break;
       }
       case "session.error":
+        // 不可重试的服务端错误（如额度耗尽）：记下并禁用自动重连，避免无效重试。
+        if (event.retryable === false) {
+          this.fatalSessionError = true;
+          this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
+        }
         this.emit({
           statusMessage: event.message ?? "云端课堂出现错误",
         });
