@@ -1,35 +1,20 @@
+import appIcon from '../../assets/app-icon.png'
+
+/**
+ * 品牌标：直接复用 App 的启动图标（app/src/main/res/drawable-nodpi/ic_brand_square.png）。
+ * 早先这里是手绘的开卷 SVG，和 App 后来换的「Z + 声波」图标对不上，官网页头/页脚/下载页
+ * 因此一直在用旧标。现在统一用同一张位图，尺寸与 App 保持一致。
+ */
 export default function LogoMark({ size = 34 }: { size?: number }) {
   return (
-    <svg
+    <img
+      src={appIcon}
       width={size}
       height={size}
-      viewBox="0 0 48 48"
-      fill="none"
+      alt=""
       aria-hidden
       className="wiggle-target"
-    >
-      <circle cx="24" cy="24" r="21.5" fill="var(--brand)" />
-      <path
-        d="M10.5 17.25c5.15-.85 9.8.2 13.5 3.15v14.1c-3.7-2.95-8.35-4-13.5-3.15V17.25Z"
-        fill="#fff"
-        fillOpacity=".14"
-        stroke="#fff"
-        strokeWidth="2.1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M37.5 17.25c-5.15-.85-9.8.2-13.5 3.15v14.1c3.7-2.95 8.35-4 13.5-3.15V17.25Z"
-        fill="#fff"
-        fillOpacity=".14"
-        stroke="#fff"
-        strokeWidth="2.1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M24 20.4v14.1" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" opacity=".8" />
-      <path d="M30.5 10.5a7 7 0 0 1 5.5 5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity=".8" />
-      <circle cx="29" cy="14.25" r="1.65" fill="#fff" />
-    </svg>
+      style={{ borderRadius: Math.round(size * 0.24), display: 'block' }}
+    />
   )
 }

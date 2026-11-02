@@ -463,9 +463,11 @@ a {
 }
 
 /* ---------- Cards ---------- */
+/* 概览是 6 张卡（请求 / 学习包 / 音频 / 翻译 / 活跃 / 账号-设备），3 列正好两行；
+   用 4 列会在第二行左侧剩两张、右边空一块。 */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
