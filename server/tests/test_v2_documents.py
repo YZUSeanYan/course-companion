@@ -30,3 +30,11 @@ def test_upload_document_and_read_page_image(settings, monkeypatch, tmp_path):
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/jpeg"
     assert image.content.startswith(b"\xff\xd8")
+
+    # Another activated account must not read another user's rendered pages.
+    foreign_headers = auth_headers(client)
+    foreign = client.get(
+        f"/v2/documents/{asset['documentId']}/pages/{filename}",
+        headers=foreign_headers,
+    )
+    assert foreign.status_code == 404
