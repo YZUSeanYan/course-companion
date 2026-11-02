@@ -221,6 +221,19 @@
 - **回滚**：网页版 `ln -sfn /opt/zhixi-webapp/r29 /opt/zhixi-webapp/current`；官网恢复 `/opt/shuike-site-backups/20261102-v209/` 下的 `index.html` 与 `assets`；APK 下载页回退 `release.ts` 2.0.8；网关无需回滚。
 - **边界**：历史课堂不会自动重新分句，需要重新识别/重新生成；云端译文与源文标点数量不一致时退化为按源句长度比例切分；真实课堂长段落仍要继续收集样本。Mimosa 深度审计未完成，不得据此声称通过安全审计。
 
+## 网页版课堂常驻 / 历史与实时同屏 / 延时对齐（2026-11-02，未发布）
+
+- **现象**：用户实测网页版课堂三点——①译文跟不上，且只显示最新一句、看不到之前句子；②实时转录也只像在记录最新一句，翻不到旧记录；③切到「学习」「设置」页会直接结束课堂。
+- **定位与修法**：
+  1. **页面结构**：旧版把「正在识别」放在计时卡、把历史转写放到下面另一张卡。手机首屏只够看到计时卡里的当前一句，历史卡在折叠线以下，观感就是「只记录最新一句」。改为**单张课堂主卡**：计时/控制在顶部，历史句子在上、最新半句固定在最下面，历史与实时在同一个滚动区。
+  2. **句模式字段**：官方 `transcript.partial` 是快照，句模式下原文在 `paragraphs[].pieces` + `tail`，扁平兜底在 `pending`，译文预览在 `tailTranslation` 或 `paragraphs[].translation`；旧代码只读 `text`。新增 `classroom-events.ts` 统一收敛，`segmentId` 允许数字（数字 0 不再被 `if (!id)` 丢掉）。
+  3. **落库**：`transcript.final` 仍逐条独立落库，但改为按 `(sessionId, segmentKey)` 幂等更新（同一段重复到达不追加重复卡片、变短时清理多余行与译文），并新增复合索引（Dexie v4，迁移测试覆盖 v3→v4 数据保留）。不同 segment 只追加，不存在后一句覆盖前一句的路径。
+  4. **切页常驻**：控制器从 `ClassroomPage` 的 `useMemo` 提升为模块级单例（`lib/classroom-session.ts`）。切页只卸载视图，麦克风、WebSocket、计时与落库继续；回到课堂页用当前快照直接恢复。外壳在其他页面显示「课堂进行中 mm:ss · 返回」浮动入口，课堂进行中关闭/刷新页面会触发浏览器离开确认。
+  5. **延时对齐 App**：①音频分片 200ms → **100ms**（1600 样本，App 同节奏，网关按字节计费不受影响）；②显式下发 `displayMode: "sentence"`（classic 才下发 segmentation），不再依赖上游默认值；③暂停与停止前先发官方 `session.finalize`，最后半句及其译文不再丢；④处理 `session.ended`，短课堂不会再被误判成断线并自动重连；⑤实时译文预览继续由 `translation.partial` / `tailTranslation` 驱动。
+- **测试**：新增 `classroom-events.test.ts`（14 项）、`transcript-store.test.ts`（9 项）、Dexie v3→v4 迁移测试（1 项）；`tsc --noEmit` 通过，vitest **142 项通过（17 文件）**，`vite build` 通过。
+- **端到端**：本地假网关（FastAPI，仅回环）+ Edge 无头 + 合成麦克风，跑生产构建，16 项断言全过：实时预览取到 `paragraphs+tail`（“The point of this exercise is to practice” / “这个练习的要点是练习”）；4 条历史 + 实时行同屏且每句都有对齐译文；数字 0 号段落库；切到 `#/learning` 后浮动入口显示「课堂进行中 00:09 返回」，期间音频仍增长 112,000 字节（约 3.5 秒 @32KB/s），返回后相位仍是「听课中」且历史完整；390px 视口 `scrollWidth === clientWidth === 390`；暂停/继续正常；停止后 `finalize` 计数 2、补齐最后两句，落库 6 行 6 译文，结束文案为「课堂已结束」。配置实测为 `displayMode: "sentence"` 且不含 `segmentation`。
+- **边界**：真实上游是否每条都下发 `translation.partial` / `tailTranslation` 仍取决于 Lecsync 服务端，本轮用假网关覆盖了两种字段形态；真实课堂的延时读数仍需下次上课时观察。本轮未改网关、协议、计费与同步逻辑；未部署（等待用户确认）。Mimosa 深度安全审计仍未完成，不得据此声称通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`

@@ -13,7 +13,7 @@ const SPLIT_AT_UNITS = 20;
 /** 太短的碎片并进相邻句，避免出现「嗯。」这种独立卡片。 */
 const TINY_UNITS = 4;
 /** 病态输入的保护阈值：超出的部分合并，绝不丢内容。 */
-const MAX_PARTS = 8;
+export const MAX_PARTS = 8;
 
 const SENTENCE_ENDERS = new Set([".", "!", "?", "。", "！", "？", "；", ";", "…"]);
 const SENTENCE_CLOSERS = new Set([..."”\"'’）)】]」』"]);

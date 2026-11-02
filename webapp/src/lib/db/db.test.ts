@@ -3,6 +3,7 @@
 // Dexie 抛 SchemaError 并在 useLiveQuery 渲染期炸掉整棵 React 树。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import Dexie from "dexie";
 import { db, ensureUid, newUid, SYNCED_TABLES } from "./db";
 
 beforeEach(async () => {
@@ -171,5 +172,44 @@ describe("Dexie 索引回归（白屏根因：where 字段必须有索引）", (
     expect((await db.reviewLogs.where("cardId").equals(1).toArray()).length).toBe(1);
     expect((await db.analysisRuns.where("courseId").equals(1).toArray()).length).toBe(1);
     expect((await db.sessions.where("startedAtMillis").below(now + 1).toArray()).length).toBe(1);
+  });
+});
+
+describe("v3 → v4 迁移", () => {
+  it("保留既有转写，并新增 (sessionId, segmentKey) 复合索引", async () => {
+    const name = "zhixi-v3-v4-migration-test";
+    await Dexie.delete(name);
+
+    const legacy = new Dexie(name);
+    legacy.version(3).stores({
+      transcriptLines: "++id, sessionId, [sessionId+timestampMillis], uid",
+    });
+    await legacy.open();
+    await legacy.table("transcriptLines").add({
+      uid: "u1",
+      sessionId: 5,
+      timestampMillis: 100,
+      text: "旧课堂的一句话",
+      segmentKey: "s1:a",
+      speaker: null,
+      startMs: null,
+      endMs: null,
+      language: "zh",
+    });
+    legacy.close();
+
+    const upgraded = new Dexie(name);
+    upgraded.version(3).stores({
+      transcriptLines: "++id, sessionId, [sessionId+timestampMillis], uid",
+    });
+    upgraded.version(4).stores({
+      transcriptLines: "++id, sessionId, [sessionId+timestampMillis], [sessionId+segmentKey], uid",
+    });
+    await upgraded.open();
+    const rows = await upgraded.table("transcriptLines").where("[sessionId+segmentKey]").equals([5, "s1:a"]).toArray();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe("旧课堂的一句话");
+    upgraded.close();
+    await Dexie.delete(name);
   });
 });

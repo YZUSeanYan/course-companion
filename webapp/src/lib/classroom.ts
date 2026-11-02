@@ -6,10 +6,10 @@ import { zhixi, sleep } from "./api/client";
 import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason } from "./audio/realtime";
 import { encodeWav } from "./audio/wav";
-import { splitClauses, splitTranslation } from "./audio/clause-splitter";
+import { normalizeSegmentId, partialTextOf, partialTranslationOf, segmentKeyOf } from "./classroom-events";
+import { saveFinalTranscript, saveSegmentTranslation } from "./transcript-store";
 import { getOfflineEngine, type OfflineCallbacks, type OfflineSegment } from "./offline/engine";
 import type { RealtimeConfig, RealtimeEvent } from "./api/types";
-import type { TranslationRecord } from "./db/db";
 
 export type ClassroomPhase = "idle" | "connecting" | "listening" | "paused" | "stopping" | "ended";
 
@@ -23,6 +23,13 @@ export interface ClassroomSnapshot {
   elapsedSeconds: number;
   usageSeconds: number;
   statusMessage: string | null;
+  /** 实时纪要原始 JSON。放进快照是为了切页回来后能恢复，而不是依赖页面本地 state。 */
+  digestJson: string;
+  /** 本节讲师语言与目标译文语言；切页回来后展示层还要用，不能留在页面 state 里。 */
+  sourceLanguage: string;
+  targetLanguage: string;
+  /** 本节字幕模式；切页回来后设置面板要与正在跑的课堂一致。 */
+  displayMode: "sentence" | "classic";
 }
 
 export interface ClassroomCallbacks {
@@ -44,6 +51,12 @@ export interface ClassroomStartOptions {
   liveMinutes: boolean;
   /** 识别模式：云端实时（默认）或浏览器离线（sherpa-onnx WASM）。 */
   mode: "cloud" | "offline";
+  /**
+   * 字幕模式，与 App 的「整句阅读 / 跟随语音」一致。
+   * sentence（默认）按标点/停顿成句，译文随句到达；classic 按端点检测分段。
+   * 显式下发，避免上游默认值变化后网页端又退回高延时模式。
+   */
+  displayMode?: "sentence" | "classic";
   /**
    * 是否把本节 PCM 编码成 WAV 存进 IndexedDB（默认 false）。
    * 只有「云端补转写」需要它；关闭时结束不落音频，隐私页口径与此一致。
@@ -71,10 +84,14 @@ export function saveSaveAudio(value: boolean): void {
 }
 
 function defaultConfig(options: ClassroomStartOptions): RealtimeConfig {
+  const displayMode = options.displayMode ?? "sentence";
   return {
     transcribe: {
       languages: options.sourceLanguages,
-      segmentation: "balanced",
+      // sentence 模式忽略 segmentation（官方文档明确说明），只下发 displayMode；
+      // classic 才用「均衡」分段节奏。与 Android CloudListeningConfig 同口径。
+      displayMode,
+      ...(displayMode === "classic" ? { segmentation: "balanced" as const } : {}),
       speakers: options.speakerAttribution,
     },
     translate: { languages: options.translateDirection },
@@ -119,23 +136,35 @@ export class ClassroomController {
     elapsedSeconds: 0,
     usageSeconds: 0,
     statusMessage: null,
+    digestJson: "",
+    sourceLanguage: "en",
+    targetLanguage: "zh",
+    displayMode: "sentence",
   };
 
   private capture: PcmCaptureHandle | null = null;
   private stream: MediaStream | null = null;
   private pcmFrames: Int16Array[] = [];
   private realtime: RealtimeSession | null = null;
-  /** 一个 segment 可能被拆成多行，所以保存有序的行 id 列表。 */
+  /** 一个 segment 可能被拆成多行，所以保存有序的行 id 列表。键是「流代号:段号」。 */
   private segmentLines = new Map<string, number[]>();
   /** 与上面一一对应：每行的源句文本，拆分译文时按长度比例兜底。 */
   private segmentClauses = new Map<string, string[]>();
+  /** 上游段号 → 交付它的流代号；重连后 translation.final 仍能找到旧段。 */
+  private segmentStreams = new Map<string, string>();
   private pendingTranslations = new Map<string, RealtimeEvent>();
+  /** 当前上游连接的流代号与自增序号（重连时 +1，防止段号复用串行）。 */
+  private streamToken = "s0";
+  private streamSeq = 0;
+  /** 上游不给段号时按到达顺序补一个，避免整条定稿被丢弃。 */
+  private anonSegmentSeq = 0;
   private usageSeconds = 0;
   private startedAt = 0;
   private accumulatedMs = 0;
   private pauseStartedAt: number | null = null;
   private ticker: number | null = null;
-  private callbacks: ClassroomCallbacks | null = null;
+  /** 允许多个订阅者：课堂页与外壳的「进行中」入口同时在听。 */
+  private listeners = new Set<ClassroomCallbacks>();
   private digestJson = "";
   private mode: "cloud" | "offline" = "cloud";
   /** 本节是否落音频存档（「保存原始录音」，默认关）。 */
@@ -148,15 +177,26 @@ export class ClassroomController {
   private reconnectAttempts = 0;
   private reconnectGeneration = 0;
   private fatalSessionError = false;
+  /** 结束流程幂等：用户停止、session.ended 与连接关闭可能同时触发。 */
+  private finishPromise: Promise<void> | null = null;
 
-  subscribe(callbacks: ClassroomCallbacks): ClassroomSnapshot {
-    this.callbacks = callbacks;
+  /** 订阅快照更新；返回取消订阅函数。重复订阅/切页都不会重置控制器。 */
+  subscribe(callbacks: ClassroomCallbacks): () => void {
+    this.listeners.add(callbacks);
+    callbacks.onSnapshot(this.snapshot);
+    return () => {
+      this.listeners.delete(callbacks);
+    };
+  }
+
+  /** 供 React 外壳在首次渲染时取当前状态（切页回来不闪空态）。 */
+  getSnapshot(): ClassroomSnapshot {
     return this.snapshot;
   }
 
   private emit(patch: Partial<ClassroomSnapshot> = {}): void {
     this.snapshot = { ...this.snapshot, ...patch };
-    this.callbacks?.onSnapshot(this.snapshot);
+    for (const listener of this.listeners) listener.onSnapshot(this.snapshot);
   }
 
   private elapsedMs(): number {
@@ -172,6 +212,13 @@ export class ClassroomController {
       partialText: "",
       partialTranslation: "",
       usageSeconds: 0,
+      digestJson: "",
+      // 新课还没建会话：先把上一节的 sessionId 清掉，否则切页回来会错误地展示旧课记录。
+      sessionId: null,
+      elapsedSeconds: 0,
+      sourceLanguage: options.sourceLanguages[0] ?? "en",
+      targetLanguage: options.translateDirection[1] ?? "zh",
+      displayMode: options.displayMode ?? "sentence",
     });
     try {
       this.mode = options.mode;
@@ -202,7 +249,12 @@ export class ClassroomController {
       });
       this.segmentLines.clear();
       this.segmentClauses.clear();
+      this.segmentStreams.clear();
       this.pendingTranslations.clear();
+      this.streamSeq = 0;
+      this.streamToken = "s0";
+      this.anonSegmentSeq = 0;
+      this.finishPromise = null;
       this.pcmFrames = [];
       this.digestJson = "";
       this.usageSeconds = 0;
@@ -245,8 +297,17 @@ export class ClassroomController {
     this.cloudOptions = options;
     this.cloudSessionId = sessionId;
     this.cloudOpenedAt = Date.now();
+    // 每条上游连接一个流代号：重连后段号可能从头发，不能和上一轮的段键撞在一起。
+    this.streamSeq += 1;
+    this.streamToken = `s${this.streamSeq}`;
     this.realtime = new RealtimeSession(zhixi.realtimeUrl(), token, defaultConfig(options), {
-      onEvent: (event) => void this.handleEvent(sessionId, event),
+      onEvent: (event) => {
+        // 单个事件处理失败不能变成未捕获拒绝；给用户一个可读提示，录音继续。
+        void this.handleEvent(sessionId, event).catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.emit({ statusMessage: `转写保存失败：${message}` });
+        });
+      },
       onClose: (code, reason) => void this.handleClose(sessionId, code, reason),
       onError: (error) => this.emit({ statusMessage: error.message }),
       onOpen: () => {
@@ -270,26 +331,29 @@ export class ClassroomController {
     };
   }
 
-  /** 离线定稿与云端 transcript.final 走同一落库口径。 */
+  /** 离线定稿与云端 transcript.final 走同一落库口径（同样拆句、同样幂等）。 */
   private async persistOfflineFinal(sessionId: number | null, segment: OfflineSegment): Promise<void> {
     if (sessionId == null) return;
-    const now = Date.now();
-    const lineId = await db.transcriptLines.add({
-      uid: newUid(),
+    // 离线引擎的段号只在本次引擎会话内有效，加固定前缀避免与云端段号串键。
+    const segmentKey = segmentKeyOf("offline", normalizeSegmentId(segment.segmentId) || newUid());
+    const saved = await saveFinalTranscript({
       sessionId,
-      timestampMillis: now,
+      segmentKey,
       text: segment.text,
-      segmentKey: segment.segmentId,
-      speaker: null,
       startMs: segment.startMs,
       endMs: segment.endMs,
-      language: null,
     });
-    this.callbacks?.onLineSaved?.(lineId);
+    for (const lineId of saved.lineIds) this.notifyLineSaved(lineId);
+  }
+
+  private notifyLineSaved(lineId: number): void {
+    for (const listener of this.listeners) listener.onLineSaved?.(lineId);
   }
 
   async pause(): Promise<void> {
     if (this.snapshot.phase !== "listening") return;
+    // 先让上游把当前半句定稿（译文也一起出），再停麦克风；否则最后一句会卡在 partial。
+    this.realtime?.finalize();
     this.capture?.setPaused(true);
     this.pauseStartedAt = Date.now();
     this.accumulatedMs += this.pauseStartedAt - this.startedAt;
@@ -394,8 +458,18 @@ export class ClassroomController {
     void sessionId;
   }
 
-  private async finishSession(): Promise<void> {
-    const sessionId = this.snapshot.sessionId;
+  private async finishSession(sessionIdOverride?: number): Promise<void> {
+    // 同一节课只收尾一次：用户点停止时上游也会回 session.ended，两个入口不能重复写库。
+    if (this.finishPromise) return this.finishPromise;
+    this.finishPromise = this.doFinishSession(sessionIdOverride ?? this.snapshot.sessionId);
+    return this.finishPromise;
+  }
+
+  private async doFinishSession(sessionId: number | null): Promise<void> {
+    if (this.ticker !== null) {
+      window.clearInterval(this.ticker);
+      this.ticker = null;
+    }
     await this.capture?.stop().catch(() => undefined);
     // 只有用户显式开启「保存原始录音」才把 PCM 编码成 WAV 落库（用于云端补转写）。
     // 默认关闭：录音不进 IndexedDB，与隐私页口径一致，也避免整节课音频占满存储配额。
@@ -417,10 +491,14 @@ export class ClassroomController {
       });
     }
     this.realtime = null;
+    // 「正在结束…」「N 秒后自动重连…」是过程提示，不能固化成结束状态；真实错误才保留。
+    const previous = this.snapshot.statusMessage;
+    const transient = previous != null && (previous.startsWith("正在结束") || previous.includes("自动重连"));
     this.emit({
       phase: "ended",
+      sessionId,
       elapsedSeconds: Math.floor(this.elapsedMs() / 1000),
-      statusMessage: this.snapshot.statusMessage ?? "课堂已结束",
+      statusMessage: previous && !transient ? previous : "课堂已结束",
     });
   }
 
@@ -439,64 +517,62 @@ export class ClassroomController {
         this.emit({ statusMessage: null });
         break;
       case "transcript.partial":
-        // 未定稿片段可能带译文预览（sentence 模式的 tailTranslation），有就先显示，
-        // 不必等定稿 + 整句翻译完成。
+        // sentence 模式的 partial 是快照：原文可能只在 paragraphs/tail/pending 里，
+        // 译文预览在 tailTranslation 或对齐段落里。统一交给解析层收敛。
         this.emit({
-          partialText: event.text ?? "",
-          partialTranslation: (event.tailTranslation as string | undefined) ?? "",
+          partialText: partialTextOf(event),
+          partialTranslation: partialTranslationOf(event),
         });
         break;
       case "transcript.final": {
         const text = (event.text ?? "").trim();
-        const segment = event.segmentId;
-        if (!text || !segment) return;
-        const now = Date.now();
-        // 云端 sentence 模式常把一整段话当成一个 final（讲者不停顿时甚至一句到底），
-        // 而每条转写都会渲染成一张卡片。先按字幕节奏拆句再逐句落库，
-        // 与 Android 的 TranscriptClauseSplitter 同一套规则。
-        const clauses = splitClauses(text);
-        const lineIds: number[] = [];
-        for (const [index, clause] of clauses.entries()) {
-          const lineId = await db.transcriptLines.add({
-            uid: newUid(),
-            sessionId,
-            // 同段的多句共用起点时间，但保持稳定顺序
-            timestampMillis: now + index,
-            text: clause,
-            segmentKey: clauses.length > 1 ? `${segment}#${index}` : segment,
-            speaker: event.speaker ?? null,
-            startMs: event.startMs ?? null,
-            endMs: event.endMs ?? null,
-            language: event.language ?? null,
-          });
-          lineIds.push(lineId);
-          this.callbacks?.onLineSaved?.(lineId);
-        }
-        this.segmentLines.set(segment, lineIds);
-        this.segmentClauses.set(segment, clauses);
-        const pending = this.pendingTranslations.get(segment);
-        if (pending) {
-          this.pendingTranslations.delete(segment);
-          await this.saveTranslation(segment, lineIds, pending);
-        }
+        const segmentId = normalizeSegmentId(event.segmentId);
+        if (!text) return;
+        // 段号缺失时造一个：宁可多一行，也不能把整条定稿丢掉。
+        const resolved = segmentId || `anon-${++this.anonSegmentSeq}`;
+        const token = this.streamToken;
+        const key = segmentKeyOf(token, resolved);
+        // 立即清掉实时预览（在 await 之前），否则下一句的 partial 先到、
+        // 本条 final 落库后返回又会把新预览清空，表现为实时行闪断。
         this.emit({ partialText: "", partialTranslation: "" });
+        this.segmentStreams.set(resolved, token);
+        const saved = await saveFinalTranscript({
+          sessionId,
+          segmentKey: key,
+          text,
+          speaker: event.speaker ?? null,
+          startMs: event.startMs ?? null,
+          endMs: event.endMs ?? null,
+          language: event.language ?? null,
+        });
+        this.segmentLines.set(key, saved.lineIds);
+        this.segmentClauses.set(key, saved.clauses);
+        for (const lineId of saved.lineIds) this.notifyLineSaved(lineId);
+        const pending = this.pendingTranslations.get(key);
+        if (pending) {
+          this.pendingTranslations.delete(key);
+          await this.saveTranslation(key, saved.lineIds, pending);
+        }
         break;
       }
       case "translation.partial":
-        // 流式译文：先把已确认的部分显示出来。网页版此前忽略这个事件，
-        // 只能等 final 才看到译文，主观延时因此远高于 App。
+        // 流式译文：先把已确认的部分显示出来，不必等定稿译文。
         this.emit({ partialTranslation: event.text ?? "" });
         break;
       case "translation.final": {
-        const segment = event.segmentId;
-        if (!segment) return;
-        const lineIds = this.segmentLines.get(segment);
+        const segmentId = normalizeSegmentId(event.segmentId);
+        if (!segmentId) return;
+        // 优先用交付该段的流代号：重连后段号可能从头开始，不能直接拿当前流拼键。
+        const token = this.segmentStreams.get(segmentId) ?? this.streamToken;
+        const key = segmentKeyOf(token, segmentId);
+        const lineIds = this.segmentLines.get(key);
         if (lineIds == null) {
-          this.pendingTranslations.set(segment, event);
+          this.pendingTranslations.set(key, event);
         } else {
-          await this.saveTranslation(segment, lineIds, event);
+          await this.saveTranslation(key, lineIds, event);
         }
-        this.emit({ partialTranslation: "" });
+        // partialText 非空说明下一句已经在识别中，这份预览属于新句子，不能清掉。
+        if (!this.snapshot.partialText) this.emit({ partialTranslation: "" });
         break;
       }
       case "usage.update":
@@ -505,9 +581,16 @@ export class ClassroomController {
       case "digest.update": {
         // 实时纪要：保存最新事件（含 sections），结束后随会话落库。
         this.digestJson = JSON.stringify(event);
-        this.callbacks?.onDigest?.(this.digestJson);
+        this.emit({ digestJson: this.digestJson });
+        for (const listener of this.listeners) listener.onDigest?.(this.digestJson);
         break;
       }
+      case "session.ended":
+        // 先把相位切到 stopping 再收尾：上游发完 ended 会立刻关闭 socket，
+        // handleClose 若在收尾完成前看到「仍是 listening」，短课堂会被误判成断线并重连。
+        this.emit({ phase: "stopping", statusMessage: "正在结束课堂…" });
+        await this.finishSession(sessionId);
+        break;
       case "session.error":
         // 不可重试的服务端错误（如额度耗尽）：记下并禁用自动重连，避免无效重试。
         if (event.retryable === false) {
@@ -527,37 +610,15 @@ export class ClassroomController {
    * 保存一个 segment 的译文。
    *
    * 源文被拆成多句后，译文也要按同样的句数拆开，否则会出现「三句源文 + 一整段译文」
-   * 的错位：每张卡片都挂上同一段完整译文。拆分交给 splitTranslation，
-   * 先按标点切、再按源句长度比例兜底。
+   * 的错位：每张卡片都挂上同一段完整译文。拆分规则在 transcript-store 里。
    */
-  private async saveTranslation(segment: string, lineIds: number[], event: RealtimeEvent): Promise<void> {
-    const translated = (event.text ?? "").trim();
-    if (!translated || lineIds.length === 0) return;
-    const targetLang = event.targetLanguage ?? "zh";
-    const clauses = this.segmentClauses.get(segment) ?? [];
-    const parts =
-      lineIds.length === 1 ? [translated] : splitTranslation(translated, lineIds.length, clauses);
-    for (const [index, lineId] of lineIds.entries()) {
-      const part = (parts[index] ?? "").trim();
-      if (!part) continue;
-      const existing = await db.translations
-        .where("[transcriptLineId+targetLang]")
-        .equals([lineId, targetLang])
-        .first();
-      const record: TranslationRecord = {
-        id: existing?.id,
-        transcriptLineId: lineId,
-        targetLang,
-        sourceHash: "",
-        translatedText: part,
-        status: "done",
-        updatedAtMillis: Date.now(),
-      };
-      if (existing) {
-        await db.translations.update(existing.id!, record);
-      } else {
-        await db.translations.add(record);
-      }
-    }
+  private async saveTranslation(key: string, lineIds: number[], event: RealtimeEvent): Promise<void> {
+    const clauses = this.segmentClauses.get(key) ?? [];
+    await saveSegmentTranslation({
+      lineIds,
+      clauses,
+      text: event.text ?? "",
+      targetLang: event.targetLanguage ?? "zh",
+    });
   }
 }

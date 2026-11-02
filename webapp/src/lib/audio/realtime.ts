@@ -88,6 +88,18 @@ export class RealtimeSession {
     return true;
   }
 
+  /** 请求上游立即收尾当前半句（官方 session.finalize）。暂停/停止前调用，避免丢最后一句。 */
+  finalize(): boolean {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(JSON.stringify({ type: "session.finalize" }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** 发送结束控制并等待 session.ended；超时后直接关闭。 */
   async stop(): Promise<void> {
     if (this.readyTimer !== null) {
@@ -97,6 +109,8 @@ export class RealtimeSession {
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     this.closedByClient = true;
+    // 先 finalize 再 stop（与 App 一致）：让上游把最后半句及其译文推完。
+    this.finalize();
     socket.send(JSON.stringify({ type: "session.stop" }));
     const deadline = Date.now() + STOP_WAIT_MS;
     while (!this.ended && Date.now() < deadline && socket.readyState === WebSocket.OPEN) {

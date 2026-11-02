@@ -189,6 +189,11 @@ class ZhixiWebDatabase extends Dexie {
       reviewCards: "++id, learningItemId, dueAtMillis, courseId, uid",
       reviewLogs: "++id, cardId, reviewedAtMillis, uid",
     });
+    // v4：定稿去重按 (sessionId, segmentKey) 精确查找。没有这个复合索引时，
+    // 每条 final 都要把整节转写读进内存过滤；长课（数千行）会明显拖慢落库。
+    this.version(4).stores({
+      transcriptLines: "++id, sessionId, [sessionId+timestampMillis], [sessionId+segmentKey], uid",
+    });
   }
 }
 

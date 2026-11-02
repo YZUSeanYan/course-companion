@@ -1,13 +1,21 @@
 // 听课台：云端实时转写（含翻译）、暂停/继续、标记疑问与生成学习包入口。
 // 网页端形态：桌面为「主区（计时台 + 转写流）+ 侧栏（设置 / 纪要 / 回看 / 额度）」的工作台，
-// 窄屏收成单列。转写流独立滚动并吸顶表头，长课时主区仍可停留在视野内。
-// 依赖麦克风权限与前台标签页；浏览器不支持锁屏后台录音。
+// 窄屏收成单列。
+//
+// 两处与旧版的关键差异：
+// 1. 历史与实时行在同一张卡片里：定稿句子留在上方，最新半句固定在底部。
+//    旧版把实时行放在计时卡、把历史放到下面另一张卡，手机上首屏只看得到当前一句，
+//    看起来就像「只记录最新一句」。
+// 2. 课堂控制器是模块级单例（lib/classroom-session.ts）：切到学习/设置页只卸载视图，
+//    麦克风、WebSocket 和转写落库继续跑；外壳会显示「课堂进行中」入口。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, newUid, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
-import { ClassroomController, loadSaveAudio, saveSaveAudio, type ClassroomSnapshot } from "../lib/classroom";
+import { loadSaveAudio, saveSaveAudio } from "../lib/classroom";
+import { classroomSession } from "../lib/classroom-session";
+import { useClassroomSnapshot } from "../hooks/useClassroomSnapshot";
 import { TranslationQueue, pickLineTranslation } from "../lib/translate-queue";
 import { describeError, isActivationError, loadGatewayUrl } from "../lib/api/client";
 import ActivationNotice from "../components/ActivationNotice";
@@ -19,6 +27,11 @@ const LANG_OPTIONS = [
   { value: "zh", label: "中文" },
   { value: "en", label: "English" },
 ];
+
+const DISPLAY_MODES = [
+  { value: "sentence", label: "整句阅读（推荐，译文随句到达）" },
+  { value: "classic", label: "跟随语音（按停顿分段）" },
+] as const;
 
 interface DigestSection {
   title: string;
@@ -57,11 +70,9 @@ function clockOf(timestampMillis: number, baseMillis: number | null): string {
 
 export default function ClassroomPage() {
   const navigate = useNavigate();
-  const controller = useMemo(() => new ClassroomController(), []);
+  const snapshot = useClassroomSnapshot();
   // 补翻队列的目标语言跟着讲师语言走：英文课翻成中文，中文课翻成英文。
-  // 早先写死 "zh-CN"，中文课结束后会把整节中文行再翻成中文（失败行还会被这样重试）。
   const queueRef = useRef<TranslationQueue | null>(null);
-  const sessionSourceLangRef = useRef("en");
   const queueFor = (sourceLanguage: string): TranslationQueue => {
     const target: "zh-CN" | "en-US" = sourceLanguage === "en" ? "zh-CN" : "en-US";
     if (!queueRef.current || queueRef.current.targetLang !== target) {
@@ -69,16 +80,11 @@ export default function ClassroomPage() {
     }
     return queueRef.current;
   };
-  const [snapshot, setSnapshot] = useState<ClassroomSnapshot>({
-    phase: "idle",
-    sessionId: null,
-    partialText: "",
-    partialTranslation: "",
-    elapsedSeconds: 0,
-    usageSeconds: 0,
-    statusMessage: null,
-  });
-  const [sourceLang, setSourceLang] = useState("en");
+  // 切页回来时沿用本节已选的讲师语言；否则设置面板会显示成默认英文，和正在跑的课堂不一致。
+  const [sourceLang, setSourceLang] = useState(() => classroomSession.getSnapshot().sourceLanguage || "en");
+  const [displayMode, setDisplayMode] = useState<"sentence" | "classic">(
+    () => classroomSession.getSnapshot().displayMode,
+  );
   const [courseId, setCourseId] = useState<string>("");
   const [doubtNote, setDoubtNote] = useState("");
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
@@ -87,33 +93,20 @@ export default function ClassroomPage() {
   const [liveMinutes, setLiveMinutes] = useState(false);
   const [mode, setMode] = useState<"cloud" | "offline">("cloud");
   const [saveAudio, setSaveAudio] = useState(() => loadSaveAudio());
-  const [digestJson, setDigestJson] = useState("");
   const [retranscribing, setRetranscribing] = useState(false);
   const [sessionBase, setSessionBase] = useState<number | null>(null);
   // 长课时只渲染最近一段，避免几百行 DOM 拖慢输入；上翻后暂停自动吸底。
   const [followLive, setFollowLive] = useState(true);
   const [showAllLines, setShowAllLines] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const subscribedRef = useRef(false);
-
-  useEffect(() => {
-    if (subscribedRef.current) return;
-    subscribedRef.current = true;
-    controller.subscribe({
-      onSnapshot: setSnapshot,
-      onLineSaved: () => undefined,
-      onDigest: setDigestJson,
-    });
-  }, [controller]);
 
   const courses = useLiveQuery(() => db.courses.toArray());
-  const session = snapshot.sessionId != null ? snapshot.sessionId : null;
+  const session = snapshot.sessionId;
   const lines = useLiveQuery(
     () => (session == null ? Promise.resolve([] as TranscriptLineRecord[]) : db.transcriptLines.where("sessionId").equals(session).sortBy("timestampMillis")),
     [session],
   );
   // 只取本节这些行的译文，不要整表全量拉取：跨课堂累积后这块会随课时线性变大。
-  // 按 transcriptLineId 取（该字段有索引），语种代号在两条通道里不一致的问题留给展示层处理。
   const translations = useLiveQuery(
     async () => {
       if (session == null) return [] as TranslationRecord[];
@@ -150,9 +143,9 @@ export default function ClassroomPage() {
 
   useEffect(() => {
     const el = listRef.current;
-    if (!el || !followLive || !lines || lines.length === 0) return;
+    if (!el || !followLive) return;
     el.scrollTop = el.scrollHeight;
-  }, [lines?.length, followLive]);
+  }, [lines?.length, snapshot.partialText, snapshot.partialTranslation, followLive]);
 
   // 用户往上翻就停跟随，回到底部附近再恢复，避免新句子把阅读位置顶走。
   const onTranscriptScroll = () => {
@@ -164,7 +157,6 @@ export default function ClassroomPage() {
 
   const start = async () => {
     setGenerateStatus(null);
-    setDigestJson("");
     // 会话级状态复位：上一节上翻过的转写或展开过的全量列表不应带到新课堂。
     setFollowLive(true);
     setShowAllLines(false);
@@ -173,8 +165,7 @@ export default function ClassroomPage() {
       return;
     }
     try {
-      sessionSourceLangRef.current = sourceLang;
-      await controller.start({
+      await classroomSession.start({
         courseId: courseId ? Number(courseId) : null,
         courseName: courses?.find((course) => String(course.id) === courseId)?.name ?? "",
         sourceLanguages: [sourceLang, sourceLang === "en" ? "zh" : "en"],
@@ -183,6 +174,7 @@ export default function ClassroomPage() {
         glossaryTerms: [],
         liveMinutes,
         mode,
+        displayMode,
         saveAudio,
       });
     } catch {
@@ -191,9 +183,10 @@ export default function ClassroomPage() {
   };
 
   const stop = async () => {
-    await controller.stop();
-    if (snapshot.sessionId != null) {
-      void queueFor(sessionSourceLangRef.current).enqueueSession(snapshot.sessionId);
+    await classroomSession.stop();
+    const finished = classroomSession.getSnapshot();
+    if (finished.sessionId != null) {
+      void queueFor(finished.sourceLanguage).enqueueSession(finished.sessionId);
     }
   };
 
@@ -205,7 +198,7 @@ export default function ClassroomPage() {
 
   const markDoubt = async () => {
     try {
-      await controller.markDoubt(doubtNote.trim());
+      await classroomSession.markDoubt(doubtNote.trim());
       setDoubtNote("");
     } catch (error) {
       reportError(error);
@@ -227,10 +220,9 @@ export default function ClassroomPage() {
     }
   };
 
-  const lastSessionId = session;
   const openCourse = () => {
-    if (lastSessionId == null) return;
-    void db.sessions.get(lastSessionId).then((record) => {
+    if (session == null) return;
+    void db.sessions.get(session).then((record) => {
       if (record?.courseId) navigate(`/learning/course/${record.courseId}`);
     });
   };
@@ -282,7 +274,7 @@ export default function ClassroomPage() {
         );
       });
       setGenerateStatus(`补转写完成：${outcome.segments.length} 行，正在重新翻译…`);
-      void queueFor(sessionSourceLangRef.current).enqueueSession(sessionId);
+      void queueFor(snapshot.sourceLanguage).enqueueSession(sessionId);
     } catch (error) {
       reportError(error);
     } finally {
@@ -290,10 +282,10 @@ export default function ClassroomPage() {
     }
   };
 
-  const digest = parseDigestSections(digestJson);
-  // 译文目标语言：与 translateDirection 保持一致（英文课→中文，中文课→英文）。
-  const sessionTargetLang = sessionSourceLangRef.current === "en" ? "zh" : "en";
-  const hasTranscript = session != null && lines != null && lines.length > 0;
+  const digest = parseDigestSections(snapshot.digestJson);
+  // 译文目标语言由控制器记录（切页回来也不会丢），与 translateDirection 一致。
+  const sessionTargetLang = snapshot.targetLanguage;
+  const hasLines = (lines?.length ?? 0) > 0;
   // 默认只渲染最近 60 行（Android 端窗口是 30 行），需要时展开全部。
   const WINDOW = 60;
   const truncated = !showAllLines && (lines?.length ?? 0) > WINDOW;
@@ -309,11 +301,11 @@ export default function ClassroomPage() {
       )}
 
       <div className="cols cols--workbench">
-        {/* ── 主区：计时台 + 转写流 ── */}
+        {/* ── 主区：计时 + 转写（历史与实时在同一张卡片里） ── */}
         <div className="cols__main">
-          <section className="glass-card glass-card--hero">
-            <div className="session">
-              <div className="session__meta">
+          <section className="glass-card classroom-stage">
+            <div className="stage__top">
+              <div className="stage__meta">
                 <span
                   className={`pill ${snapshot.phase === "paused" ? "pill-warn" : ""} ${listening ? "pill-ok pill-dot" : ""} ${
                     snapshot.phase === "idle" || snapshot.phase === "ended" ? "pill-brand" : ""
@@ -328,12 +320,12 @@ export default function ClassroomPage() {
                 {liveMinutes && <span className="pill pill-brand">实时纪要</span>}
               </div>
 
-              <div className="session__timer">
+              <div className="stage__timer">
                 {formatSeconds(snapshot.elapsedSeconds)}
                 <small>{active ? (listening ? "Recording" : "Paused") : "Ready"}</small>
               </div>
 
-              <div className="session__dock">
+              <div className="stage__actions">
                 {!active ? (
                   <>
                     <button className="btn btn-primary btn-lg" onClick={() => void start()}>
@@ -346,11 +338,11 @@ export default function ClassroomPage() {
                 ) : (
                   <>
                     {snapshot.phase === "paused" ? (
-                      <button className="btn btn-primary btn-lg" onClick={() => void controller.resume()}>
+                      <button className="btn btn-primary btn-lg" onClick={() => void classroomSession.resume()}>
                         继续
                       </button>
                     ) : (
-                      <button className="btn btn-lg" onClick={() => void controller.pause()} disabled={snapshot.phase !== "listening"}>
+                      <button className="btn btn-lg" onClick={() => void classroomSession.pause()} disabled={snapshot.phase !== "listening"}>
                         暂停
                       </button>
                     )}
@@ -360,113 +352,110 @@ export default function ClassroomPage() {
                   </>
                 )}
               </div>
-
-              {active && (
-                <>
-                  <div className="live-line">
-                    {listening && (
-                      <span className="live-line__wave" aria-hidden>
-                        <i />
-                        <i />
-                        <i />
-                        <i />
-                        <i />
-                      </span>
-                    )}
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      {snapshot.partialText || (listening ? "正在聆听…" : "已暂停，点「继续」恢复")}
-                      {/* 未定稿片段的译文预览：先把已确认的译文显示出来，不必等整句定稿 */}
-                      {snapshot.partialTranslation && (
-                        <span className="live-line__translation">{snapshot.partialTranslation}</span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="btn-row" style={{ alignItems: "center" }}>
-                    <input
-                      className="text-input"
-                      style={{ flex: "1 1 240px", width: "auto" }}
-                      placeholder="疑问备注（可留空，直接保存当前原话）"
-                      value={doubtNote}
-                      onChange={(event) => setDoubtNote(event.target.value)}
-                      maxLength={3000}
-                    />
-                    <button className="btn" onClick={() => void markDoubt()}>
-                      标记疑问
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {snapshot.statusMessage && <p className="card-desc" style={{ marginTop: 12 }}>{snapshot.statusMessage}</p>}
             </div>
-          </section>
 
-          {hasTranscript ? (
-            <section className="glass-card transcript">
-              <div className="transcript__head">
-                <div className="card-title" style={{ margin: 0 }}>
-                  实时转写
-                  <span className="pill">{lines.length} 行</span>
-                </div>
-                <div className="card-title__actions">
-                  {!followLive && (
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => {
-                        setFollowLive(true);
-                        const el = listRef.current;
-                        if (el) el.scrollTop = el.scrollHeight;
-                      }}
-                    >
-                      回到最新
-                    </button>
-                  )}
-                  {doubts && doubts.length > 0 && <span className="pill pill-brand">疑问 {doubts.length}</span>}
-                </div>
+            <div className="stage__head">
+              <div className="card-title" style={{ margin: 0 }}>
+                实时课堂记录
+                <span className="pill">{lines?.length ?? 0} 行</span>
               </div>
-              {truncated && (
-                <p className="muted" style={{ margin: "0 0 6px" }}>
-                  只显示最近 {WINDOW} 行 ·{" "}
+              <div className="card-title__actions">
+                {truncated && (
                   <button
                     className="btn btn-sm"
                     style={{ height: 22, padding: "0 8px", fontSize: 11 }}
                     onClick={() => setShowAllLines(true)}
                   >
-                    显示全部 {lines.length} 行
+                    显示全部 {lines?.length ?? 0} 行
                   </button>
-                </p>
-              )}
-              <div className="transcript__body" ref={listRef} onScroll={onTranscriptScroll} style={{ maxHeight: "min(58vh, 620px)" }}>
-                {visibleLines.map((line) => {
-                  // 目标语言随讲师语言变化（英文课→中文、中文课→英文），且两条通道的
-                  // 语种代号不一致（"zh"/"zh-CN"），交给 pickLineTranslation 统一处理。
-                  const translation = pickLineTranslation(translations ?? [], line, sessionTargetLang);
-                  return (
-                    <div className="transcript-line" key={line.id}>
-                      <span className="ts">{clockOf(line.timestampMillis, sessionBase)}</span>
-                      <div>
-                        <div className="zh">{line.text}</div>
-                        {translation?.translatedText && <div className="en">{translation.translatedText}</div>}
-                      </div>
-                    </div>
-                  );
-                })}
+                )}
+                {!followLive && (
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setFollowLive(true);
+                      const el = listRef.current;
+                      if (el) el.scrollTop = el.scrollHeight;
+                    }}
+                  >
+                    回到最新
+                  </button>
+                )}
+                {doubts && doubts.length > 0 && <span className="pill pill-brand">疑问 {doubts.length}</span>}
               </div>
-            </section>
-          ) : (
-            <section className="glass-card">
-              <p className="eyebrow">Live transcript</p>
-              <h2 style={{ margin: "0 0 8px", fontSize: 17, fontWeight: 700 }}>转写会出现在这里</h2>
-              <p className="card-desc" style={{ maxWidth: "56ch" }}>
-                点「开始听课」并允许麦克风权限后，{sourceLang === "en" ? "英文" : "中文"}原声会被实时转写，
-                逐句附上译文。音频只在页面停留前台时采集，切换标签页或锁屏会暂停。
-              </p>
-              <div className="empty-hint">等待第一句话</div>
-            </section>
-          )}
+            </div>
+
+            <div className="transcript__body stage__body" ref={listRef} onScroll={onTranscriptScroll}>
+              {!hasLines && !active && (
+                <div className="stage__empty">
+                  <p className="eyebrow">Live transcript</p>
+                  <p className="empty-hint">
+                    点「开始听课」并允许麦克风权限后，{sourceLang === "en" ? "英文" : "中文"}原声会被实时转写，逐句附上译文。
+                    历史句子会一直留在上面，切到其他页面再回来也会继续记录。
+                  </p>
+                </div>
+              )}
+
+              {visibleLines.map((line) => {
+                // 目标语言随讲师语言变化（英文课→中文、中文课→英文），且两条通道的
+                // 语种代号不一致（"zh"/"zh-CN"），交给 pickLineTranslation 统一处理。
+                const translation = pickLineTranslation(translations ?? [], line, sessionTargetLang);
+                return (
+                  <div className="transcript-line" key={line.id}>
+                    <span className="ts">{clockOf(line.timestampMillis, sessionBase)}</span>
+                    <div>
+                      <div className="zh">{line.text}</div>
+                      {translation?.translatedText && <div className="en">{translation.translatedText}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {active && (
+                <div className="transcript-line transcript-line--live" aria-live="polite">
+                  <span className="ts">{formatSeconds(snapshot.elapsedSeconds)}</span>
+                  <div>
+                    <div className="zh">
+                      {listening && (
+                        <span className="live-line__wave" aria-hidden>
+                          <i />
+                          <i />
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      )}
+                      <span>{snapshot.partialText || (listening ? "正在聆听…" : "已暂停，点「继续」恢复")}</span>
+                    </div>
+                    {snapshot.partialTranslation && (
+                      <div className="en transcript-line__preview">{snapshot.partialTranslation}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {active && (
+              <div className="btn-row stage__doubt">
+                <input
+                  className="text-input"
+                  style={{ flex: "1 1 240px", width: "auto" }}
+                  placeholder="疑问备注（可留空，直接保存当前原话）"
+                  value={doubtNote}
+                  onChange={(event) => setDoubtNote(event.target.value)}
+                  maxLength={3000}
+                />
+                <button className="btn" onClick={() => void markDoubt()}>
+                  标记疑问
+                </button>
+              </div>
+            )}
+
+            {snapshot.statusMessage && <p className="card-desc" style={{ marginTop: 10 }}>{snapshot.statusMessage}</p>}
+          </section>
         </div>
 
-        {/* ── 侧栏：设置 / 纪要 / 回看 / 额度 ── */}
+        {/* ── 侧栏：回看 / 纪要 / 设置 / 额度 ── */}
         <div className="cols__side cols__side--sticky">
           {snapshot.phase === "ended" && snapshot.sessionId != null && (
             <div className="glass-card">
@@ -537,6 +526,21 @@ export default function ClassroomPage() {
               <option value="cloud">云端实时（转写 + 翻译 + 纪要，需额度）</option>
               <option value="offline">浏览器离线（无需额度，首次下载约 200MB）</option>
             </select>
+            <label className="field-label">
+              字幕模式{active ? " · 本次课堂按开始时的设置执行" : ""}
+            </label>
+            <select
+              className="text-input"
+              value={displayMode}
+              disabled={active || mode === "offline"}
+              onChange={(event) => setDisplayMode(event.target.value as "sentence" | "classic")}
+            >
+              {DISPLAY_MODES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <label className="field-label">实时纪要（AI 课堂小结，额外消耗云端音频时长）</label>
             <select
               className="text-input"
@@ -577,7 +581,7 @@ export default function ClassroomPage() {
   );
 }
 
-function phaseLabel(phase: ClassroomSnapshot["phase"]): string {
+function phaseLabel(phase: "idle" | "connecting" | "listening" | "paused" | "stopping" | "ended"): string {
   switch (phase) {
     case "idle":
       return "待开始";

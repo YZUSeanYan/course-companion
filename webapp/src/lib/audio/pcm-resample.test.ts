@@ -8,7 +8,7 @@
 // 16kHz 打标。网关按 len(audio)/32000 计费并转给上游 ASR，结果是 3 倍慢放 + 3 倍
 // 额度，识别为空。
 //
-// 注意：帧攒满 3200 个样本才发出，所以任意时刻最多有不足一帧（0.2s）留在缓冲里，
+// 注意：帧攒满 FRAME_SAMPLES（0.1s）才发出，所以任意时刻最多有不足一帧留在缓冲里，
 // 断言不能用「1 秒恰好 16000 个」，要按「每秒样本数」算并留一帧容差。
 
 import { describe, expect, it } from "vitest";
@@ -101,7 +101,7 @@ describe("worklet 降采样", () => {
     expect(Math.abs(b - c)).toBeLessThanOrEqual(FRAME_SAMPLES);
   });
 
-  it("每个输出帧长度固定为 3200（= 0.2s）", () => {
+  it("每个输出帧长度固定为 FRAME_SAMPLES（= 0.1s）", () => {
     const { frames } = collect(48000, 2);
     expect(frames.length).toBeGreaterThan(0);
     for (const frame of frames) {
