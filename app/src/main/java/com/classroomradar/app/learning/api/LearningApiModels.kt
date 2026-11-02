@@ -256,6 +256,7 @@ data class LearningPackRequestV2(
     val courseName: String,
     val courseNature: String = "",
     val language: String,
+    val outputLanguage: String = "zh",
     val analysisMode: String,
     val chunks: List<AnalysisChunkInput>,
     val glossary: List<GlossaryInput> = emptyList(),
@@ -322,7 +323,7 @@ fun AnalysisResultDto.validateV2Against(request: LearningPackRequestV2) {
     require(analysisId.isNotBlank() && Regex("[0-9a-f]{64}").matches(inputSha256)) { "AI 返回的元数据无效" }
     val validSources = request.chunks.mapTo(mutableSetOf()) { it.sourceId } + request.visualBlocks.map { it.sourceId }
     val minutes = learningPackage.minutes
-    require(minutes != null && minutes.overview.isNotBlank() && minutes.sections.isNotEmpty()) { "AI 未返回学习纪要" }
+    require(minutes != null && minutes.overview.isNotBlank()) { "AI 未返回学习纪要" }
     minutes.sections.forEach { section ->
         require(section.sourceIds.isNotEmpty() && section.sourceIds.all(validSources::contains)) { "纪要包含无效来源" }
     }

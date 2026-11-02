@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from .accounts import resolve_quota_subject
@@ -23,7 +24,9 @@ from .v2_provider import PROMPT_VERSION_V2, SCHEMA_VERSION_V2, V2Provider
 from .v2_schemas import LearningPackRequest, LearningPackResponse
 
 SUCCEEDED_DEDUPE_WINDOW = timedelta(minutes=15)
-LEARNING_PACK_JOB_TIMEOUT_SECONDS = 360.0
+LEARNING_PACK_JOB_TIMEOUT_SECONDS = 300.0
+
+logger = logging.getLogger(__name__)
 
 QUOTA_EXCEEDED_MESSAGE = "今日学习包额度已用完，请明天再试。"
 PROVIDER_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
@@ -165,6 +168,7 @@ class LearningPackJobManager:
         except TimeoutError:
             if quota_reserved:
                 self._release_quota(device_id, account_id)
+            logger.warning("learning pack job %s timed out after %.0fs", job_id, LEARNING_PACK_JOB_TIMEOUT_SECONDS)
             self._fail_job(
                 device_id, job_id, "provider_unavailable", PROVIDER_TIMEOUT_MESSAGE, provider
             )
@@ -172,6 +176,13 @@ class LearningPackJobManager:
             if quota_reserved:
                 self._release_quota(device_id, account_id)
             code, message = error_for_exception(exc)
+            logger.warning(
+                "learning pack job %s failed code=%s error=%s: %s",
+                job_id,
+                code,
+                type(exc).__name__,
+                exc,
+            )
             self._fail_job(device_id, job_id, code, message, provider)
 
     def _release_quota(self, device_id: str, account_id: str | None) -> None:

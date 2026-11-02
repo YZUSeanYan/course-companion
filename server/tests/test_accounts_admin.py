@@ -14,6 +14,7 @@ from conftest import (
     chat_response,
     create_test_account,
     make_client,
+    register,
     register_unactivated,
     valid_package,
 )
@@ -286,7 +287,7 @@ def test_admin_batch_create_skips_duplicates_and_invalid(settings):
 
 def test_admin_overview_and_request_log(settings):
     client = make_client(settings, lambda request: chat_response(valid_package()))
-    registered = register_unactivated(client)
+    registered = register(client)
     headers = _bearer(registered["token"])
     assert client.get("/v1/accounts/me", headers=headers).status_code == 200
     assert client.get("/health").status_code == 200
@@ -299,14 +300,100 @@ def test_admin_overview_and_request_log(settings):
     assert body["service"]["status"] == "ok"
     assert any(item["route"] == "/v1/accounts/me" for item in body["endpoints"])
 
-    requests = client.get("/admin/api/requests").json()
+    requests = client.get(
+        "/admin/api/requests", params={"includePolling": True}
+    ).json()
     routes = [item["route"] for item in requests["items"]]
     assert "/v1/accounts/me" in routes
     assert "/health" not in routes
     assert not any(route.startswith("/admin") for route in routes)
+    assert all(item["accountId"] == registered["accountId"] for item in requests["items"])
+    assert requests["items"][0]["accountName"] == "Test User"
 
-    devices = client.get("/admin/api/devices").json()
+    devices = client.get("/admin/api/devices", params={"scope": "all"}).json()
     assert devices["total"] >= 1
+    assert devices["boundTotal"] >= 1
+
+
+def test_admin_requests_hide_anonymous_and_polling_by_default(settings):
+    client = make_client(settings, lambda request: chat_response(valid_package()))
+    anonymous = register_unactivated(client)
+    anonymous_headers = _bearer(anonymous["token"])
+    assert client.get("/v1/accounts/me", headers=anonymous_headers).status_code == 200
+
+    account, _ = create_test_account(client, phone="13900000021")
+    bound = register_unactivated(client)
+    bind_test_device(client, bound["deviceId"], account)
+    bound_headers = _bearer(bound["token"])
+    assert client.get("/v1/accounts/me", headers=bound_headers).status_code == 200
+
+    _login(client, settings)
+    default_rows = client.get("/admin/api/requests").json()["items"]
+    assert default_rows == []
+
+    unbound_rows = client.get(
+        "/admin/api/requests",
+        params={"includeUnbound": True, "includePolling": True},
+    ).json()["items"]
+    assert any(item["deviceId"] == anonymous["deviceId"] for item in unbound_rows)
+
+    polling_rows = client.get(
+        "/admin/api/requests",
+        params={"accountId": account["id"], "includePolling": True},
+    ).json()["items"]
+    assert [item["route"] for item in polling_rows] == ["/v1/accounts/me"]
+    assert polling_rows[0]["accountName"] == "Test User"
+
+    assert client.get(
+        "/admin/api/devices", params={"scope": "unbound"}
+    ).json()["unboundTotal"] == 1
+    assert client.get(
+        "/admin/api/devices", params={"scope": "bound"}
+    ).json()["boundTotal"] == 1
+
+
+def test_admin_can_unbind_one_device_and_clean_anonymous_data(settings):
+    client = TestClient(create_app(settings))
+    _login(client, settings)
+    csrf = {"X-Requested-With": "zhixi-admin"}
+    account, phone = create_test_account(client, phone="13900000022")
+
+    anonymous = register_unactivated(client)
+    bound = register_unactivated(client)
+    bind_test_device(client, bound["deviceId"], account)
+    assert client.post(
+        "/v1/accounts/activate", json={"phone": phone}, headers=_bearer(bound["token"])
+    ).status_code == 200
+
+    accounts = client.get("/admin/api/accounts").json()["items"]
+    payload = next(item for item in accounts if item["id"] == account["id"])
+    assert payload["deviceCount"] == 1
+    assert payload["devices"][0]["deviceId"] == bound["deviceId"]
+
+    unbound_delete = client.delete(
+        f"/admin/api/devices/{anonymous['deviceId']}", headers=csrf
+    )
+    assert unbound_delete.status_code == 200
+    bound_delete = client.delete(
+        f"/admin/api/devices/{bound['deviceId']}", headers=csrf
+    )
+    assert bound_delete.status_code == 409
+
+    unbound = client.post(
+        f"/admin/api/accounts/{account['id']}/unbind", headers=csrf
+    )
+    assert unbound.json()["unbound"] == 1
+    assert client.delete(
+        f"/admin/api/devices/{bound['deviceId']}", headers=csrf
+    ).status_code == 200
+    assert client.get("/admin/api/devices", params={"scope": "all"}).json()["total"] == 0
+
+    # 清理接口：匿名设备、调用记录、验证码全部清空，账号本身保留。
+    cleanup = client.post("/admin/api/maintenance/cleanup", headers=csrf)
+    assert cleanup.status_code == 200, cleanup.text
+    assert cleanup.json()["orphanSyncRecords"] >= 0
+    assert client.get("/admin/api/accounts").json()["total"] == 1
+    assert client.get("/admin/api/requests", params={"includeUnbound": True}).json()["total"] == 0
 
 
 def test_admin_static_mount_serves_index_and_keeps_api(settings, tmp_path):

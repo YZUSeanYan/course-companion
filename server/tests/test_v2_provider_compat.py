@@ -76,9 +76,12 @@ def test_provider_aliases_are_normalized_without_relaxing_sources(settings):
 
 def test_invalid_provider_output_gets_one_schema_repair(settings):
     calls = []
-    invalid = valid_package() | {
-        "vocabulary": [{"term": "lathe", "translation": "车床", "definition": "机床", "example": "A lathe removes material.", "sourceIds": ["page-1"]}],
-    }
+    invalid = valid_package()
+    invalid["visualNotes"] = [{
+        "sourceId": "figure-x",
+        "description": "A lathe removes material.",
+        "sourceIds": ["unknown-page"],
+    }]
 
     def handler(request):
         calls.append(request)

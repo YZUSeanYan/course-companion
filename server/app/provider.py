@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import logging
 import socket
+import time
 from urllib.parse import urlsplit
 
 import httpx
@@ -15,6 +17,8 @@ from .schemas import AnalyzeRequest, LearningPackage
 
 PROMPT_VERSION = "learning-pack-v1"
 SCHEMA_VERSION = "1.0"
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -31,6 +35,15 @@ class ProviderUnavailable(ProviderError):
 
 class ProviderInvalidResponse(ProviderError):
     pass
+
+
+class ProviderAttemptError(ProviderUnavailable):
+    """A single failed HTTP attempt, with enough detail to decide failover."""
+
+    def __init__(self, message: str, *, retryable: bool, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
 
 
 def validate_provider_url(base_url: str) -> str:
@@ -122,10 +135,14 @@ class AIProvider:
         self.model = settings.provider_model or ""
         self.api_key = settings.provider_api_key or ""
         self.timeout = settings.provider_timeout_seconds
+        self.pack_timeout = settings.provider_pack_timeout_seconds
         self.max_retries = settings.provider_max_retries
         self.retry_backoff = settings.provider_retry_backoff_seconds
+        self.cooldown_seconds = settings.provider_cooldown_seconds
+        self.parallel = settings.provider_parallel
         self.transport = transport
         self.model_used = self.model
+        self._cooldowns: dict[str, float] = {}
         configured = provider_endpoints_from_env()
         self.endpoints = configured or [
             ProviderEndpoint("default", self.base_url, self.model, self.api_key)
@@ -198,74 +215,160 @@ class AIProvider:
             },
         )
 
-    async def _request_provider(
-        self, provider: ProviderEndpoint, messages: list[dict[str, str]]
+    def _ordered_endpoints(self, providers: list[ProviderEndpoint]) -> list[ProviderEndpoint]:
+        now = time.monotonic()
+        available = [
+            provider
+            for provider in providers
+            if self._cooldowns.get(provider.name, 0.0) <= now
+        ]
+        # If every provider is cooling down, try them anyway: a short outage is
+        # still better served by one attempt than by failing immediately.
+        return available or list(providers)
+
+    def _cool_down(self, provider: ProviderEndpoint, seconds: float | None = None) -> None:
+        self._cooldowns[provider.name] = time.monotonic() + (
+            self.cooldown_seconds if seconds is None else seconds
+        )
+
+    async def _send_chat_request(
+        self,
+        provider: ProviderEndpoint,
+        messages: list[dict[str, str]],
+        *,
+        timeout_seconds: float | None = None,
     ) -> str:
+        """One HTTP attempt. Retry/failover decisions belong to the caller."""
         payload = {
             "model": provider.model,
             "messages": messages,
             "response_format": {"type": "json_object"},
             "temperature": 1 if provider.name == "kimi" else 0.2,
         }
-        last_error: ProviderError | None = None
+        request_timeout = self.timeout if timeout_seconds is None else timeout_seconds
+        started = time.monotonic()
+        try:
+            endpoint = await asyncio.to_thread(validate_provider_url, provider.base_url)
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(request_timeout, connect=10.0),
+                follow_redirects=False,
+                transport=self.transport,
+            ) as client:
+                response = await client.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {provider.api_key}"},
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            self._cool_down(provider)
+            logger.warning(
+                "provider=%s model=%s outcome=network_error elapsed=%.2fs",
+                provider.name,
+                provider.model,
+                time.monotonic() - started,
+            )
+            raise ProviderAttemptError(
+                f"{provider.name} connection failed", retryable=True
+            ) from exc
+        except ProviderConfigurationError:
+            self._cool_down(provider, seconds=300)
+            raise
+
+        elapsed = time.monotonic() - started
+        if response.status_code == 200:
+            try:
+                body = response.json()
+                content = body["choices"][0]["message"]["content"]
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                logger.warning(
+                    "provider=%s model=%s outcome=invalid_envelope status=200 elapsed=%.2fs",
+                    provider.name,
+                    provider.model,
+                    elapsed,
+                )
+                raise ProviderInvalidResponse(
+                    f"{provider.name} returned an invalid chat completions envelope"
+                ) from exc
+            if not isinstance(content, str):
+                raise ProviderInvalidResponse(
+                    f"{provider.name} message content must be a string"
+                )
+            self._cooldowns.pop(provider.name, None)
+            self.model_used = provider.model
+            logger.info(
+                "provider=%s model=%s outcome=ok status=200 elapsed=%.2fs",
+                provider.name,
+                provider.model,
+                elapsed,
+            )
+            return content
+
+        retryable = response.status_code == 429 or 500 <= response.status_code <= 599
+        if retryable:
+            self._cool_down(provider)
+        elif response.status_code in (400, 401, 403, 404):
+            # A bad model/key configuration will not heal in seconds; skip this
+            # provider for longer so other brands can serve the request.
+            self._cool_down(provider, seconds=300)
+        logger.warning(
+            "provider=%s model=%s outcome=http_%s retryable=%s elapsed=%.2fs",
+            provider.name,
+            provider.model,
+            response.status_code,
+            retryable,
+            elapsed,
+        )
+        raise ProviderAttemptError(
+            f"{provider.name} returned HTTP {response.status_code}",
+            retryable=retryable,
+            status_code=response.status_code,
+        )
+
+    async def _request_provider_once(
+        self,
+        provider: ProviderEndpoint,
+        messages: list[dict[str, str]],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """One attempt, used by the fast failover chain."""
+        return await self._send_chat_request(
+            provider, messages, timeout_seconds=timeout_seconds
+        )
+
+    async def _request_provider(
+        self, provider: ProviderEndpoint, messages: list[dict[str, str]]
+    ) -> str:
+        """Single-provider call with bounded retries (legacy direct callers)."""
+        last_error: ProviderAttemptError | None = None
         for retry in range(self.max_retries + 1):
             try:
-                endpoint = await asyncio.to_thread(validate_provider_url, provider.base_url)
-                async with httpx.AsyncClient(
-                    timeout=self.timeout,
-                    follow_redirects=False,
-                    transport=self.transport,
-                ) as client:
-                    response = await client.post(
-                        endpoint,
-                        json=payload,
-                        headers={"Authorization": f"Bearer {provider.api_key}"},
-                    )
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                last_error = ProviderUnavailable(
-                    f"{provider.name} connection failed after bounded retries"
-                )
-                last_error.__cause__ = exc
-                if retry < self.max_retries:
-                    await asyncio.sleep(self.retry_backoff * (2**retry))
-                    continue
-                break
-            except ProviderConfigurationError as exc:
+                return await self._send_chat_request(provider, messages)
+            except ProviderAttemptError as exc:
                 last_error = exc
-                break
-            if response.status_code == 200:
-                try:
-                    body = response.json()
-                    content = body["choices"][0]["message"]["content"]
-                except (ValueError, KeyError, IndexError, TypeError) as exc:
-                    raise ProviderInvalidResponse(
-                        f"{provider.name} returned an invalid chat completions envelope"
-                    ) from exc
-                if not isinstance(content, str):
-                    raise ProviderInvalidResponse(
-                        f"{provider.name} message content must be a string"
-                    )
-                self.model_used = provider.model
-                return content
-            last_error = ProviderUnavailable(
-                f"{provider.name} returned HTTP {response.status_code} after bounded retries"
-            )
-            if response.status_code == 429 or 500 <= response.status_code <= 599:
-                if retry < self.max_retries:
+                if exc.retryable and retry < self.max_retries:
                     await asyncio.sleep(self.retry_backoff * (2**retry))
                     continue
-            break
-        if last_error is not None:
-            raise last_error
-        raise ProviderUnavailable("AI provider request failed")
+                break
+        raise ProviderUnavailable(
+            f"{provider.name} request failed after bounded retries"
+        ) from last_error
 
     async def _request_chat(self, messages: list[dict[str, str]]) -> str:
+        """Round-robin failover: one attempt per healthy provider before retrying."""
         last_error: ProviderError | None = None
-        for provider in self.endpoints:
-            try:
-                return await self._request_provider(provider, messages)
-            except ProviderError as exc:
-                last_error = exc
+        for attempt in range(self.max_retries + 1):
+            for provider in self._ordered_endpoints(self.endpoints):
+                try:
+                    return await self._send_chat_request(provider, messages)
+                except ProviderError as exc:
+                    last_error = exc
+            if attempt < self.max_retries:
+                await asyncio.sleep(self.retry_backoff * (2**attempt))
+        if isinstance(last_error, ProviderAttemptError):
+            raise ProviderUnavailable(
+                "AI provider request failed after bounded retries"
+            ) from last_error
         if last_error is not None:
             raise last_error
         raise ProviderUnavailable("AI provider request failed")

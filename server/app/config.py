@@ -49,8 +49,11 @@ class Settings:
     provider_model: str | None
     provider_api_key: str | None
     provider_timeout_seconds: float = 30.0
-    provider_max_retries: int = 2
+    provider_pack_timeout_seconds: float = 75.0
+    provider_max_retries: int = 1
     provider_retry_backoff_seconds: float = 0.25
+    provider_cooldown_seconds: float = 45.0
+    provider_parallel: bool = True
     device_daily_quota: int = 20
     register_rate_limit: int = 5
     register_rate_window_seconds: int = 3600
@@ -117,10 +120,17 @@ class Settings:
             provider_timeout_seconds=_float_env(
                 "AI_PROVIDER_TIMEOUT_SECONDS", 30.0, 0.1, 120.0
             ),
-            provider_max_retries=_int_env("AI_PROVIDER_MAX_RETRIES", 2, 0, 3),
+            provider_pack_timeout_seconds=_float_env(
+                "AI_PROVIDER_PACK_TIMEOUT_SECONDS", 75.0, 10.0, 180.0
+            ),
+            provider_max_retries=_int_env("AI_PROVIDER_MAX_RETRIES", 1, 0, 3),
             provider_retry_backoff_seconds=_float_env(
                 "AI_PROVIDER_RETRY_BACKOFF_SECONDS", 0.25, 0.0, 5.0
             ),
+            provider_cooldown_seconds=_float_env(
+                "AI_PROVIDER_COOLDOWN_SECONDS", 45.0, 0.0, 3600.0
+            ),
+            provider_parallel=_bool_env("AI_PROVIDER_PARALLEL", True),
             device_daily_quota=_int_env("DEVICE_DAILY_QUOTA", 20, 1, 10000),
             register_rate_limit=_int_env("REGISTER_RATE_LIMIT", 5, 1, 10000),
             register_rate_window_seconds=_int_env(

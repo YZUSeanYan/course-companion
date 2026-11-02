@@ -41,6 +41,7 @@ class LearningPackRequest(StrictV2Model):
     course_name: str = Field(alias="courseName", min_length=1, max_length=200)
     course_nature: str = Field(alias="courseNature", default="", max_length=200)
     language: str = Field(min_length=1, max_length=50)
+    output_language: Literal["zh", "source"] = Field(alias="outputLanguage", default="zh")
     analysis_mode: Literal["SESSION", "MATERIAL", "EXAM"] = Field(alias="analysisMode")
     chunks: list[dict] = Field(min_length=1, max_length=100)
     glossary: list[dict] = Field(default_factory=list, max_length=100)
@@ -78,7 +79,7 @@ class MinuteSection(StrictV2Model):
 class Minutes(StrictV2Model):
     title: str = Field(min_length=1, max_length=300)
     overview: str = Field(min_length=1, max_length=6000)
-    sections: list[MinuteSection] = Field(min_length=1, max_length=20)
+    sections: list[MinuteSection] = Field(default_factory=list, max_length=20)
 
 
 class DoubtAnswer(StrictV2Model):

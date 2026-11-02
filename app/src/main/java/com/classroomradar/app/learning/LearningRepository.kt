@@ -36,6 +36,21 @@ class LearningRepository private constructor(private val dao: LearningDao) {
     fun deleteMaterial(materialId: Long) = dao.deleteMaterial(materialId)
     fun updateMaterial(material: MaterialEntity) = dao.updateMaterial(material)
     fun insertLearningItems(items: List<LearningItemEntity>) = dao.insertLearningItems(items)
+    fun updateLearningItemContent(
+        itemId: Long,
+        title: String,
+        content: String,
+        translation: String?,
+        example: String?,
+    ) = dao.updateLearningItemAndCard(
+        itemId,
+        title.trim(),
+        content.trim(),
+        translation?.trim()?.ifBlank { null },
+        example?.trim()?.ifBlank { null },
+        System.currentTimeMillis(),
+    )
+    fun deleteLearningItem(itemId: Long) = dao.deleteLearningItem(itemId)
     fun insertReviewCards(cards: List<ReviewCardEntity>) = dao.insertReviewCards(cards)
     fun getReviewCard(cardId: Long) = dao.getReviewCard(cardId)
     fun updateReviewCard(card: ReviewCardEntity) = dao.updateReviewCard(card)

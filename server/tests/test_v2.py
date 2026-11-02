@@ -70,7 +70,8 @@ def test_learning_pack_contains_minutes_and_manual_doubt_answers(settings):
 
     assert response.status_code == 200, response.text
     result = response.json()["package"]
-    assert result["minutes"]["sections"][0]["sourceIds"] == ["page-1"]
+    assert result["minutes"]["overview"] == "The class explained lathes."
+    assert result["minutes"]["sections"] == []
     assert result["doubtAnswers"][0]["doubtId"] == "doubt-1"
     assert result["vocabulary"][0]["term"] == "lathe"
 

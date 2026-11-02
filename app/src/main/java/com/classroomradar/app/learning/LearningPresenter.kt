@@ -3,6 +3,7 @@ package com.classroomradar.app.learning
 import android.content.Context
 import android.net.Uri
 import com.classroomradar.app.BuildConfig
+import com.classroomradar.app.data.AppPreferences
 import com.classroomradar.app.data.ClassroomRepository
 import com.classroomradar.app.learning.api.AiServiceConfig
 import com.classroomradar.app.learning.api.AccountStatusDto
@@ -147,6 +148,50 @@ class LearningPresenter(private val appContext: Context) {
         }
     }
 
+    fun updateLearningItem(
+        itemId: Long,
+        title: String,
+        content: String,
+        translation: String?,
+        example: String?,
+    ) {
+        if (title.isBlank() || content.isBlank()) {
+            _message.value = "标题和正文不能为空"
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                repository.updateLearningItemContent(itemId, title, content, translation, example)
+            }.onSuccess {
+                SyncManager.get(appContext).syncInBackground(silent = true)
+                withContext(Dispatchers.Main.immediate) {
+                    _message.value = "学习内容已保存"
+                }
+            }.onFailure { error ->
+                withContext(Dispatchers.Main.immediate) {
+                    _message.value = error.message ?: "学习内容保存失败"
+                }
+            }
+        }
+    }
+
+    fun deleteLearningItem(itemId: Long) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { repository.deleteLearningItem(itemId) }
+                .onSuccess {
+                    SyncManager.get(appContext).syncInBackground(silent = true)
+                    withContext(Dispatchers.Main.immediate) {
+                        _message.value = "学习内容已删除"
+                    }
+                }
+                .onFailure { error ->
+                    withContext(Dispatchers.Main.immediate) {
+                        _message.value = error.message ?: "学习内容删除失败"
+                    }
+                }
+        }
+    }
+
     fun loadCourse(courseId: Long) {
         selectedCourseId = courseId
         detailJob?.cancel()
@@ -211,6 +256,7 @@ class LearningPresenter(private val appContext: Context) {
                         courseName = course.name,
                         language = course.language,
                         courseNature = course.courseNature,
+                        outputLanguage = if (AppPreferences.get(appContext).learningOutputChinese) "zh" else "source",
                         analysisMode = when {
                             targetType == "SESSION" -> "SESSION"
                             course.examProfile != CourseEntity.PROFILE_FOREIGN_CLASS -> "EXAM"
@@ -359,7 +405,9 @@ class LearningPresenter(private val appContext: Context) {
             "account_required" -> "AI 学习包需要先激活试用额度：设置 → 试用额度 → 输入手机号。"
             "account_expired", "account_disabled" -> error.userMessage
             "quota_exceeded" -> "今天的学习包生成次数已达上限，请明天再试。"
-            "provider_unavailable" -> "AI 模型暂时繁忙，任务未完成：${error.userMessage}"
+            "provider_unavailable" -> error.userMessage.ifBlank {
+                "AI 服务暂时不可用，请稍后重试。"
+            }
             "timeout" -> "讲义分析用时较长，暂时还没有结果。请稍后重试，已开始的同一任务会继续复用。"
             else -> "学习包生成未完成：${error.userMessage}"
         }
@@ -413,20 +461,18 @@ class LearningPresenter(private val appContext: Context) {
         val pack = response.learningPackage
         val items = buildList {
             pack.minutes?.let { minutes ->
+                val minuteSources = (
+                    minutes.sections.flatMap { it.sourceIds } +
+                        pack.keyPoints.flatMap { it.sourceIds } +
+                        pack.quizCards.flatMap { it.sourceIds }
+                    ).distinct()
                 add(
                     learningItem(
                         courseId,
                         LearningItemEntity.TYPE_MEETING_MINUTES,
                         minutes.title,
-                        buildString {
-                            appendLine(minutes.overview)
-                            minutes.sections.sortedBy { it.order }.forEach { section ->
-                                appendLine()
-                                appendLine("## ${section.title}")
-                                appendLine(section.body)
-                            }
-                        },
-                        minutes.sections.flatMap { it.sourceIds }.distinct(),
+                        minutes.overview,
+                        minuteSources,
                         now,
                     ),
                 )

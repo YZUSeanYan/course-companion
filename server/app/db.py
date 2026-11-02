@@ -872,9 +872,15 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT device_id, activated_at, last_seen_at
-                FROM account_devices WHERE account_id = ?
-                ORDER BY activated_at ASC
+                SELECT ad.device_id, ad.activated_at,
+                       COALESCE(
+                           (SELECT MAX(r.created_at) FROM api_requests r
+                            WHERE r.device_id = ad.device_id),
+                           ad.last_seen_at
+                       ) AS last_seen_at
+                FROM account_devices ad
+                WHERE ad.account_id = ?
+                ORDER BY ad.activated_at ASC
                 """,
                 (account_id,),
             ).fetchall()
@@ -1224,6 +1230,7 @@ class Database:
 
     def list_accounts(self) -> list[dict]:
         today = self.today()
+        week_ago = self._since_utc(7)
         with self.connect() as connection:
             rows = connection.execute(
                 """
@@ -1232,7 +1239,14 @@ class Database:
                        COALESCE(u.analysis_count, 0) AS today_ai_packs,
                        COALESCE(u.document_count, 0) AS today_documents,
                        COALESCE(l.text_characters, 0) AS today_text_characters,
-                       COALESCE(l.audio_seconds, 0) AS today_audio_seconds
+                       COALESCE(l.audio_seconds, 0) AS today_audio_seconds,
+                       (SELECT MAX(r.created_at) FROM api_requests r
+                        WHERE r.account_id = a.id) AS last_active_at,
+                       (SELECT COUNT(*) FROM api_requests r
+                        WHERE r.account_id = a.id AND r.created_at >= ?) AS requests_7d,
+                       (SELECT COUNT(*) FROM api_requests r
+                        WHERE r.account_id = a.id AND r.created_at >= ?
+                          AND r.status >= 400) AS errors_7d
                 FROM access_accounts a
                 LEFT JOIN account_daily_usage u
                     ON u.account_id = a.id AND u.usage_date = ?
@@ -1240,26 +1254,242 @@ class Database:
                     ON l.account_id = a.id AND l.usage_date = ?
                 ORDER BY a.created_at DESC
                 """,
-                (today, today),
+                (week_ago, week_ago, today, today),
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_devices(self, limit: int = 200) -> list[dict]:
+    def list_devices(
+        self,
+        limit: int = 200,
+        *,
+        account_id: str | None = None,
+        unbound_only: bool = False,
+    ) -> list[dict]:
         with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT d.id, d.created_at,
-                       a.id AS account_id, a.phone_ciphertext,
-                       (SELECT MAX(r.created_at) FROM api_requests r WHERE r.device_id = d.id) AS last_seen_at
-                FROM devices d
-                LEFT JOIN account_devices ad ON ad.device_id = d.id
-                LEFT JOIN access_accounts a ON a.id = ad.account_id
-                ORDER BY d.created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            if account_id is not None:
+                rows = connection.execute(
+                    """
+                    SELECT d.id, d.created_at,
+                           ad.account_id, ad.activated_at,
+                           a.phone_ciphertext, a.display_name,
+                           (SELECT MAX(r.created_at) FROM api_requests r
+                            WHERE r.device_id = d.id) AS last_seen_at,
+                           (SELECT COUNT(*) FROM api_requests r
+                            WHERE r.device_id = d.id) AS request_count
+                    FROM devices d
+                    LEFT JOIN account_devices ad ON ad.device_id = d.id
+                    LEFT JOIN access_accounts a ON a.id = ad.account_id
+                    WHERE ad.account_id = ?
+                    ORDER BY d.created_at DESC
+                    LIMIT ?
+                    """,
+                    (account_id, limit),
+                ).fetchall()
+            elif unbound_only:
+                rows = connection.execute(
+                    """
+                    SELECT d.id, d.created_at,
+                           ad.account_id, ad.activated_at,
+                           a.phone_ciphertext, a.display_name,
+                           (SELECT MAX(r.created_at) FROM api_requests r
+                            WHERE r.device_id = d.id) AS last_seen_at,
+                           (SELECT COUNT(*) FROM api_requests r
+                            WHERE r.device_id = d.id) AS request_count
+                    FROM devices d
+                    LEFT JOIN account_devices ad ON ad.device_id = d.id
+                    LEFT JOIN access_accounts a ON a.id = ad.account_id
+                    WHERE ad.account_id IS NULL
+                    ORDER BY d.created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT d.id, d.created_at,
+                           ad.account_id, ad.activated_at,
+                           a.phone_ciphertext, a.display_name,
+                           (SELECT MAX(r.created_at) FROM api_requests r
+                            WHERE r.device_id = d.id) AS last_seen_at,
+                           (SELECT COUNT(*) FROM api_requests r
+                            WHERE r.device_id = d.id) AS request_count
+                    FROM devices d
+                    LEFT JOIN account_devices ad ON ad.device_id = d.id
+                    LEFT JOIN access_accounts a ON a.id = ad.account_id
+                    ORDER BY d.created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
         return [dict(row) for row in rows]
+
+    def delete_unbound_devices(self, older_than_days: int | None = None) -> dict:
+        """清掉未绑定账号的匿名设备及其全部附属记录。
+
+        只处理 account_devices 中没有绑定的设备；已绑定设备必须先在后台解绑。
+        通过临时表避免 SQLite 变量数量上限，并保证整批删除在同一事务内完成。
+        """
+        cutoff = None
+        if older_than_days is not None:
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=older_than_days)
+            ).isoformat()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS _purge_devices (id TEXT PRIMARY KEY)"
+            )
+            connection.execute("DELETE FROM _purge_devices")
+            if cutoff is None:
+                connection.execute(
+                    "INSERT INTO _purge_devices(id) SELECT d.id FROM devices d "
+                    "WHERE NOT EXISTS (SELECT 1 FROM account_devices ad "
+                    "WHERE ad.device_id = d.id)"
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO _purge_devices(id) SELECT d.id FROM devices d "
+                    "WHERE NOT EXISTS (SELECT 1 FROM account_devices ad "
+                    "WHERE ad.device_id = d.id) AND d.created_at < ?",
+                    (cutoff,),
+                )
+            total = connection.execute(
+                "SELECT COUNT(*) AS total FROM _purge_devices"
+            ).fetchone()["total"]
+            deleted = {
+                "api_requests": 0,
+                "learning_pack_jobs": 0,
+                "lecsync_tasks": 0,
+                "lecsync_usage": 0,
+                "daily_usage": 0,
+                "analyses": 0,
+                "devices": 0,
+            }
+            if total:
+                deleted["api_requests"] = connection.execute(
+                    "DELETE FROM api_requests WHERE device_id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+                deleted["learning_pack_jobs"] = connection.execute(
+                    "DELETE FROM learning_pack_jobs WHERE device_id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+                deleted["lecsync_tasks"] = connection.execute(
+                    "DELETE FROM lecsync_tasks WHERE device_id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+                deleted["lecsync_usage"] = connection.execute(
+                    "DELETE FROM lecsync_usage WHERE device_id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+                deleted["daily_usage"] = connection.execute(
+                    "DELETE FROM daily_usage WHERE device_id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+                deleted["analyses"] = connection.execute(
+                    "DELETE FROM analyses WHERE device_id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+                deleted["devices"] = connection.execute(
+                    "DELETE FROM devices WHERE id IN "
+                    "(SELECT id FROM _purge_devices)"
+                ).rowcount
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return {"devices": int(total), "details": deleted}
+
+    def delete_unbound_device(self, device_id: str) -> bool:
+        with self.connect() as connection:
+            bound = connection.execute(
+                "SELECT 1 FROM account_devices WHERE device_id = ?", (device_id,)
+            ).fetchone()
+            if bound is not None:
+                return False
+            exists = connection.execute(
+                "SELECT 1 FROM devices WHERE id = ?", (device_id,)
+            ).fetchone()
+            if exists is None:
+                return False
+            connection.execute(
+                "DELETE FROM api_requests WHERE device_id = ?", (device_id,)
+            )
+            connection.execute(
+                "DELETE FROM learning_pack_jobs WHERE device_id = ?", (device_id,)
+            )
+            connection.execute(
+                "DELETE FROM lecsync_tasks WHERE device_id = ?", (device_id,)
+            )
+            connection.execute(
+                "DELETE FROM lecsync_usage WHERE device_id = ?", (device_id,)
+            )
+            connection.execute(
+                "DELETE FROM daily_usage WHERE device_id = ?", (device_id,)
+            )
+            connection.execute(
+                "DELETE FROM analyses WHERE device_id = ?", (device_id,)
+            )
+            connection.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+            return True
+
+    def purge_api_requests(self, older_than_days: int | None = None) -> int:
+        with self.connect() as connection:
+            if older_than_days is None:
+                cursor = connection.execute("DELETE FROM api_requests")
+            else:
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(days=older_than_days)
+                ).isoformat()
+                cursor = connection.execute(
+                    "DELETE FROM api_requests WHERE created_at < ?", (cutoff,)
+                )
+            return cursor.rowcount
+
+    def purge_orphan_sync_records(self) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM sync_records WHERE account_id NOT IN "
+                "(SELECT id FROM access_accounts)"
+            )
+            return cursor.rowcount
+
+    def purge_expired_codes(self, older_than_days: int = 7) -> dict:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        ).isoformat()
+        with self.connect() as connection:
+            sms = connection.execute(
+                "DELETE FROM sms_verification_codes WHERE created_at < ?", (cutoff,)
+            ).rowcount
+            activation = connection.execute(
+                "DELETE FROM activation_codes WHERE created_at < ?", (cutoff,)
+            ).rowcount
+        return {"smsCodes": sms, "activationCodes": activation}
+
+    def cleanup_old_metrics(
+        self,
+        *,
+        anonymous_device_days: int = 7,
+        request_days: int = 90,
+        code_days: int = 7,
+    ) -> dict:
+        """启动时的轻量保留策略：匿名设备、调用记录、过期验证码不会无限累积。"""
+        devices = self.delete_unbound_devices(anonymous_device_days)
+        requests = self.purge_api_requests(request_days)
+        codes = self.purge_expired_codes(code_days)
+        orphans = self.purge_orphan_sync_records()
+        return {
+            "anonymousDevices": devices["devices"],
+            "apiRequests": requests,
+            "smsCodes": codes["smsCodes"],
+            "activationCodes": codes["activationCodes"],
+            "orphanSyncRecords": orphans,
+        }
 
     def record_api_request(
         self,
@@ -1554,6 +1784,9 @@ class Database:
             device_total = connection.execute(
                 "SELECT COUNT(*) AS total FROM devices"
             ).fetchone()["total"]
+            bound_device_total = connection.execute(
+                "SELECT COUNT(*) AS total FROM account_devices"
+            ).fetchone()["total"]
         requests_by_day = {row["day"]: row for row in request_rows}
         analyses_by_day = {row["day"]: int(row["ai_packs"]) for row in analysis_rows}
         audio_by_day = {row["day"]: float(row["seconds"] or 0.0) for row in audio_rows}
@@ -1583,7 +1816,8 @@ class Database:
                 "activeDevices": int(totals_row["active_devices"] or 0),
                 "activeAccounts": int(totals_row["active_accounts"] or 0),
                 "accounts": int(account_total),
-                "devices": int(device_total),
+                "devices": int(bound_device_total),
+                "unboundDevices": max(0, int(device_total) - int(bound_device_total)),
             },
             "series": series,
         }
@@ -1623,19 +1857,52 @@ class Database:
             ).fetchall()
         return [{"model": row["model"], "count": int(row["count"])} for row in rows]
 
-    def recent_api_requests(self, limit: int = 200, errors_only: bool = False) -> list[dict]:
-        clause = "WHERE r.status >= 400" if errors_only else ""
+    def device_counts(self) -> dict:
+        with self.connect() as connection:
+            total = connection.execute(
+                "SELECT COUNT(*) AS total FROM devices"
+            ).fetchone()["total"]
+            bound = connection.execute(
+                "SELECT COUNT(*) AS total FROM account_devices"
+            ).fetchone()["total"]
+        return {"total": int(total), "bound": int(bound), "unbound": max(0, int(total) - int(bound))}
+
+    def recent_api_requests(
+        self,
+        limit: int = 200,
+        errors_only: bool = False,
+        *,
+        account_id: str | None = None,
+        include_unbound: bool = False,
+        include_polling: bool = False,
+    ) -> list[dict]:
         with self.connect() as connection:
             rows = connection.execute(
-                f"""
+                """
                 SELECT r.id, r.device_id, r.account_id, r.method, r.route, r.status,
-                       r.duration_ms, r.created_at, a.phone_ciphertext
+                       r.duration_ms, r.created_at, a.phone_ciphertext, a.display_name
                 FROM api_requests r
                 LEFT JOIN access_accounts a ON a.id = r.account_id
-                {clause}
-                ORDER BY r.id DESC LIMIT ?
+                WHERE (? IS NULL OR r.account_id = ?)
+                  AND (? = 1 OR r.account_id IS NOT NULL)
+                  AND (? = 1 OR r.route NOT IN (
+                      '/v1/accounts/me',
+                      '/v1/trial/status',
+                      '/v1/app-config',
+                      '/v2/learning-pack/jobs/{job_id}'
+                  ))
+                  AND (? = 0 OR r.status >= 400)
+                ORDER BY r.id DESC
+                LIMIT ?
                 """,
-                (limit,),
+                (
+                    account_id,
+                    account_id,
+                    1 if include_unbound else 0,
+                    1 if include_polling else 0,
+                    1 if errors_only else 0,
+                    limit,
+                ),
             ).fetchall()
         return [dict(row) for row in rows]
 

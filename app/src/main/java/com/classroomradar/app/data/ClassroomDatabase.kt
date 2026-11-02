@@ -194,7 +194,7 @@ interface ClassroomDao {
         SyncEntityRow::class,
         SyncStateRow::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class ClassroomDatabase : RoomDatabase() {
@@ -416,13 +416,21 @@ abstract class ClassroomDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 学习条目可编辑后需要有独立的更新时间供 LWW 云同步判断。
+                db.execSQL("ALTER TABLE learning_items ADD COLUMN updatedAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE learning_items SET updatedAtMillis = createdAtMillis")
+            }
+        }
+
         fun get(context: Context): ClassroomDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClassroomDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
                 .also { instance = it }
         }

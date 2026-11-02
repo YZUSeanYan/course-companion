@@ -148,9 +148,9 @@ class SyncManager private constructor(private val appContext: Context) {
 
     private fun collectLearningItems(out: MutableList<SyncChange>) {
         dao.allLearningItems().forEach { item ->
-            val uid = uidFor(ENTITY_ITEMS, item.id) { item.createdAtMillis }
+            val uid = uidFor(ENTITY_ITEMS, item.id) { item.updatedAtMillis }
             val courseUid = uidOf(ENTITY_COURSES, item.courseId)
-            out += change(ENTITY_ITEMS, uid, item.createdAtMillis, buildJsonObject {
+            out += change(ENTITY_ITEMS, uid, item.updatedAtMillis, buildJsonObject {
                 put("courseId", item.courseId)
                 courseUid?.let { put("courseUid", it) }
                 put("type", item.type)
@@ -165,6 +165,7 @@ class SyncManager private constructor(private val appContext: Context) {
                 put("inCET6", item.inCET6)
                 put("origin", item.origin)
                 put("createdAtMillis", item.createdAtMillis)
+                put("updatedAtMillis", item.updatedAtMillis)
             })
         }
     }
@@ -354,6 +355,9 @@ class SyncManager private constructor(private val appContext: Context) {
                         inCET6 = payload.bool("inCET6") ?: false,
                         origin = payload.str("origin") ?: LearningItemEntity.ORIGIN_AI,
                         createdAtMillis = payload.long("createdAtMillis") ?: System.currentTimeMillis(),
+                        updatedAtMillis = payload.long("updatedAtMillis")
+                            ?: payload.long("createdAtMillis")
+                            ?: System.currentTimeMillis(),
                     ),
                 )
             }
@@ -465,6 +469,9 @@ class SyncManager private constructor(private val appContext: Context) {
                         payload.array("sourceIds")?.joinToString(",") ?: "",
                         payload.bool("inCET6") ?: false,
                         payload.str("origin") ?: LearningItemEntity.ORIGIN_AI,
+                        payload.long("updatedAtMillis")
+                            ?: payload.long("createdAtMillis")
+                            ?: System.currentTimeMillis(),
                     )
                 }
                 ENTITY_CARDS -> dao.updateReviewCard(

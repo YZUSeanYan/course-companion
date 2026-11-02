@@ -1,6 +1,11 @@
 package com.classroomradar.app.learning
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,21 +14,32 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.classroomradar.app.GlassEffect
@@ -34,6 +50,7 @@ import com.classroomradar.app.LiquidTextPrimary
 import com.classroomradar.app.LiquidTextSecondary
 import com.classroomradar.app.RadarBrand
 import com.classroomradar.app.RadarBrandDeep
+import com.classroomradar.app.data.AppPreferences
 import com.classroomradar.app.learning.api.DocumentAssetDto
 import kotlinx.serialization.json.Json
 import java.text.DateFormat
@@ -69,6 +86,10 @@ fun CourseDetailScreen(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
     ) {
         item {
+            val context = LocalContext.current
+            var outputChinese by remember {
+                mutableStateOf(AppPreferences.get(context).learningOutputChinese)
+            }
             GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Accent, effect = GlassEffect.Static) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(course.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
@@ -81,6 +102,31 @@ fun CourseDetailScreen(
                         color = LiquidTextSecondary,
                     )
                     Text("讲义 ${state.materials.size} · 学习内容 ${state.learningItems.size}", color = RadarBrandDeep, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                if (outputChinese) "学习内容使用中文" else "学习内容跟随原文",
+                                fontWeight = FontWeight.SemiBold,
+                                color = LiquidTextPrimary,
+                            )
+                            Text(
+                                "纪要、重点与解析的语言；仅影响之后生成的内容",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LiquidTextSecondary,
+                            )
+                        }
+                        Switch(
+                            checked = outputChinese,
+                            onCheckedChange = { enabled ->
+                                outputChinese = enabled
+                                AppPreferences.get(context).learningOutputChinese = enabled
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = RadarBrand,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -212,11 +258,26 @@ fun CourseDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun LearningItemCard(item: LearningItemEntity, showTypeLabel: Boolean = true) {
-    GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
+internal fun LearningItemCard(
+    item: LearningItemEntity,
+    showTypeLabel: Boolean = true,
+    onActions: (() -> Unit)? = null,
+) {
+    val cardModifier = if (onActions == null) {
+        Modifier.fillMaxWidth()
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = {}, onLongClick = onActions)
+    }
+    GlassPanel(modifier = cardModifier, tone = GlassTone.Neutral, effect = GlassEffect.Static) {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (showTypeLabel) {
                     Text(learningTypeLabel(item.type), color = RadarBrandDeep, fontWeight = FontWeight.Bold)
                 }
@@ -227,6 +288,23 @@ internal fun LearningItemCard(item: LearningItemEntity, showTypeLabel: Boolean =
                     Text("AI 生成", color = LiquidTextSecondary, style = MaterialTheme.typography.labelMedium)
                 } else if (item.origin == LearningItemEntity.ORIGIN_AI_CACHE) {
                     Text("AI 预生成缓存", color = LiquidTextSecondary, style = MaterialTheme.typography.labelMedium)
+                }
+                if (onActions != null) {
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onActions),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Outlined.MoreVert,
+                            contentDescription = "编辑或删除这条学习内容",
+                            tint = RadarBrandDeep,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
             Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)

@@ -1,5 +1,6 @@
 package com.classroomradar.app.learning
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -67,6 +68,7 @@ data class LearningItemEntity(
     val inCET6: Boolean = false,
     val origin: String = ORIGIN_AI,
     val createdAtMillis: Long,
+    @ColumnInfo(defaultValue = "0") val updatedAtMillis: Long = createdAtMillis,
 ) {
     companion object {
         const val TYPE_VOCABULARY = "VOCABULARY"

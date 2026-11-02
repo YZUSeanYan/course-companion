@@ -420,25 +420,48 @@ class RecordingService : Service() {
         rememberFinalTranscript(text)
         updateActiveSnapshot { snapshot -> snapshot?.copy(liveTranscript = "") }
         requestForegroundNotificationUpdate()
+        // Cloud sentence mode can return a paragraph as one final; persist subtitle-sized
+        // clauses so each card stays short and its translation lines up with the source.
+        val chunks = TranscriptClauseSplitter.split(text).ifEmpty { listOf(text) }
         persistenceWorker.execute {
-            val lineId = repository.appendTranscript(
-                sessionId, timestampMillis, text,
-                segmentKey = segment.segmentKey,
-                speaker = segment.speaker,
-                startMs = segment.startMs,
-                endMs = segment.endMs,
-                language = segment.language,
-            )
-            if (lineId > 0) {
-                (engine as? LecsyncRealtimeEngine)?.registerTranscriptLine(segment.segmentKey, lineId, text)
-                RecordingBus.emit(RecorderEvent.Transcript(lineId, text, timestampMillis))
-                // Local rows keep translating even after a cloud session fell back to the device engine.
-                val usingDeviceEngine = !preferences.cloudListeningEnabled ||
-                    (engine as? LecsyncRealtimeEngine)?.isOfflineFallbackActive == true ||
-                    engine is SherpaTwoPassEngine
-                if (usingDeviceEngine) translationCoordinator.enqueue(lineId, text)
+            val lineIds = mutableListOf<Long>()
+            val lineTexts = mutableListOf<String>()
+            chunks.forEachIndexed { index, chunk ->
+                val lineId = repository.appendTranscript(
+                    sessionId, timestampMillis + index, chunk,
+                    segmentKey = segment.segmentKey?.let {
+                        if (chunks.size == 1) it else "$it#${index + 1}"
+                    },
+                    speaker = if (index == 0) segment.speaker else null,
+                    startMs = chunkBoundary(segment.startMs, segment.endMs, chunks, index),
+                    endMs = chunkBoundary(segment.startMs, segment.endMs, chunks, index + 1),
+                    language = segment.language,
+                )
+                if (lineId > 0) {
+                    lineIds += lineId
+                    lineTexts += chunk
+                    RecordingBus.emit(RecorderEvent.Transcript(lineId, chunk, timestampMillis + index))
+                    // Local rows keep translating even after a cloud session fell back to the device engine.
+                    val usingDeviceEngine = !preferences.cloudListeningEnabled ||
+                        (engine as? LecsyncRealtimeEngine)?.isOfflineFallbackActive == true ||
+                        engine is SherpaTwoPassEngine
+                    if (usingDeviceEngine) translationCoordinator.enqueue(lineId, chunk)
+                }
+            }
+            if (lineIds.isNotEmpty()) {
+                (engine as? LecsyncRealtimeEngine)?.registerTranscriptLines(segment.segmentKey, lineIds, lineTexts)
             }
         }
+    }
+
+    /** Proportional time boundary for clause [index] of [chunks]; null stays null. */
+    private fun chunkBoundary(startMs: Long?, endMs: Long?, chunks: List<String>, index: Int): Long? {
+        if (startMs == null || endMs == null || endMs <= startMs) return if (index == 0) startMs else endMs
+        if (index <= 0) return startMs
+        if (index >= chunks.size) return endMs
+        val total = chunks.sumOf { it.length }.coerceAtLeast(1)
+        val before = chunks.take(index).sumOf { it.length }
+        return startMs + (endMs - startMs) * before / total
     }
 
     private fun handlePartialTranscript(text: String) {

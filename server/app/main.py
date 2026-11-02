@@ -73,6 +73,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Course Companion Learning Analysis", version="1.2.0")
     app.state.settings = settings
     app.state.db = Database(settings.database_path, settings.usage_timezone)
+    try:
+        # 保留策略：匿名设备 7 天、调用记录 90 天、验证码 7 天，避免运营后台长期堆积。
+        app.state.db.cleanup_old_metrics()
+    except Exception:  # 清理失败不能影响网关启动。
+        logger.exception("Failed to run startup retention cleanup")
     if settings.web_cors_origins:
         # 网页版与网关不同源部署时的显式白名单；同源部署（网关托管 /web/）无需开启。
         app.add_middleware(
@@ -134,10 +139,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = request.url.path
         if path.startswith(("/v1/", "/v2/")):
             route = request.scope.get("route")
+            device_id = getattr(request.state, "device_id", None)
+            account_id = getattr(request.state, "account_id", None)
+            if account_id is None and device_id is not None:
+                # 部分端点（如自助申请试用）在请求开始后才建立绑定；
+                # 记录指标时再回查一次，保证调用记录能归到账号下。
+                try:
+                    account = app.state.db.account_for_device(device_id)
+                    account_id = None if account is None else str(account["id"])
+                except Exception:
+                    account_id = None
             try:
                 app.state.db.record_api_request(
-                    device_id=getattr(request.state, "device_id", None),
-                    account_id=getattr(request.state, "account_id", None),
+                    device_id=device_id,
+                    account_id=account_id,
                     method=request.method,
                     route=getattr(route, "path", path),
                     status=response.status_code,

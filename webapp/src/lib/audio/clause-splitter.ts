@@ -190,6 +190,7 @@ function splitAtWidth(text: string): string[] {
       cursor += 1;
     }
     if (cut <= 0 || cut >= remaining.length) cut = Math.max(1, cursor);
+    cut = avoidMidWord(remaining, cut);
     const piece = remaining.slice(0, cut).trim();
     if (piece) result.push(piece);
     remaining = remaining.slice(cut).trim();
@@ -197,6 +198,16 @@ function splitAtWidth(text: string): string[] {
   }
   if (remaining) result.push(remaining);
   return result;
+}
+
+/** 硬切落在英文单词中间时，退回到最近的词边界，避免出现 "lazy d" 这类断词。 */
+function avoidMidWord(text: string, cut: number): number {
+  if (cut <= 0 || cut >= text.length) return cut;
+  const isWord = (ch: string): boolean => /[\p{L}\p{N}]/u.test(ch) && !isCjk(ch);
+  if (!isWord(text[cut - 1]) || !isWord(text[cut])) return cut;
+  let index = cut - 1;
+  while (index > 0 && !/\s/.test(text[index - 1])) index -= 1;
+  return index > 0 ? index : cut;
 }
 
 function splitAtPunctuation(text: string): string[] {
