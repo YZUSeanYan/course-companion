@@ -279,12 +279,17 @@ def test_activate_requires_code_when_enforced(settings):
     assert "验证码" in response.json()["detail"]
 
 
-def test_activate_without_code_stays_compatible_by_default(settings):
-    client, _ = make_client(settings)
-    assert settings.require_activation_code is False
+def test_activate_without_code_rejected_even_if_legacy_flag_is_disabled(settings):
+    # A deployment setting cannot re-enable code-free account takeover.
+    client, _ = make_client(replace(settings, require_activation_code=False))
     _, phone = create_test_account(client)
     _, token = register_device(client)
 
     response = activate(client, token, phone)
-    assert response.status_code == 200, response.text
-    assert response.json()["activated"] is True
+    assert response.status_code == 403
+    assert response.headers["X-Zhixi-Error-Code"] == "activation_code_required"
+    assert client.app.state.db.account_for_device(
+        client.app.state.db.find_device_by_token_hash(
+            __import__("app.security", fromlist=["token_digest"]).token_digest(token, settings.token_pepper)
+        )
+    ) is None
