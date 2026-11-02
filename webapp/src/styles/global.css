@@ -959,6 +959,175 @@ select.text-input {
   margin-top: 10px;
 }
 
+/* ── 课堂主卡：计时台 + 历史转写 + 实时行 ──
+   历史与实时必须在同一张卡里：旧版把实时行放在计时卡、历史放到下一张卡，
+   手机首屏只看得到当前一句，用户会以为旧记录没保存。 */
+.classroom-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stage__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.stage__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.stage__timer {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-size: clamp(30px, 3.4vw, 40px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.stage__timer small {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--ink-4);
+  margin-top: 6px;
+  text-transform: uppercase;
+  text-align: right;
+}
+
+.stage__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stage__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.stage__body {
+  min-height: 120px;
+  max-height: min(52vh, 560px);
+  padding: 0 8px 0 2px;
+}
+
+.stage__empty {
+  padding: 8px 2px 16px;
+}
+
+.stage__empty .eyebrow {
+  margin: 0 0 6px;
+}
+
+.stage__empty .empty-hint {
+  display: block;
+  max-width: 56ch;
+  line-height: 1.65;
+}
+
+.stage__doubt {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* 最新半句：贴在历史末尾，用品牌色背景和上面的定稿区分开 */
+.transcript-line--live {
+  border-bottom: none;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--brand-soft), rgba(255, 255, 255, 0) 82%);
+  padding: 10px 10px 10px 0;
+}
+
+.transcript-line--live .zh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.transcript-line__preview {
+  color: var(--ink-2);
+}
+
+/* 离开课堂页后的「进行中」入口：切到学习/设置也能看到并一键返回 */
+.live-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-brand);
+  cursor: pointer;
+  transition: transform 0.18s var(--ease-out), background 0.18s var(--ease-out);
+}
+
+.live-fab:hover {
+  background: var(--brand-deep);
+  transform: translateY(-1px);
+}
+
+.live-fab:active {
+  transform: translateY(0);
+}
+
+.live-fab__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.22);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.live-fab__time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.live-fab__cta {
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+  font-weight: 700;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* 纪要 */
 .digest-section + .digest-section {
   margin-top: 12px;
@@ -1402,6 +1571,51 @@ select.text-input {
 
   .session__timer {
     font-size: 52px;
+  }
+
+  .stage__top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 12px;
+    gap: 12px;
+  }
+
+  .stage__meta {
+    grid-column: 1 / -1;
+  }
+
+  .stage__timer {
+    font-size: 32px;
+    text-align: left;
+  }
+
+  .stage__timer small {
+    text-align: left;
+  }
+
+  .stage__actions {
+    gap: 6px;
+  }
+
+  .stage__actions .btn-lg {
+    height: 42px;
+    padding: 0 15px;
+    font-size: 13px;
+  }
+
+  .stage__body {
+    min-height: 96px;
+    max-height: min(44vh, 420px);
+  }
+
+  .live-fab {
+    right: 12px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+
+  .live-fab__cta {
+    display: none;
   }
 
   .bottom-nav {

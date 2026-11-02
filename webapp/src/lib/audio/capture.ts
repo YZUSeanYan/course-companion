@@ -1,9 +1,9 @@
 // 麦克风采集：AudioWorklet 重采样为 16kHz 单声道 Int16 PCM。
-// 实时课堂 WebSocket 的音频分片按 0.2 秒（3200 样本 / 6400 字节）成帧，
-// 与网关 sent_seconds = bytes/32000 的口径一致（网关按 len(audio)/32000 计费并转给上游）。
+// 分片按 0.1 秒（1600 样本 / 3200 字节）：与 App 的采集节奏一致，降低排队延时；
+// 网关按 len(audio)/32000 计时，帧长不影响计费口径。
 
 export const TARGET_SAMPLE_RATE = 16000;
-export const FRAME_SAMPLES = 3200; // 0.2s
+export const FRAME_SAMPLES = 1600; // 0.1s
 
 /**
  * worklet 模块源码。两个坑都在这里：

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { HashRouter, Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { HashRouter, Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import ClassroomPage from "./pages/ClassroomPage";
 import LearningPage from "./pages/LearningPage";
 import CourseDetailPage from "./pages/CourseDetailPage";
 import ReviewPage from "./pages/ReviewPage";
 import SettingsPage from "./pages/SettingsPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import { useClassroomSnapshot, isClassroomActive } from "./hooks/useClassroomSnapshot";
 import { BookIcon, CardsIcon, ChevronLeftIcon, MicIcon, SettingsIcon } from "./components/layout/NavIcons";
 // 与 App 启动图标同源：app/src/main/res/drawable-nodpi/ic_brand_square.png
 import appIcon from "./assets/app-icon.png";
@@ -135,8 +136,22 @@ function TopBar({ chrome, isHome }: { chrome: Chrome; isHome: boolean }) {
 
 function Shell() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isHome = location.pathname === "/";
   const chrome = chromeFor(location.pathname);
+  const snapshot = useClassroomSnapshot();
+  const classroomActive = isClassroomActive(snapshot);
+
+  // 课堂进行中关标签页/刷新会真的结束本节（浏览器没有后台音频存档），先拦一下。
+  useEffect(() => {
+    if (!classroomActive) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [classroomActive]);
 
   // 路由切换：回到页顶；若焦点随即将卸载的元素一起消失（如顶栏返回按钮），转交给主区，
   // 否则键盘用户的 Tab 顺序会从文档开头重新走一遍。
@@ -166,8 +181,30 @@ function Shell() {
         </div>
       </div>
       <BottomNav />
+      {classroomActive && !isHome && (
+        <button className="live-fab" onClick={() => navigate("/")} title="返回课堂">
+          <span className="live-fab__dot" aria-hidden />
+          <span className="live-fab__label">
+            {snapshot.phase === "paused"
+              ? "课堂已暂停"
+              : snapshot.phase === "connecting"
+                ? "正在连接课堂"
+                : snapshot.phase === "stopping"
+                  ? "正在结束课堂"
+                  : "课堂进行中"}
+          </span>
+          <b className="live-fab__time">{formatClock(snapshot.elapsedSeconds)}</b>
+          <span className="live-fab__cta">返回</span>
+        </button>
+      )}
     </div>
   );
+}
+
+function formatClock(total: number): string {
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 export default function App() {
