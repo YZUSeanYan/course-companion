@@ -211,10 +211,20 @@
 - **发布**：`/opt/zhixi-webapp/r26`，`current` 从 `r25` 切到 `r26`（`r24`/`r25` 保留）。线上 `index-BhvtVEj3.js` 与本地验证产物 SHA-256 完全一致（`e5a5dd68…`）。**回滚 = `ln -sfn /opt/zhixi-webapp/r25 /opt/zhixi-webapp/current`**。
 - **边界**：只改网页版两个页面与译文工具，未改网关、协议与数据结构；未做真实短信与真实课堂的端到端。Mimosa 深度审计仍未完成，不得据此声称通过安全审计。
 
+## V2.0.9 平板双栏 / 主动分句与 V2.0.8 学习包精简（2026-11-02，已发布）
+
+- **V2.0.8 / R20（同批上线）**：学习包 prompt v4 把课堂纪要压成单段摘要并清空分节；词汇/短语/练习等条目支持卡片内长按或 ⋮ 编辑/删除，编辑同步复习卡、删除级联；Room 10→11 增加 `updatedAtMillis` 并迁移回填。生成侧每个提供方每轮只尝试一次，75 秒包超时、429/5xx 冷却 45 秒、鉴权/配置错误冷却 300 秒，DeepSeek/Kimi/MiMo 并行竞速，首个有效结果立即返回；真实联调从 226 秒失败降到 44–47 秒成功。R20 运营后台改为账号中心（账号内展开设备、按账号筛选调用记录、匿名设备清理与保留策略），生产已清理 52 台匿名设备等旧记录。
+- **平板首页**：≥840dp 双栏不再等宽拉伸。首页内容上限 1200dp、其他页面 880dp；顶栏与内容共用同一上限和左侧导航轨偏移。≥1000dp 时课程关联与状态并成一行；转写卡按剩余高度铺满并在内部滚动；右栏无疑问时整高占位，有疑问时列表滚动，实时纪要也放右栏；底部控制条按系统导航栏 inset + 160dp 预留，不再压住卡片底边。
+- **长表述分句**：新增 `audio/TranscriptClauseSplitter.kt`，与网页版同一套阈值（MAX 16 units / SPLIT 20 / TINY 4 / MAX 8 parts）。云端 `sentence` 模式整段 final、本机 sherpa 长定稿都会先按句末标点、再按从句连词/逗号切；无标点英文在词边界硬切，不会切出 `lazy d`。每个分句单独落库（`segmentKey#n`、时间戳 +n ms），云端 `translation.final` 按相同段数拆分，本机/离线行逐句进入翻译队列；说话人只标首句。
+- **验证**：Android JVM **106 项，0 失败**（分句器 16 项）、`:app:lintDebug` 通过、`assembleRelease` 成功；server **157 项 pytest，0 失败**；webapp **118 项 vitest，0 失败**（分句器 18 项）、`tsc --noEmit && vite build` 通过。模拟器 2048×1280 @256dpi（1280×800dp）验待机/录音/注入转写三态，手机 1080×2400 回归；顶栏边缘、双栏比例、整高卡片、底栏留白均截图核对。
+- **发布**：V2.0.9 签名 APK **50,847,411 字节**，SHA-256 `ED9F4207A09563113C75BC3F60DC0C4568D150AAE91677E88515C79648F96E81`；Gitee `https://gitee.com/seanyan-dev/zhixi-apk/releases/download/v2.0.9/zhixi-v2.0.9.apk` 已上传并完整下载复验同哈希。官网切换 2.0.9，线上 `index-DUHNu2BV.js` 含该 Gitee 直链。网页版发布到 `/opt/zhixi-webapp/r30`，线上 `index-fqwjlyP4.js` 与本地 SHA-256 一致。网关保持 R20（`/health` 200）。
+- **回滚**：网页版 `ln -sfn /opt/zhixi-webapp/r29 /opt/zhixi-webapp/current`；官网恢复 `/opt/shuike-site-backups/20261102-v209/` 下的 `index.html` 与 `assets`；APK 下载页回退 `release.ts` 2.0.8；网关无需回滚。
+- **边界**：历史课堂不会自动重新分句，需要重新识别/重新生成；云端译文与源文标点数量不一致时退化为按源句长度比例切分；真实课堂长段落仍要继续收集样本。Mimosa 深度审计未完成，不得据此声称通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
-- V2.0.4 签名 Release：桌面 `知习-V2.0.4.apk`，`versionName=2.0.4`、`versionCode=6`，v3 签名验证通过；大小 **50,535,834 字节**，SHA-256：`C908BDC68B0F17238B9D05381A2E94B04425C61A3EE21654E755FAD8F184ED92`。
-- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.4 APK 已完整下载并核对为同一 SHA-256；官网首页、下载页与隐私页已更新。
+- V2.0.9 签名 Release：桌面 `知习-V2.0.9.apk`，`versionName=2.0.9`、`versionCode=11`，v3 签名验证通过；大小 **50,847,411 字节**，SHA-256：`ED9F4207A09563113C75BC3F60DC0C4568D150AAE91677E88515C79648F96E81`。
+- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.9 APK 已从 Gitee 完整下载并核对为同一 SHA-256；官网首页、下载页与隐私页已更新。
 - 运营后台：`https://zhixi.seanyan.store/admin/`，管理员密码只保存在服务器 `/opt/zhixi-gateway/.env`（600），不写入仓库、APK 或前端 bundle。
 - Release 默认网关为 `https://zhixi.seanyan.store`，不包含模型权重或 API 密钥；离线模型首次使用前需下载或恢复。
