@@ -29,6 +29,7 @@ def settings(tmp_path):
         provider_model="mock-model",
         provider_api_key=_TEST_PROVIDER_KEY,
         provider_timeout_seconds=0.1,
+        provider_parallel=False,
         provider_max_retries=0,
         provider_retry_backoff_seconds=0,
         device_daily_quota=20,

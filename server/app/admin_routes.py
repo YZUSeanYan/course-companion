@@ -113,6 +113,17 @@ def _account_payload(row: dict, settings: Settings, today: str) -> dict:
             "documents": int(row.get("today_documents", 0)),
         },
         "deviceCount": int(row.get("device_count", 0)),
+        "devices": [
+            {
+                "deviceId": device["device_id"],
+                "activatedAt": device["activated_at"],
+                "lastSeenAt": device.get("last_seen_at"),
+            }
+            for device in (row.get("devices") or [])
+        ],
+        "lastActiveAt": row.get("last_active_at"),
+        "requests7d": int(row.get("requests_7d", 0)),
+        "errors7d": int(row.get("errors_7d", 0)),
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
     }
@@ -293,7 +304,19 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
     ) -> dict:
         today = database.today()
         rows = database.list_accounts()
-        items = [_account_payload(row, settings, today) for row in rows]
+        items = []
+        for row in rows:
+            item = _account_payload(row, settings, today)
+            item["devices"] = database.account_devices(str(row["id"]))
+            item["devices"] = [
+                {
+                    "deviceId": device["device_id"],
+                    "activatedAt": device["activated_at"],
+                    "lastSeenAt": device.get("last_seen_at"),
+                }
+                for device in item["devices"]
+            ]
+            items.append(item)
         needle = query.strip()
         if needle:
             items = [
@@ -403,6 +426,7 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
         row = {
             **account,
             "device_count": len(devices),
+            "devices": devices,
             "today_ai_packs": usage["aiPacks"],
             "today_audio_seconds": usage["audioMinutes"] * 60,
             "today_text_characters": usage["textCharacters"],
@@ -435,10 +459,15 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
     @app.get("/admin/api/devices")
     def admin_devices(
         request: Request,
+        scope: Literal["unbound", "bound", "all"] = "unbound",
         limit: int = 200,
         _: int = Depends(require_session),
     ) -> dict:
-        rows = database.list_devices(max(1, min(limit, 1000)))
+        counts = database.device_counts()
+        rows = database.list_devices(
+            max(1, min(limit, 1000)),
+            unbound_only=(scope == "unbound"),
+        )
         items = []
         for row in rows:
             phone = _decrypt_phone(row, settings)
@@ -447,21 +476,106 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
                     "deviceId": row["id"],
                     "createdAt": row["created_at"],
                     "lastSeenAt": row["last_seen_at"],
+                    "requestCount": int(row.get("request_count", 0)),
                     "accountId": row["account_id"],
+                    "accountName": row.get("display_name") or "",
                     "phone": phone,
-                    "phoneMasked": mask_phone(phone) if phone else "****",
+                    "phoneMasked": mask_phone(phone) if phone else "—",
                 }
             )
-        return {"items": items, "total": len(items)}
+        return {
+            "items": items,
+            "total": len(items),
+            "unboundTotal": counts["unbound"],
+            "boundTotal": counts["bound"],
+        }
+
+    @app.delete("/admin/api/devices/anonymous")
+    def admin_delete_anonymous_devices(
+        request: Request,
+        olderThanDays: int = 0,
+        _: int = Depends(require_session),
+    ) -> dict:
+        require_csrf(request)
+        days = None if olderThanDays <= 0 else min(olderThanDays, 3650)
+        return database.delete_unbound_devices(days)
+
+    @app.delete("/admin/api/devices/{device_id}")
+    def admin_delete_device(
+        device_id: str,
+        request: Request,
+        _: int = Depends(require_session),
+    ) -> dict:
+        require_csrf(request)
+        if database.account_for_device(device_id) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="该设备已绑定账号，请先在账号下解绑",
+            )
+        if not database.delete_unbound_device(device_id):
+            raise HTTPException(status_code=404, detail="设备不存在")
+        return {"deleted": True}
+
+    @app.delete("/admin/api/accounts/{account_id}/devices/{device_id}")
+    def admin_unbind_device(
+        account_id: str,
+        device_id: str,
+        request: Request,
+        _: int = Depends(require_session),
+    ) -> dict:
+        require_csrf(request)
+        if database.account_by_id(account_id) is None:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        if not database.unbind_device(account_id, device_id):
+            raise HTTPException(status_code=404, detail="该账号未绑定此设备")
+        return {"unbound": True}
+
+    @app.delete("/admin/api/requests")
+    def admin_purge_requests(
+        request: Request,
+        olderThanDays: int = 0,
+        _: int = Depends(require_session),
+    ) -> dict:
+        require_csrf(request)
+        days = None if olderThanDays <= 0 else min(olderThanDays, 3650)
+        return {"deleted": database.purge_api_requests(days)}
+
+    @app.post("/admin/api/maintenance/cleanup")
+    def admin_cleanup_legacy_data(
+        request: Request,
+        _: int = Depends(require_session),
+    ) -> dict:
+        """一次性清理历史测试数据：匿名设备、调用记录、过期验证码、孤儿同步记录。"""
+        require_csrf(request)
+        devices = database.delete_unbound_devices()
+        requests_deleted = database.purge_api_requests()
+        codes = database.purge_expired_codes(0)
+        orphans = database.purge_orphan_sync_records()
+        return {
+            "anonymousDevices": devices,
+            "apiRequests": requests_deleted,
+            "smsCodes": codes["smsCodes"],
+            "activationCodes": codes["activationCodes"],
+            "orphanSyncRecords": orphans,
+        }
 
     @app.get("/admin/api/requests")
     def admin_requests(
         request: Request,
         limit: int = 200,
         errorsOnly: bool = False,
+        accountId: str | None = None,
+        includeUnbound: bool = False,
+        includePolling: bool = False,
         _: int = Depends(require_session),
     ) -> dict:
-        rows = database.recent_api_requests(max(1, min(limit, 1000)), errorsOnly)
+        rows = database.recent_api_requests(
+            max(1, min(limit, 1000)),
+            errorsOnly,
+            account_id=accountId,
+            include_unbound=includeUnbound,
+            include_polling=includePolling,
+        )
         items = []
         for row in rows:
             phone = _decrypt_phone(row, settings)
@@ -470,6 +584,7 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
                     "id": row["id"],
                     "deviceId": row["device_id"],
                     "accountId": row["account_id"],
+                    "accountName": row.get("display_name") or "",
                     "phone": phone,
                     "phoneMasked": mask_phone(phone) if phone else "—",
                     "method": row["method"],
