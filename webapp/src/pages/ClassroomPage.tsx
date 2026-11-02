@@ -73,6 +73,7 @@ export default function ClassroomPage() {
     phase: "idle",
     sessionId: null,
     partialText: "",
+    partialTranslation: "",
     elapsedSeconds: 0,
     usageSeconds: 0,
     statusMessage: null,
@@ -372,7 +373,13 @@ export default function ClassroomPage() {
                         <i />
                       </span>
                     )}
-                    <span>{snapshot.partialText || (listening ? "正在聆听…" : "已暂停，点「继续」恢复")}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      {snapshot.partialText || (listening ? "正在聆听…" : "已暂停，点「继续」恢复")}
+                      {/* 未定稿片段的译文预览：先把已确认的译文显示出来，不必等整句定稿 */}
+                      {snapshot.partialTranslation && (
+                        <span className="live-line__translation">{snapshot.partialTranslation}</span>
+                      )}
+                    </span>
                   </div>
                   <div className="btn-row" style={{ alignItems: "center" }}>
                     <input

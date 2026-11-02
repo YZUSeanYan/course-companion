@@ -798,6 +798,14 @@ select.text-input {
   line-height: 1.55;
 }
 
+/* 未定稿片段的译文预览：压在原文下面一行，颜色略淡，避免和已定稿译文混淆 */
+.live-line__translation {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
 .live-line__wave {
   display: flex;
   align-items: center;
