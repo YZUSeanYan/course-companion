@@ -282,7 +282,8 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         except ValueError as exc:
             raise HTTPException(401, {"code": "INVALID_TOKEN", "message": "设备身份无效"}) from exc
         path = upload_root / f"{device_key}-{identifier}"
-        path.write_bytes(data)
+        # Upload bytes are already in memory; no persistent staging copy is required.
+        # In particular, never leave unencrypted classroom audio on disk.
         try:
             upload = await call(client().create_audio_upload, len(data), hashlib.sha256(data).hexdigest())
             await call(client().upload_created_file, upload, data)
@@ -291,9 +292,6 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         except HTTPException:
             app.state.db.settle_lecsync_audio(device, seconds, 0)
             raise
-        finally:
-            # The staging file is retained for retry/recovery, never served publicly.
-            pass
         identifier = task_id(result, identifier)
         app.state.db.create_lecsync_task(device, identifier, "transcription_job", upstream_request_id=result.get("request_id"), reserved_seconds=seconds)
         return finish_task(device, identifier, "transcription_job", result, seconds)
