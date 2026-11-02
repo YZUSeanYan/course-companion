@@ -21,6 +21,19 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 def register_document_routes(app: FastAPI, settings: Settings) -> None:
     root = Path(os.getenv("DOCUMENT_STORAGE_ROOT", "document_assets")).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    # Identical documents may share assets but not access rights.
+    with app.state.db.connect() as connection:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS document_access (
+                document_id TEXT NOT NULL,
+                owner_key TEXT NOT NULL,
+                PRIMARY KEY (document_id, owner_key)
+            )"""
+        )
+
+    def document_owner(device: str) -> str:
+        subject = resolve_quota_subject(app.state.db, settings, device)
+        return f"account:{subject.account_id}" if subject.account_id else f"device:{device}"
 
     @app.post("/v2/documents/analyze")
     async def upload_document(
@@ -64,15 +77,27 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
             except Exception:
                 app.state.db.release_document(device, subject.account_id)
                 raise
+            with app.state.db.connect() as connection:
+                connection.execute(
+                    "INSERT OR IGNORE INTO document_access (document_id, owner_key) VALUES (?, ?)",
+                    (asset.documentId, document_owner(device)),
+                )
             return asset.to_dict()
 
     @app.get("/v2/documents/{document_id}/pages/{filename}")
     def page_image(
-        document_id: str, filename: str, _: str = Depends(activated_device)
+        document_id: str, filename: str, device: str = Depends(activated_device)
     ) -> FileResponse:
         document_match = re.fullmatch(r"([0-9a-f]{24})", document_id)
         page_match = re.fullmatch(r"page-(\d{4})\.jpg", filename)
         if document_match is None or page_match is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        with app.state.db.connect() as connection:
+            allowed = connection.execute(
+                "SELECT 1 FROM document_access WHERE document_id = ? AND owner_key = ?",
+                (document_id, document_owner(device)),
+            ).fetchone()
+        if allowed is None:
             raise HTTPException(status_code=404, detail="Page not found")
         # Rebuild both components from parsed integers so the path can only
         # contain characters produced by this formatting, never raw input.
