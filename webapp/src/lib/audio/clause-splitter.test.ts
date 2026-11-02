@@ -81,6 +81,15 @@ describe("splitClauses", () => {
     expect(parts).toEqual(["Yes. This is the main point."]);
   });
 
+  it("无标点英文硬切时不切断单词", () => {
+    const text =
+      "The quick brown fox jumps over the lazy dog and keeps running through the field until the sun goes down";
+    const words = new Set(text.split(" "));
+    for (const part of splitClauses(text)) {
+      for (const word of part.split(" ")) expect(words.has(word)).toBe(true);
+    }
+  });
+
   it("超长句被硬切后，碎片仍会与相邻片段合并到合理长度", () => {
     const text = "Yes. This is the main explanation of the lathe and its coolant flow system which matters a lot.";
     const parts = splitClauses(text);
