@@ -84,7 +84,15 @@ export type Overview = {
     activeDevices: number
     activeAccounts: number
     accounts: number
+    /**
+     * 设备数。不同网关版本口径不同：线上 r20 返回的是「已绑定数」，
+     * 仓库 main 返回的是「设备总数」，所以界面上用 deviceSummary() 统一折算。
+     */
     devices: number
+    /** 已绑定到账号的设备数（新版本网关才返回）。 */
+    boundDevices?: number
+    /** 未绑定账号的匿名设备数（r20 起返回）。 */
+    unboundDevices?: number
   }
   series: Array<{
     date: string
