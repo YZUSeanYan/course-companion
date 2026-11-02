@@ -7,6 +7,7 @@ import ReviewPage from "./pages/ReviewPage";
 import SettingsPage from "./pages/SettingsPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import { useClassroomSnapshot, isClassroomActive } from "./hooks/useClassroomSnapshot";
+import { useScreenWakeLock } from "./hooks/useScreenWakeLock";
 import { BookIcon, CardsIcon, ChevronLeftIcon, MicIcon, SettingsIcon } from "./components/layout/NavIcons";
 // 与 App 启动图标同源：app/src/main/res/drawable-nodpi/ic_brand_square.png
 import appIcon from "./assets/app-icon.png";
@@ -141,6 +142,8 @@ function Shell() {
   const chrome = chromeFor(location.pathname);
   const snapshot = useClassroomSnapshot();
   const classroomActive = isClassroomActive(snapshot);
+  // 听课期间保持屏幕常亮；不支持或用省电模式拒绝时静默降级。
+  useScreenWakeLock(classroomActive);
 
   // 课堂进行中关标签页/刷新会真的结束本节（浏览器没有后台音频存档），先拦一下。
   useEffect(() => {

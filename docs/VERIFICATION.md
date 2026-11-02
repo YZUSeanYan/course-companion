@@ -234,6 +234,23 @@
 - **端到端**：本地假网关（FastAPI，仅回环）+ Edge 无头 + 合成麦克风，跑生产构建，16 项断言全过：实时预览取到 `paragraphs+tail`（“The point of this exercise is to practice” / “这个练习的要点是练习”）；4 条历史 + 实时行同屏且每句都有对齐译文；数字 0 号段落库；切到 `#/learning` 后浮动入口显示「课堂进行中 00:09 返回」，期间音频仍增长 112,000 字节（约 3.5 秒 @32KB/s），返回后相位仍是「听课中」且历史完整；390px 视口 `scrollWidth === clientWidth === 390`；暂停/继续正常；停止后 `finalize` 计数 2、补齐最后两句，落库 6 行 6 译文，结束文案为「课堂已结束」。配置实测为 `displayMode: "sentence"` 且不含 `segmentation`。
 - **边界**：真实上游是否每条都下发 `translation.partial` / `tailTranslation` 仍取决于 Lecsync 服务端，本轮用假网关覆盖了两种字段形态；真实课堂的延时读数仍需下次上课时观察。本轮未改网关、协议、计费与同步逻辑；未部署（等待用户确认）。Mimosa 深度安全审计仍未完成，不得据此声称通过安全审计。
 
+## 网页版课堂小窗 + 屏幕常亮（2026-11-02，待发布）
+
+- **需求**：用户问浏览器能否申请「悬浮窗权限」并一直保活。结论先说清：网页没有 Android 的 `SYSTEM_ALERT_WINDOW`，也没有后台保活权限；桌面 Chromium 有 Document Picture-in-Picture，可做始终置顶的小窗；手机浏览器不支持任意 DOM 小窗，只能做屏幕常亮。
+- **实现**：
+  1. **课堂小窗**（`lib/classroom-pip.tsx` + `components/classroom/ClassroomMini.tsx`）：仅当 `documentPictureInPicture` 存在时显示「小窗」按钮（桌面 Chrome/Edge 116+）。用户点击后用 `requestWindow({380,500})` 开窗，镜像主文档的样式表（外链改绝对地址 + `<base>`）、渲染独立的 React 根；小窗显示阶段、计时、最近 8 句（原文 + 译文）与实时半句，并提供暂停/继续、停止、回到课堂、关闭小窗。与主页面共享全局 `ClassroomController`，所以主窗口最小化/切标签页时继续计时、采集与落库。
+  2. **屏幕常亮**（`hooks/useScreenWakeLock.ts`）：课堂进行中在 `Shell` 里申请 `navigator.wakeLock.request("screen")`；页面重新可见时补申请；停止课堂即释放。不支持、页面不可见或用省电模式拒绝时静默降级。
+  3. **补翻队列单例**（`lib/translation-queue-registry.ts`）：停止可能从主页面或小窗触发，两边共用同一个 `TranslationQueue`，避免同一批未翻译行重复排队、重复扣额度。
+  4. **降级**：Safari/Firefox/手机浏览器不显示小窗按钮；设置面板注明「锁屏或切到其他 App 仍可能被系统暂停，需要真正后台录音请用 App」。
+- **测试**：`tsc --noEmit` 通过；vitest **142 项 / 17 文件**通过；`vite build` 通过。
+- **端到端**（假网关 + Edge 156 无头 + 合成麦克风，生产构建）：
+  - 小窗实际打开：标题「知习 · 课堂小窗」、body class `pip-body`、内部尺寸 301×397、计时字号 28px、样式表已镜像、`base` 指向主文档；显示 5 条转写（4 条历史 + 实时行）且每条都有译文；按钮为「暂停 / 停止 / 回到课堂 / 关闭小窗」。
+  - 在小窗点「暂停」「继续」会驱动主页面相位（已暂停 → 听课中）；切到 `#/learning` 后小窗仍打开、相位仍是「听课中」，3.2 秒内音频继续增长 **102,400 字节**；从小窗点「回到课堂」主窗口回到 `#/` 且小窗保留；关闭小窗后主会话仍是「听课中」。
+  - Wake Lock：实测真实 `navigator.wakeLock.request('screen')` 返回 `released:false`；E2E 计数为申请 1 次、停止时释放 1 次。
+  - 停止后相位「已结束」、落库 6 行、`finalize` 计数 2；390px 视口 `scrollWidth === clientWidth === 390`，操作区宽 186px 不溢出。
+  - 小窗截图与主页面截图已人工核对（桌面 1440 / 手机 390）。
+- **边界**：Document PiP 仅桌面 Chromium；关掉主标签页会同时结束课堂；Wake Lock 只防熄屏，不防切 App/锁屏/系统杀后台；手机端没有悬浮窗权限，真正后台录音仍以 App 为准。本轮未改网关、协议、计费与同步。Mimosa 深度审计未完成，不据此声称通过安全审计。
+
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
