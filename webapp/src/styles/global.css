@@ -1128,6 +1128,134 @@ select.text-input {
   }
 }
 
+/* ── 课堂小窗（Document Picture-in-Picture）──
+   小窗文档只有复制过去的样式表，没有主应用的 .app 外壳，所以这里自带完整布局。 */
+.pip-body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+#classroom-pip-root {
+  height: 100%;
+}
+
+.pip {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px;
+  gap: 10px;
+}
+
+.pip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pip__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.pip__timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.pip__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 2px;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  overscroll-behavior: contain;
+}
+
+.pip__line {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pip__line:last-child {
+  border-bottom: none;
+}
+
+.pip__source {
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.pip__source .live-line__wave {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.pip__translation {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.pip__line--live {
+  background: var(--brand-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.pip__empty {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.pip__status {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+.pip__foot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pip__foot .btn {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.pip__hint {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-4);
+}
+
+/* 纪要 */
+
 /* 纪要 */
 .digest-section + .digest-section {
   margin-top: 12px;

@@ -15,8 +15,10 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, newUid, type ClassroomSessionRecord, type DoubtEventRecord, type TranscriptLineRecord, type TranslationRecord } from "../lib/db/db";
 import { loadSaveAudio, saveSaveAudio } from "../lib/classroom";
 import { classroomSession } from "../lib/classroom-session";
+import { openClassroomPip, supportsClassroomPip } from "../lib/classroom-pip";
+import { enqueueSessionTranslation } from "../lib/translation-queue-registry";
 import { useClassroomSnapshot } from "../hooks/useClassroomSnapshot";
-import { TranslationQueue, pickLineTranslation } from "../lib/translate-queue";
+import { pickLineTranslation } from "../lib/translate-queue";
 import { describeError, isActivationError, loadGatewayUrl } from "../lib/api/client";
 import ActivationNotice from "../components/ActivationNotice";
 import { retranscribeWav, type TranscriptSegment } from "../lib/audio/transcribe-job";
@@ -71,15 +73,8 @@ function clockOf(timestampMillis: number, baseMillis: number | null): string {
 export default function ClassroomPage() {
   const navigate = useNavigate();
   const snapshot = useClassroomSnapshot();
-  // 补翻队列的目标语言跟着讲师语言走：英文课翻成中文，中文课翻成英文。
-  const queueRef = useRef<TranslationQueue | null>(null);
-  const queueFor = (sourceLanguage: string): TranslationQueue => {
-    const target: "zh-CN" | "en-US" = sourceLanguage === "en" ? "zh-CN" : "en-US";
-    if (!queueRef.current || queueRef.current.targetLang !== target) {
-      queueRef.current = new TranslationQueue(target);
-    }
-    return queueRef.current;
-  };
+  // 补翻队列是进程内单例：主页面与小窗谁触发停止都用同一个队列，避免重复排队。
+  const [pipSupported] = useState(() => supportsClassroomPip());
   // 切页回来时沿用本节已选的讲师语言；否则设置面板会显示成默认英文，和正在跑的课堂不一致。
   const [sourceLang, setSourceLang] = useState(() => classroomSession.getSnapshot().sourceLanguage || "en");
   const [displayMode, setDisplayMode] = useState<"sentence" | "classic">(
@@ -186,7 +181,17 @@ export default function ClassroomPage() {
     await classroomSession.stop();
     const finished = classroomSession.getSnapshot();
     if (finished.sessionId != null) {
-      void queueFor(finished.sourceLanguage).enqueueSession(finished.sessionId);
+      enqueueSessionTranslation(finished.sessionId, finished.sourceLanguage);
+    }
+  };
+
+  /** 打开置顶小窗；不支持 Document PiP 的浏览器不显示该按钮，失败时给可读提示。 */
+  const openPip = async () => {
+    try {
+      const opened = await openClassroomPip({ onReturn: () => navigate("/") });
+      if (!opened) setGenerateStatus("当前浏览器不支持课堂小窗，请使用桌面版 Chrome / Edge。");
+    } catch (error) {
+      setGenerateStatus(`课堂小窗打开失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -274,7 +279,7 @@ export default function ClassroomPage() {
         );
       });
       setGenerateStatus(`补转写完成：${outcome.segments.length} 行，正在重新翻译…`);
-      void queueFor(snapshot.sourceLanguage).enqueueSession(sessionId);
+      enqueueSessionTranslation(sessionId, snapshot.sourceLanguage);
     } catch (error) {
       reportError(error);
     } finally {
@@ -349,6 +354,11 @@ export default function ClassroomPage() {
                     <button className="btn btn-lg btn-danger" onClick={() => void stop()}>
                       停止
                     </button>
+                    {pipSupported && (
+                      <button className="btn btn-lg" onClick={() => void openPip()} title="在置顶小窗里显示课堂状态（桌面 Chrome / Edge）">
+                        小窗
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -567,6 +577,10 @@ export default function ClassroomPage() {
               <option value="off">不保存（只留文字转写）</option>
               <option value="on">保存整节 WAV 到本浏览器（占用较多存储）</option>
             </select>
+            <p className="card-desc" style={{ margin: 0 }}>
+              听课期间会尝试保持屏幕常亮；桌面 Chrome / Edge 可点「小窗」把课堂置顶显示。锁屏或切到其他 App
+              仍可能被系统暂停，需要真正后台录音请用 App。
+            </p>
             <div className="btn-row">
               <button className="btn btn-primary" onClick={() => setShowSettings(false)}>
                 完成
