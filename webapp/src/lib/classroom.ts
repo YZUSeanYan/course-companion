@@ -6,6 +6,7 @@ import { zhixi, sleep } from "./api/client";
 import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason } from "./audio/realtime";
 import { encodeWav } from "./audio/wav";
+import { splitClauses, splitTranslation } from "./audio/clause-splitter";
 import { getOfflineEngine, type OfflineCallbacks, type OfflineSegment } from "./offline/engine";
 import type { RealtimeConfig, RealtimeEvent } from "./api/types";
 import type { TranslationRecord } from "./db/db";
@@ -16,6 +17,9 @@ export interface ClassroomSnapshot {
   phase: ClassroomPhase;
   sessionId: number | null;
   partialText: string;
+  /** 未定稿片段的译文预览（服务端 translation.partial / transcript.partial.tailTranslation）。
+   *  没有它时，用户要等整句定稿且翻译完成才看到译文，等待感明显强于 App。 */
+  partialTranslation: string;
   elapsedSeconds: number;
   usageSeconds: number;
   statusMessage: string | null;
@@ -111,6 +115,7 @@ export class ClassroomController {
     phase: "idle",
     sessionId: null,
     partialText: "",
+    partialTranslation: "",
     elapsedSeconds: 0,
     usageSeconds: 0,
     statusMessage: null,
@@ -120,7 +125,10 @@ export class ClassroomController {
   private stream: MediaStream | null = null;
   private pcmFrames: Int16Array[] = [];
   private realtime: RealtimeSession | null = null;
-  private segmentLines = new Map<string, number>();
+  /** 一个 segment 可能被拆成多行，所以保存有序的行 id 列表。 */
+  private segmentLines = new Map<string, number[]>();
+  /** 与上面一一对应：每行的源句文本，拆分译文时按长度比例兜底。 */
+  private segmentClauses = new Map<string, string[]>();
   private pendingTranslations = new Map<string, RealtimeEvent>();
   private usageSeconds = 0;
   private startedAt = 0;
@@ -162,6 +170,7 @@ export class ClassroomController {
       phase: "connecting",
       statusMessage: options.mode === "offline" ? "正在准备离线识别引擎…" : "正在连接云端课堂…",
       partialText: "",
+      partialTranslation: "",
       usageSeconds: 0,
     });
     try {
@@ -192,6 +201,7 @@ export class ClassroomController {
         digestJson: "",
       });
       this.segmentLines.clear();
+      this.segmentClauses.clear();
       this.pendingTranslations.clear();
       this.pcmFrames = [];
       this.digestJson = "";
@@ -429,43 +439,64 @@ export class ClassroomController {
         this.emit({ statusMessage: null });
         break;
       case "transcript.partial":
-        this.emit({ partialText: event.text ?? "" });
+        // 未定稿片段可能带译文预览（sentence 模式的 tailTranslation），有就先显示，
+        // 不必等定稿 + 整句翻译完成。
+        this.emit({
+          partialText: event.text ?? "",
+          partialTranslation: (event.tailTranslation as string | undefined) ?? "",
+        });
         break;
       case "transcript.final": {
         const text = (event.text ?? "").trim();
         const segment = event.segmentId;
         if (!text || !segment) return;
         const now = Date.now();
-        const lineId = await db.transcriptLines.add({
-          uid: newUid(),
-          sessionId,
-          timestampMillis: now,
-          text,
-          segmentKey: segment,
-          speaker: event.speaker ?? null,
-          startMs: event.startMs ?? null,
-          endMs: event.endMs ?? null,
-          language: event.language ?? null,
-        });
-        this.segmentLines.set(segment, lineId);
+        // 云端 sentence 模式常把一整段话当成一个 final（讲者不停顿时甚至一句到底），
+        // 而每条转写都会渲染成一张卡片。先按字幕节奏拆句再逐句落库，
+        // 与 Android 的 TranscriptClauseSplitter 同一套规则。
+        const clauses = splitClauses(text);
+        const lineIds: number[] = [];
+        for (const [index, clause] of clauses.entries()) {
+          const lineId = await db.transcriptLines.add({
+            uid: newUid(),
+            sessionId,
+            // 同段的多句共用起点时间，但保持稳定顺序
+            timestampMillis: now + index,
+            text: clause,
+            segmentKey: clauses.length > 1 ? `${segment}#${index}` : segment,
+            speaker: event.speaker ?? null,
+            startMs: event.startMs ?? null,
+            endMs: event.endMs ?? null,
+            language: event.language ?? null,
+          });
+          lineIds.push(lineId);
+          this.callbacks?.onLineSaved?.(lineId);
+        }
+        this.segmentLines.set(segment, lineIds);
+        this.segmentClauses.set(segment, clauses);
         const pending = this.pendingTranslations.get(segment);
         if (pending) {
           this.pendingTranslations.delete(segment);
-          await this.saveTranslation(lineId, pending);
+          await this.saveTranslation(segment, lineIds, pending);
         }
-        this.emit({ partialText: "" });
-        this.callbacks?.onLineSaved?.(lineId);
+        this.emit({ partialText: "", partialTranslation: "" });
         break;
       }
+      case "translation.partial":
+        // 流式译文：先把已确认的部分显示出来。网页版此前忽略这个事件，
+        // 只能等 final 才看到译文，主观延时因此远高于 App。
+        this.emit({ partialTranslation: event.text ?? "" });
+        break;
       case "translation.final": {
         const segment = event.segmentId;
         if (!segment) return;
-        const lineId = this.segmentLines.get(segment);
-        if (lineId == null) {
+        const lineIds = this.segmentLines.get(segment);
+        if (lineIds == null) {
           this.pendingTranslations.set(segment, event);
         } else {
-          await this.saveTranslation(lineId, event);
+          await this.saveTranslation(segment, lineIds, event);
         }
+        this.emit({ partialTranslation: "" });
         break;
       }
       case "usage.update":
@@ -492,26 +523,41 @@ export class ClassroomController {
     }
   }
 
-  private async saveTranslation(lineId: number, event: RealtimeEvent): Promise<void> {
+  /**
+   * 保存一个 segment 的译文。
+   *
+   * 源文被拆成多句后，译文也要按同样的句数拆开，否则会出现「三句源文 + 一整段译文」
+   * 的错位：每张卡片都挂上同一段完整译文。拆分交给 splitTranslation，
+   * 先按标点切、再按源句长度比例兜底。
+   */
+  private async saveTranslation(segment: string, lineIds: number[], event: RealtimeEvent): Promise<void> {
     const translated = (event.text ?? "").trim();
-    if (!translated) return;
-    const existing = await db.translations
-      .where("[transcriptLineId+targetLang]")
-      .equals([lineId, event.targetLanguage ?? "zh"])
-      .first();
-    const record: TranslationRecord = {
-      id: existing?.id,
-      transcriptLineId: lineId,
-      targetLang: event.targetLanguage ?? "zh",
-      sourceHash: "",
-      translatedText: translated,
-      status: "done",
-      updatedAtMillis: Date.now(),
-    };
-    if (existing) {
-      await db.translations.update(existing.id!, record);
-    } else {
-      await db.translations.add(record);
+    if (!translated || lineIds.length === 0) return;
+    const targetLang = event.targetLanguage ?? "zh";
+    const clauses = this.segmentClauses.get(segment) ?? [];
+    const parts =
+      lineIds.length === 1 ? [translated] : splitTranslation(translated, lineIds.length, clauses);
+    for (const [index, lineId] of lineIds.entries()) {
+      const part = (parts[index] ?? "").trim();
+      if (!part) continue;
+      const existing = await db.translations
+        .where("[transcriptLineId+targetLang]")
+        .equals([lineId, targetLang])
+        .first();
+      const record: TranslationRecord = {
+        id: existing?.id,
+        transcriptLineId: lineId,
+        targetLang,
+        sourceHash: "",
+        translatedText: part,
+        status: "done",
+        updatedAtMillis: Date.now(),
+      };
+      if (existing) {
+        await db.translations.update(existing.id!, record);
+      } else {
+        await db.translations.add(record);
+      }
     }
   }
 }
