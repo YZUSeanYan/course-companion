@@ -107,4 +107,8 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
         path.relative_to(root)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Page not found")
-        return FileResponse(path, media_type="image/jpeg")
+        return FileResponse(
+            path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store", "Vary": "Authorization"},
+        )
