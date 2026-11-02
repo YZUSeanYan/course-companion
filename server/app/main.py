@@ -224,7 +224,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             ) from exc
-        if payload.code is None and settings.require_activation_code:
+        if payload.code is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="该账号已启用验证码保护，请先获取短信验证码后再激活",
@@ -243,8 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise AccountDisabled()
         if state == "expired":
             raise AccountExpired(str(account["valid_until"]))
-        if payload.code is not None:
-            verify_activation_code(db, settings, phone, payload.code)
+        verify_activation_code(db, settings, phone, payload.code)
         db.bind_device(str(account["id"]), device_id, int(account["max_devices"]))
         request.state.account_id = str(account["id"])
         return AccountStatusResponse(
