@@ -58,10 +58,8 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
     ip_apply_limiter = SlidingWindowRateLimiter(settings.trial_apply_per_ip_hour, 3600)
 
     def client_ip(request: Request) -> str:
-        return (
-            request.headers.get("x-real-ip")
-            or (request.client.host if request.client else "unknown")
-        )
+        # Do not let callers forge their IP rate-limit key via X-Real-IP.
+        return request.client.host if request.client else "unknown"
 
     def normalize_or_error(raw: str) -> str:
         try:

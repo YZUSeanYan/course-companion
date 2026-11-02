@@ -90,7 +90,7 @@ class Settings:
     trial_code_per_phone_hour: int = 5
     trial_code_per_ip_hour: int = 10
     trial_apply_per_ip_hour: int = 20
-    require_activation_code: bool = False
+    require_activation_code: bool = True
     activation_code_ttl_seconds: int = 300
     activation_code_max_attempts: int = 5
     activation_code_resend_seconds: int = 60
@@ -181,7 +181,7 @@ class Settings:
             trial_code_per_phone_hour=_int_env("TRIAL_CODE_PER_PHONE_HOUR", 5, 1, 100),
             trial_code_per_ip_hour=_int_env("TRIAL_CODE_PER_IP_HOUR", 10, 1, 1000),
             trial_apply_per_ip_hour=_int_env("TRIAL_APPLY_PER_IP_HOUR", 20, 1, 1000),
-            require_activation_code=_bool_env("REQUIRE_ACTIVATION_CODE", False),
+            require_activation_code=_bool_env("REQUIRE_ACTIVATION_CODE", True),
             activation_code_ttl_seconds=_int_env("ACTIVATION_CODE_TTL_SECONDS", 300, 60, 1800),
             activation_code_max_attempts=_int_env("ACTIVATION_CODE_MAX_ATTEMPTS", 5, 1, 20),
             activation_code_resend_seconds=_int_env(
