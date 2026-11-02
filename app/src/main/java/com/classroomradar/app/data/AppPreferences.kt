@@ -123,6 +123,10 @@ class AppPreferences private constructor(context: Context) {
         get() = preferences.getBoolean(KEY_AUTO_CLOUD_SYNC, true)
         set(value) = preferences.edit { putBoolean(KEY_AUTO_CLOUD_SYNC, value) }
 
+    var learningOutputChinese: Boolean
+        get() = preferences.getBoolean(KEY_LEARNING_OUTPUT_ZH, true)
+        set(value) = preferences.edit { putBoolean(KEY_LEARNING_OUTPUT_ZH, value) }
+
     /** sessionId -> absolute WAV path waiting for cloud re-transcription. */
     fun pendingCloudSync(): Map<Long, String> {
         val raw = preferences.getString(KEY_PENDING_CLOUD_SYNC, "") ?: return emptyMap()
@@ -191,6 +195,7 @@ class AppPreferences private constructor(context: Context) {
         private const val KEY_AUTO_OFFLINE = "auto_offline_on_network_loss"
         private const val KEY_OFFLINE_FIRST = "offline_first_start"
         private const val KEY_AUTO_CLOUD_SYNC = "auto_cloud_sync"
+        private const val KEY_LEARNING_OUTPUT_ZH = "learning_output_chinese"
         private const val KEY_PENDING_CLOUD_SYNC = "pending_cloud_sync"
 
         @Volatile private var instance: AppPreferences? = null

@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -766,6 +767,16 @@ class MainActivity : ComponentActivity() {
                             courseName = courseDetail.course?.name ?: "课程",
                             type = learningCategoryType.orEmpty(),
                             items = courseDetail.learningItems,
+                            onUpdateItem = { item, title, content, translation, example ->
+                                learningPresenter.updateLearningItem(
+                                    item.id,
+                                    title,
+                                    content,
+                                    translation,
+                                    example,
+                                )
+                            },
+                            onDeleteItem = learningPresenter::deleteLearningItem,
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -1430,8 +1441,13 @@ private fun AppScaffold(
     val widthDp = LocalConfiguration.current.screenWidthDp
     val useRail = widthDp >= 600
     val railInset = if (useRail) 112.dp else 0.dp
-    val contentCap = if (useRail) 840.dp else Int.MAX_VALUE.dp
-    val chromeCap = if (useRail) 952.dp else Int.MAX_VALUE.dp
+    // 首页是双栏工作台，大屏尽量用满；其余页面保持可读行宽。头部与内容共用同一上限，
+    // 左右边缘对齐，避免出现“标题条比内容宽一截”的悬浮感。
+    val contentCap = when {
+        !useRail -> Int.MAX_VALUE.dp
+        page == AppPage.Home -> (widthDp - railInset.value - 48f).dp.coerceAtMost(1200.dp)
+        else -> 880.dp
+    }
     // 首页轮播标语：后台可远控；未配置或拉取失败回退内置默认两句。
     val mottos = taglines.filter { it.isNotBlank() }.ifEmpty { listOf("知行合一", "学而时习之，不亦说乎") }
     var mottoIndex by remember(mottos) { mutableStateOf(0) }
@@ -1452,12 +1468,18 @@ private fun AppScaffold(
         ) {
             RadarAmbientBackground()
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                Box(modifier = Modifier.widthIn(max = contentCap).fillMaxWidth().fillMaxHeight()) {
+                Box(
+                    modifier = Modifier
+                        .padding(start = railInset)
+                        .widthIn(max = contentCap)
+                        .fillMaxWidth()
+                        .fillMaxHeight(),
+                ) {
                     // Content starts below the floating header; the bottom stays unpadded so
                     // lists can scroll under the glass navigation/dock and be refracted by them.
                     content(
                         androidx.compose.foundation.layout.PaddingValues(
-                            start = railInset,
+                            start = 0.dp,
                             top = topInset + 88.dp,
                             bottom = 0.dp,
                         ),
@@ -1466,7 +1488,13 @@ private fun AppScaffold(
             }
         }
         GlassPanel(
-            modifier = Modifier.align(Alignment.TopCenter).widthIn(max = chromeCap).fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(start = railInset)
+                .widthIn(max = contentCap)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = if (useRail) 20.dp else 16.dp, vertical = 10.dp),
             tone = GlassTone.Neutral,
             effect = GlassEffect.Elevated,
             shape = RoundedCornerShape(24.dp),
@@ -1773,22 +1801,56 @@ private fun HomeScreen(
     // 录音中（含暂停）收窄关联卡与状态卡，把空间让给实时课堂记录。
     val liveMode = state.isRecording || state.isPaused
     // The list itself owns the bottom padding, so transcript cards slide under the glass
-    // dock and navigation bar and are refracted by them as they pass.
-    val bottomPad = if (LocalConfiguration.current.screenWidthDp >= 600) 148.dp else 208.dp
+    // dock and navigation bar and are refracted by them as they pass. Tablets add the
+    // system navigation inset because the dock is lifted by navigationBarsPadding().
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomPad = if (LocalConfiguration.current.screenWidthDp >= 600) 160.dp + navBottom else 208.dp
     if (twoPane) {
         // ≥840dp（平板/折叠展开/横屏）：转写左栏、提问右栏，一屏同时看两块，内容不拉伸。
-        Row(modifier = modifier.fillMaxSize().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 左栏转写卡按剩余高度铺满，右栏在没有疑问时用占位卡填满，避免留下大片空白。
+        val leftWeight = if (LocalConfiguration.current.screenWidthDp >= 1100) 1.65f else 1.4f
+        Row(
+            modifier = modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, bottom = bottomPad),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                modifier = Modifier.weight(leftWeight).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                RecordingCourseSelector(
-                    courses = courses,
-                    selectedCourseId = selectedCourseId,
-                    onCourseSelected = onCourseSelected,
-                    compact = liveMode,
-                )
-                StatusCard(state.isRecording, state.elapsedSeconds, state.isPaused, compact = liveMode)
+                if (LocalConfiguration.current.screenWidthDp >= 1000) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RecordingCourseSelector(
+                            courses = courses,
+                            selectedCourseId = selectedCourseId,
+                            onCourseSelected = onCourseSelected,
+                            modifier = Modifier.weight(1f),
+                            compact = true,
+                        )
+                        StatusCard(
+                            state.isRecording,
+                            state.elapsedSeconds,
+                            state.isPaused,
+                            compact = true,
+                            modifier = Modifier.width(168.dp),
+                        )
+                    }
+                } else {
+                    // Narrow two-pane (foldable/portrait): keep both controls full width so the
+                    // course name never collapses to an ellipsis.
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        RecordingCourseSelector(
+                            courses = courses,
+                            selectedCourseId = selectedCourseId,
+                            onCourseSelected = onCourseSelected,
+                            compact = true,
+                        )
+                        StatusCard(state.isRecording, state.elapsedSeconds, state.isPaused, compact = true)
+                    }
+                }
                 TranscriptCard(
                     transcript = state.transcript,
                     liveTranscript = state.liveTranscript,
@@ -1797,17 +1859,28 @@ private fun HomeScreen(
                     translations = state.translations,
                     cloudMetrics = state.cloudMetrics,
                     expanded = liveMode,
+                    recording = state.isRecording,
+                    paused = state.isPaused,
+                    modifier = Modifier.weight(1f),
+                    fillHeight = true,
                 )
-                Spacer(Modifier.height(bottomPad))
-                state.liveMinutes?.let { LiveMinutesCard(it) }
             }
-            LazyColumn(
-                modifier = Modifier.weight(1f),
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomPad),
             ) {
-                item { QuestionSectionHeader(state, onOpenTimeline) }
-                questionItems(state)
+                QuestionSectionHeader(state, onOpenTimeline)
+                state.liveMinutes?.let { LiveMinutesCard(it) }
+                if (state.doubts.isEmpty()) {
+                    EmptyQuestionCard(Modifier.weight(1f), expanded = true)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        questionItems(state)
+                    }
+                }
             }
         }
         return
@@ -1835,6 +1908,8 @@ private fun HomeScreen(
                 translations = state.translations,
                 cloudMetrics = state.cloudMetrics,
                 expanded = liveMode,
+                recording = state.isRecording,
+                paused = state.isPaused,
             )
         }
         item { QuestionSectionHeader(state, onOpenTimeline) }
@@ -1846,7 +1921,11 @@ private fun HomeScreen(
 @Composable
 private fun QuestionSectionHeader(state: DashboardState, onOpenTimeline: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text("我的疑问", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(
+            if (state.doubts.isEmpty()) "我的疑问" else "我的疑问 · ${state.doubts.size}",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
         Spacer(Modifier.weight(1f))
         GlassInlineAction(
             label = "历史",
@@ -2020,9 +2099,15 @@ private fun DockPauseButton(paused: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatusCard(recording: Boolean, seconds: Long, paused: Boolean = false, compact: Boolean = false) {
+private fun StatusCard(
+    recording: Boolean,
+    seconds: Long,
+    paused: Boolean = false,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     GlassPanel(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         tone = if (recording) GlassTone.AlertSoft else GlassTone.Neutral,
         effect = GlassEffect.Static,
         shape = RoundedCornerShape(if (compact) 14.dp else 18.dp),
@@ -2092,6 +2177,10 @@ private fun TranscriptCard(
     cloudMetrics: RecorderDashboardMetrics? = null,
     liveTranslation: String? = null,
     expanded: Boolean = false,
+    recording: Boolean = false,
+    paused: Boolean = false,
+    modifier: Modifier = Modifier,
+    fillHeight: Boolean = false,
 ) {
     // While recording/paused the transcript owns most of the screen; idle keeps the compact card.
     val viewportHeight = if (expanded) {
@@ -2099,88 +2188,155 @@ private fun TranscriptCard(
     } else {
         236.dp
     }
-    GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val scrollState = rememberScrollState()
+    LaunchedEffect(transcript.size, liveTranscript.length) {
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+    val transcriptBody: @Composable () -> Unit = {
+        if (transcript.isEmpty() && liveTranscript.isEmpty()) {
+            Text(
+                if (paused) "已暂停，继续后会接着记录"
+                else if (recording) "正在聆听，转写内容会实时显示在这里"
+                else "转写内容会实时显示在这里",
+                color = LiquidTextSecondary,
+            )
+        } else {
+            transcript.takeLast(30).forEach { line ->
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (line.speaker != null) Text(line.speaker, style = MaterialTheme.typography.labelMedium, color = RadarBrandDeep)
+                    Text(line.text, color = LiquidTextPrimary)
+                    val translation = translations[line.id]
+                    if (translation != null) {
+                        Text(
+                            when {
+                                translation.translatedText.isNotBlank() -> translation.translatedText
+                                translation.status == TranslationEntity.STATUS_FAILED -> "翻译失败，可稍后重试"
+                                else -> "正在翻译…"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (translation.status == TranslationEntity.STATUS_FAILED) RadarAlert else LiquidTextSecondary,
+                        )
+                    }
+                }
+            }
+            if (liveTranscript.isNotEmpty()) {
+                GlassPanel(
+                    modifier = Modifier.animateContentSize(),
+                    tone = GlassTone.Accent,
+                    effect = GlassEffect.Static,
+                    shape = RoundedCornerShape(18.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "正在识别  $liveTranscript",
+                            color = LiquidTextPrimary,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        // Streaming translation preview, like the official bilingual subtitle.
+                        if (!liveTranslation.isNullOrBlank()) {
+                            Text(
+                                "译  $liveTranslation",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LiquidTextSecondary,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    GlassPanel(modifier = modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
+        Column(
+            modifier = if (fillHeight) Modifier.fillMaxHeight() else Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Mic, null, modifier = Modifier.size(20.dp), tint = RadarBrand)
                 Spacer(Modifier.width(8.dp))
-                Text("实时课堂记录", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+                Text(
+                    "实时课堂记录",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = LiquidTextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 cloudMetrics?.let { metrics ->
-                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.width(10.dp))
                     // Same figures the official client quotes: ~0.28s first word, ~88ms behind for translation.
                     Text(
                         buildString {
-                            append("首字 ~")
+                            append("首字 ")
                             append(String.format(java.util.Locale.US, "%.2fs", metrics.recognitionLatencyMs / 1000.0))
                             metrics.translationLatencyMs?.let {
-                                append(" · 译 ~")
+                                append(" · 译 ")
                                 append(String.format(java.util.Locale.US, "%.2fs", it / 1000.0))
                             }
                         },
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = LiquidTextSecondary,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
-            // Fixed-height scrollable region: new text sticks to the bottom, the user can
-            // scroll up to read earlier lines without the card growing taller.
-            val scrollState = rememberScrollState()
-            LaunchedEffect(transcript.size, liveTranscript.length) {
-                scrollState.animateScrollTo(scrollState.maxValue)
-            }
-            Column(
-                modifier = Modifier.fillMaxWidth().height(viewportHeight).verticalScroll(scrollState),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+            if (fillHeight) {
+                // Tablet two-pane: the card owns the remaining column height and scrolls inside.
                 if (transcript.isEmpty() && liveTranscript.isEmpty()) {
-                    Text("转写内容会实时显示在这里", color = LiquidTextSecondary)
-                } else {
-                    transcript.takeLast(30).forEach { line ->
-                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            if (line.speaker != null) Text(line.speaker, style = MaterialTheme.typography.labelMedium, color = RadarBrandDeep)
-                            Text(line.text, color = LiquidTextPrimary)
-                            val translation = translations[line.id]
-                            if (translation != null) {
-                                Text(
-                                    when {
-                                        translation.translatedText.isNotBlank() -> translation.translatedText
-                                        translation.status == TranslationEntity.STATUS_FAILED -> "翻译失败，可稍后重试"
-                                        else -> "正在翻译…"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (translation.status == TranslationEntity.STATUS_FAILED) RadarAlert else LiquidTextSecondary,
-                                )
-                            }
-                        }
-                    }
-                    if (liveTranscript.isNotEmpty()) {
-                        GlassPanel(
-                            modifier = Modifier.animateContentSize(),
-                            tone = GlassTone.Accent,
-                            effect = GlassEffect.Static,
-                            shape = RoundedCornerShape(18.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    "正在识别  $liveTranscript",
-                                    color = LiquidTextPrimary,
-                                    maxLines = 8,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                // Streaming translation preview, like the official bilingual subtitle.
-                                if (!liveTranslation.isNullOrBlank()) {
-                                    Text(
-                                        "译  $liveTranslation",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = LiquidTextSecondary,
-                                        maxLines = 4,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
+                            Icon(
+                                if (paused) Icons.Outlined.Pause else Icons.Outlined.Mic,
+                                null,
+                                modifier = Modifier.size(34.dp),
+                                tint = RadarBrand.copy(alpha = 0.55f),
+                            )
+                            Text(
+                                when {
+                                    paused -> "已暂停"
+                                    recording -> "正在聆听…"
+                                    else -> "准备开始一节课"
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = LiquidTextPrimary,
+                            )
+                            Text(
+                                when {
+                                    paused -> "继续记录后，新的原文与译文会出现在这里"
+                                    recording -> "说第一句话后，原文与译文会逐句出现在这里"
+                                    else -> "开始听课后，原文与译文会逐句出现在这里"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LiquidTextSecondary,
+                            )
                         }
                     }
+                } else {
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(scrollState),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        transcriptBody()
+                    }
+                }
+            } else {
+                // Fixed-height scrollable region: new text sticks to the bottom, the user can
+                // scroll up to read earlier lines without the card growing taller.
+                Column(
+                    modifier = Modifier.fillMaxWidth().height(viewportHeight).verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    transcriptBody()
                 }
             }
             if (failureMessage != null) Text(failureMessage, color = LiquidTextPrimary, fontWeight = FontWeight.SemiBold)
@@ -2235,11 +2391,27 @@ private fun DoubtPreviewCard(doubt: DoubtEventEntity) {
 }
 
 @Composable
-private fun EmptyQuestionCard() {
-    GlassPanel(modifier = Modifier.fillMaxWidth().heightIn(min = 84.dp), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
-        Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Icon(Icons.Outlined.Timeline, null, tint = LiquidTextSecondary)
+private fun EmptyQuestionCard(modifier: Modifier = Modifier, expanded: Boolean = false) {
+    GlassPanel(modifier = modifier.fillMaxWidth().heightIn(min = 84.dp), tone = GlassTone.Neutral, effect = GlassEffect.Static, shape = RoundedCornerShape(24.dp)) {
+        Column(
+            modifier = Modifier.align(Alignment.Center).padding(vertical = if (expanded) 20.dp else 0.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Icon(
+                Icons.Outlined.Timeline,
+                null,
+                modifier = if (expanded) Modifier.size(26.dp) else Modifier,
+                tint = LiquidTextSecondary,
+            )
             Text("点击“标记疑问”，记录还没听懂的地方", color = LiquidTextSecondary)
+            if (expanded) {
+                Text(
+                    "标记后会显示在这里，课后可回看时间轴",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LiquidTextSecondary.copy(alpha = 0.72f),
+                )
+            }
         }
     }
 }
@@ -2811,7 +2983,7 @@ private fun SettingsScreen(
         item {
             val context = LocalContext.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("知习 v2.0.6 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
+                Text("知习 v2.0.8 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
                 Text("包含 sherpa-onnx 与 Silero VAD 等开源组件，详情见应用随附的第三方声明。", color = LiquidTextSecondary)
                 GlassTextAction(
                     "访问官网",

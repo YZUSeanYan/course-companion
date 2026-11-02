@@ -189,6 +189,26 @@ class RoomMigrationTest {
         }
     }
 
+    @Test
+    fun migration10To11AddsEditableUpdatedAtWithoutLosingItems() {
+        helper.createDatabase(TEST_DATABASE, 10).apply {
+            execSQL("INSERT INTO courses (id, name, teacher, language, examProfile, courseNature, createdAtMillis) VALUES (1, 'English', '', 'zh-en', 'FOREIGN_CLASS', '', 1)")
+            execSQL(
+                "INSERT INTO learning_items (id, courseId, type, title, content, sourceIdsCsv, inCET6, origin, createdAtMillis) " +
+                    "VALUES (5, 1, 'VOCABULARY', 'lathe', '车床', 'page-1', 0, 'AI', 123456)",
+            )
+            close()
+        }
+        helper.runMigrationsAndValidate(TEST_DATABASE, 11, true, ClassroomDatabase.MIGRATION_10_11).apply {
+            query("SELECT title, updatedAtMillis FROM learning_items WHERE id = 5").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.getString(0) == "lathe")
+                assertTrue(cursor.getLong(1) == 123456L)
+            }
+            close()
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "course-companion-migration-test"
     }

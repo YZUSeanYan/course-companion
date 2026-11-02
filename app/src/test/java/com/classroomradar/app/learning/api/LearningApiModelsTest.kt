@@ -23,6 +23,23 @@ class LearningApiModelsTest {
     }
 
     @Test
+    fun v2RequestCarriesOutputLanguageAndDefaultsToChinese() {
+        val request = LearningPackRequestV2(
+            courseName = "Manufacturing English",
+            language = "zh-en",
+            analysisMode = "MATERIAL",
+            chunks = listOf(AnalysisChunkInput("page-1", "A lathe removes material.", page = 1)),
+        )
+        val encoded = json.encodeToString(LearningPackRequestV2.serializer(), request)
+        assertTrue(encoded.contains("\"outputLanguage\":\"zh\""))
+        val source = json.encodeToString(
+            LearningPackRequestV2.serializer(),
+            request.copy(outputLanguage = "source"),
+        )
+        assertTrue(source.contains("\"outputLanguage\":\"source\""))
+    }
+
+    @Test
     fun validResponsePassesSourceValidation() {
         val request = AnalysisRequest(
             courseName = "Manufacturing English",

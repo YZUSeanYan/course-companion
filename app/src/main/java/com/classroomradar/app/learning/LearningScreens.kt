@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -208,6 +209,20 @@ fun LearningHomeScreen(
                             )
                         }
                         Icon(Icons.Outlined.MenuBook, contentDescription = null, tint = RadarBrand)
+                        Spacer(Modifier.width(2.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .clickable { actionCourse = course },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Outlined.MoreVert,
+                                contentDescription = "编辑或删除课程",
+                                tint = RadarBrandDeep,
+                            )
+                        }
                     }
                 }
             }

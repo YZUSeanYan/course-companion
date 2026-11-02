@@ -29,8 +29,11 @@ import android.os.Looper
  * gateway's own contract codes (4401 auth; legacy 4408 class boundary).
  */
 internal val REALTIME_RECONNECT_CLOSE_CODES = setOf(
-    4001, 4004, 4010, 4011, 4012, 4013, 4016, 1012, 4401, 4408,
+    4001, 4004, 4010, 4011, 1012, 4012, 4013, 4016, 4401, 4408,
 )
+
+/** One persisted clause of an upstream final, kept in order for translation splitting. */
+private data class SegmentedLine(val id: Long, val text: String)
 
 /** Device audio goes only to our gateway, which owns all upstream credentials. */
 class LecsyncRealtimeEngine(
@@ -65,7 +68,7 @@ class LecsyncRealtimeEngine(
     @Volatile private var liveTranslation: String? = null
     private var reconnectAttempts = 0
     private val pending = ByteArrayOutputStream()
-    private val segmentLines = ConcurrentHashMap<String, Long>()
+    private val segmentLines = ConcurrentHashMap<String, List<SegmentedLine>>()
     private val segmentStreams = ConcurrentHashMap<String, String>()
     private val pendingTranslations = ConcurrentHashMap<String, JsonObject>()
     private val latencyTracker = RealtimeLatencyTracker()
@@ -275,12 +278,12 @@ class LecsyncRealtimeEngine(
                 val segment = event.string("segmentId") ?: return
                 val streamOfSegment = segmentStreams[segment] ?: streamId
                 val key = "$streamOfSegment:$segment"
-                val lineId = segmentLines[key]
+                val lines = segmentLines[key]
                 latencyTracker.onTranslationFinal(segment, System.currentTimeMillis())?.let { publishMetrics() }
-                if (lineId == null) {
+                if (lines == null) {
                     pendingTranslations[key] = event
                 } else {
-                    saveTranslation(lineId, event)
+                    saveTranslation(lines, event)
                 }
             }
             "digest.update" -> {
@@ -316,10 +319,14 @@ class LecsyncRealtimeEngine(
         }
     }
 
-    fun registerTranscriptLine(segmentKey: String?, lineId: Long, sourceText: String) {
-        if (segmentKey == null || lineId <= 0) return
-        segmentLines[segmentKey] = lineId
-        pendingTranslations.remove(segmentKey)?.let { translation -> saveTranslation(lineId, translation) }
+    fun registerTranscriptLines(segmentKey: String?, lineIds: List<Long>, sourceTexts: List<String>) {
+        if (segmentKey == null || lineIds.isEmpty()) return
+        val lines = lineIds.mapIndexedNotNull { index, lineId ->
+            if (lineId <= 0) null else SegmentedLine(lineId, sourceTexts.getOrNull(index).orEmpty())
+        }
+        if (lines.isEmpty()) return
+        segmentLines[segmentKey] = lines
+        pendingTranslations.remove(segmentKey)?.let { translation -> saveTranslation(lines, translation) }
     }
 
     /** Publishes live latency at most twice a second and only when a value moved. */
@@ -335,20 +342,27 @@ class LecsyncRealtimeEngine(
         RecordingBus.emit(RecorderEvent.CloudMetrics(recognition, translation))
     }
 
-    private fun saveTranslation(lineId: Long, event: JsonObject) {
+    private fun saveTranslation(lines: List<SegmentedLine>, event: JsonObject) {
         val translated = event.string("text").orEmpty()
         if (translated.isBlank()) return
+        val parts = TranscriptClauseSplitter.splitTranslation(translated, lines.size, lines.map { it.text })
+        val targetLang = event.string("targetLanguage") ?: "zh"
+        val now = System.currentTimeMillis()
         runBlocking {
-            repository.upsertTranslation(
-                TranslationEntity(
-                    transcriptLineId = lineId,
-                    targetLang = event.string("targetLanguage") ?: "zh",
-                    sourceHash = event.string("sourceText").orEmpty().toByteArray().sha256(),
-                    translatedText = translated,
-                    status = TranslationEntity.STATUS_DONE,
-                    updatedAtMillis = System.currentTimeMillis(),
-                ),
-            )
+            lines.forEachIndexed { index, line ->
+                val part = parts.getOrNull(index).orEmpty()
+                if (part.isBlank()) return@forEachIndexed
+                repository.upsertTranslation(
+                    TranslationEntity(
+                        transcriptLineId = line.id,
+                        targetLang = targetLang,
+                        sourceHash = line.text.toByteArray().sha256(),
+                        translatedText = part,
+                        status = TranslationEntity.STATUS_DONE,
+                        updatedAtMillis = now,
+                    ),
+                )
+            }
         }
     }
 

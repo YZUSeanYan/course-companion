@@ -62,8 +62,8 @@ interface SyncDao {
     @Query("UPDATE materials SET courseId=:courseId, title=:title, mimeType=:mimeType, pageCount=:pageCount, importedAtMillis=:importedAtMillis WHERE id=:id")
     fun updateMaterial(id: Long, courseId: Long, title: String, mimeType: String, pageCount: Int, importedAtMillis: Long)
 
-    @Query("UPDATE learning_items SET courseId=:courseId, type=:type, title=:title, content=:content, translation=:translation, example=:example, sourceIdsCsv=:sourceIdsCsv, inCET6=:inCet6, origin=:origin WHERE id=:id")
-    fun updateLearningItem(id: Long, courseId: Long, type: String, title: String, content: String, translation: String?, example: String?, sourceIdsCsv: String, inCet6: Boolean, origin: String)
+    @Query("UPDATE learning_items SET courseId=:courseId, type=:type, title=:title, content=:content, translation=:translation, example=:example, sourceIdsCsv=:sourceIdsCsv, inCET6=:inCet6, origin=:origin, updatedAtMillis=:updatedAtMillis WHERE id=:id")
+    fun updateLearningItem(id: Long, courseId: Long, type: String, title: String, content: String, translation: String?, example: String?, sourceIdsCsv: String, inCet6: Boolean, origin: String, updatedAtMillis: Long)
 
     @Query("UPDATE review_cards SET front=:front, back=:back, dueAtMillis=:dueAtMillis, cardState=:cardState, step=:step, stability=:stability, difficulty=:difficulty, reps=:reps, lapses=:lapses, lastReviewedAtMillis=:lastReviewedAtMillis, lastRating=:lastRating WHERE id=:id")
     fun updateReviewCard(id: Long, front: String, back: String, dueAtMillis: Long, cardState: Int, step: Int?, stability: Double, difficulty: Double, reps: Int, lapses: Int, lastReviewedAtMillis: Long?, lastRating: Int?)

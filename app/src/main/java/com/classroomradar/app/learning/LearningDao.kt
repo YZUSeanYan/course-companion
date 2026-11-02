@@ -68,6 +68,38 @@ interface LearningDao {
     @Query("DELETE FROM learning_items WHERE id = :itemId")
     fun deleteLearningItem(itemId: Long)
 
+    @Query(
+        "UPDATE learning_items SET title = :title, content = :content, translation = :translation, " +
+            "example = :example, updatedAtMillis = :updatedAtMillis WHERE id = :itemId",
+    )
+    fun updateLearningItemContent(
+        itemId: Long,
+        title: String,
+        content: String,
+        translation: String?,
+        example: String?,
+        updatedAtMillis: Long,
+    )
+
+    @Query(
+        "UPDATE review_cards SET front = :front, back = :back, dueAtMillis = :dueAtMillis " +
+            "WHERE learningItemId = :itemId",
+    )
+    fun updateReviewCardForItem(itemId: Long, front: String, back: String, dueAtMillis: Long)
+
+    @Transaction
+    fun updateLearningItemAndCard(
+        itemId: Long,
+        title: String,
+        content: String,
+        translation: String?,
+        example: String?,
+        updatedAtMillis: Long,
+    ) {
+        updateLearningItemContent(itemId, title, content, translation, example, updatedAtMillis)
+        updateReviewCardForItem(itemId, title, content, updatedAtMillis)
+    }
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     fun insertReviewCards(cards: List<ReviewCardEntity>): List<Long>
 

@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.classroomradar.app.data.ClassroomDatabase
 import com.classroomradar.app.learning.review.ReviewScheduler
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,6 +79,50 @@ class LearningPackageDatabaseTest {
         )
         assertEquals(run.model, found?.model)
         assertEquals(null, dao.findCompletedAnalysisRun(courseId, "MATERIAL", 8L, "a".repeat(64), "learning-minutes-v2", "2.0"))
+        dao.deleteCourse(courseId)
+    }
+
+    @Test
+    fun editingItemUpdatesLinkedCardAndDeletingCascades() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val dao = ClassroomDatabase.get(context).learningDao()
+        val now = System.currentTimeMillis()
+        val courseId = dao.insertCourse(CourseEntity(name = "条目编辑测试", createdAtMillis = now))
+        val itemId = dao.insertLearningItems(
+            listOf(
+                LearningItemEntity(
+                    courseId = courseId,
+                    type = LearningItemEntity.TYPE_VOCABULARY,
+                    title = "lathe",
+                    content = "车床",
+                    sourceIdsCsv = "test-source",
+                    createdAtMillis = now,
+                ),
+            ),
+        ).single()
+        val cardId = dao.insertReviewCard(
+            ReviewCardEntity(
+                learningItemId = itemId,
+                front = "lathe",
+                back = "车床",
+                dueAtMillis = now,
+            ),
+        )
+        val editedAt = now + 5_000
+        dao.updateLearningItemAndCard(itemId, "lathe tool", "车床刀具", "车床", "A lathe tool.", editedAt)
+
+        val edited = requireNotNull(dao.getLearningItem(itemId))
+        assertEquals("lathe tool", edited.title)
+        assertEquals("车床刀具", edited.content)
+        assertEquals(editedAt, edited.updatedAtMillis)
+        val card = requireNotNull(dao.getReviewCard(cardId))
+        assertEquals("lathe tool", card.front)
+        assertEquals("车床刀具", card.back)
+        assertEquals(editedAt, card.dueAtMillis)
+
+        dao.deleteLearningItem(itemId)
+        assertNull(dao.getLearningItem(itemId))
+        assertNull(dao.getReviewCard(cardId))
         dao.deleteCourse(courseId)
     }
 }
