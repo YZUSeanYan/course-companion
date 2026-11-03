@@ -15,8 +15,8 @@ android {
         applicationId = "store.seanyan.coursecompanion"
         minSdk = 29
         targetSdk = 36
-        versionCode = 11
-        versionName = "2.0.9"
+        versionCode = 12
+        versionName = "2.0.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "LEARNING_API_BASE_URL", "\"${configuredLearningApiUrl.orElse("http://10.0.2.2:8765").get()}\"")

@@ -672,6 +672,14 @@ class LearningPresenter(private val appContext: Context) {
                     _accountMessage.value = applied.message.ifBlank { "自助开通失败，请稍后重试" }
                     return@launch
                 }
+                // 服务端已开卡，但当前设备令牌无效/已绑定其他账号时不会绑定本机；
+                // 此时不能谎报“已激活”，应引导用户重新获取激活验证码。
+                if (!applied.deviceBound) {
+                    _accountTrialMode.value = false
+                    _codeCooldownUntilMs.value = 0L
+                    _accountMessage.value = "已开通 ${applied.phoneMasked}；请重新获取验证码激活本设备"
+                    return@launch
+                }
                 // 开卡成功后立即拉取账号状态（apply 已绑定当前设备）。
                 val status = learningApi.accountStatus()
                 accountStatusStore.save(status)

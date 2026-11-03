@@ -61,8 +61,10 @@ fun AccountSettingsCard(
     val codeValid = normalizedCode.length == 6
     val trialValid = realName.isNotBlank() && nickname.isNotBlank()
     // 未开通手机号被识别后进入自助开通：显示姓名/昵称输入与「开通并激活」。
+    // 通道切换时同时清空上一步的验证码，避免把已消费的自助验证码带到激活通道。
     LaunchedEffect(trialMode) {
-        if (trialMode) codeSent = false
+        codeSent = false
+        code = ""
     }
 
     // 验证码发送成功（进入冷却）即推进到第二步输入验证码；激活成功后退出第二步。
