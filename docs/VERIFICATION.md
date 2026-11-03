@@ -252,10 +252,10 @@
 - **发布**：从合并后的 `main`（`cb89cd4`）重新构建并发布到 `/opt/zhixi-webapp/r31`，`current` 从 `r30` 切到 `r31`（`r30` 保留回滚）。上传后远端与本地 SHA-256 完全一致；线上 `index-uM6ObI_b.js` 499,871 字节（`1294b08e…f96495`）、`index-CjeYdPlM.css` 25,310 字节（`82c35238…c5ce0`）、`app-icon-DnJRG8jj.png` 72,614 字节（`086eb660…`）。公网 `/web/` 与 `/health` 均 200；线上包内 `documentPictureInPicture` 与 `wakeLock` 均存在，Edge 无头逐页冒烟零控制台错误，1440/390 无横向溢出。**回滚 = `ln -sfn /opt/zhixi-webapp/r30 /opt/zhixi-webapp/current`**。
 - **边界**：Document PiP 仅桌面 Chromium；关掉主标签页会同时结束课堂；Wake Lock 只防熄屏，不防切 App/锁屏/系统杀后台；手机端没有悬浮窗权限，真正后台录音仍以 App 为准。本轮未改网关、协议、计费与同步。Mimosa 深度审计未完成，不据此声称通过安全审计。
 
-## 防 AI 复刻加固（2026-11-03，未部署）
+## 防 AI 复刻加固（2026-11-03，r21 已发布）
 
 - **暴露面审计**：
-  - GitHub 仓库当前为 **public**，且没有 LICENSE（默认版权，未授予开源许可）。这是「用 AI 直接读源码复刻」的最大入口；服务端提示词、限流与风控逻辑都在公开仓库里，前端混淆无法解决。
+  - GitHub 仓库当前为 **public**（负责人决定保持公开 + 专有许可）。公开源码仍是「用 AI 直接读源码复刻」的最大入口；服务端提示词、限流与风控逻辑都在公开仓库里，前端混淆无法解决。
   - 线上网页包（r31）扫描未发现 API key/上游密钥/系统提示词；`server/.env.example` 的敏感项全部是 `replace-*` 占位符（按长度、字符类与熵核验，未输出值），不是真实凭据。
   - Android release 已开启 R8 minify + shrinkResources；试用/激活已有手机号、设备与 IP 三路限流；AI 文本与学习包走账号额度。
 - **本轮代码加固**：
@@ -263,8 +263,10 @@
   2. **学习包限流**：`/v2/learning-pack` 与 `/v2/learning-pack/jobs` 共用每设备 12 次/分钟闸门，降低脚本化批量生成与蒸馏速度（不影响正常一节课几次的节奏）。
   3. **发布产物闸门**：`scripts/check-release-artifacts.mjs` 扫描 `webapp/admin/site` 的 `dist`，拦截环境变量名、`sk-` 密钥、私钥块、长 Bearer、提示词哨兵、上游 `api.lecsync.com` 域名与 source map；只打印文件/行号/规则，不打印命中值。`--self-test` 通过，当前三个 `dist` 全部 PASS。
   4. **使用边界**：新增 `SECURITY.md`，README 明确「公开用于协作与审阅、不授予开源许可（All rights reserved）」，禁止批量抓取、训练/蒸馏竞品模型、转售服务、绕过额度与设备限制。
-- **验证**：server **160 项 pytest 全绿**（新增提示词防护 3 项）；webapp 既有 **142 项 vitest / 17 文件**不受影响；产物扫描 self-test + 三个 dist 全 PASS。
-- **未做/待决策**：把 GitHub 仓库设为私有、增加专有 LICENSE 属于仓库可见性与法律决策，需负责人确认后再执行；本轮服务端改动尚未部署。Mimosa 深度审计未完成，不据此声称通过安全审计。
+  5. **专有许可**：新增 `LICENSE`（All Rights Reserved）：除 GitHub 平台必要的查看/fork 外不授予任何使用许可；禁止部署、分发、衍生、训练/蒸馏竞品模型、转售与移除标识；提交 PR 视为授予权利人使用该贡献的许可。README 与 `SECURITY.md` 已链接。
+- **验证**：server **160 项 pytest 全绿**（新增提示词防护 3 项）；webapp 既有 **142 项 vitest / 17 文件**不受影响；产物扫描 self-test + 三个 dist 全 PASS。r21 的 venv 内导入检查：哨兵存在、规则长度 364、3 个泄露标记、两条学习包路由都有 `learning_pack_limiter.allow`。
+- **发布**：网关从 `/opt/zhixi-gateway-20261102-r20` 切到 `/opt/zhixi-gateway-20261103-r21`。r21 由 r20 **完整复制**后只覆盖 `app/v2_provider.py` 与 `app/v2_routes.py`（先核对两文件与改动前 `main` 的 SHA-256 一致，确认没有生产侧私有补丁）；覆盖后远端 SHA-256 与本地一致（`6859609b…` / `c6a2a11e…`）。systemd 单元备份 `/etc/systemd/system/zhixi-gateway.service.bak-r20-20261103`；重启后 `active`、本机与公网 `/health` 均 200、`/web/` 200、journal 无 traceback。r20 目录保留。**回滚 = `cp /etc/systemd/system/zhixi-gateway.service.bak-r20-20261103 /etc/systemd/system/zhixi-gateway.service && systemctl daemon-reload && systemctl restart zhixi-gateway`**。
+- **边界**：仓库仍公开，`LICENSE` 只能约束使用、不能阻止阅读；本轮未做仓库私有化。服务端重启会中断当时正在进行的云端课堂 WebSocket，需要客户端重连。Mimosa 深度审计未完成，不据此声称通过安全审计。
 
 ## 产物
 
