@@ -52,6 +52,21 @@ class LearningApiModelsTest {
     }
 
     @Test
+    fun trialApplicationAcceptsCompleteServerResponse() {
+        val raw = """
+            {"applied":true,"phoneMasked":"139****0001","validUntil":"2027-01-03",
+             "limits":{"aiPacksPerDay":5,"audioMinutesPerDay":30,"textCharactersPerDay":20000,
+                       "documentsPerDay":5,"maxDevices":3},
+             "message":"申请成功，已开通试用额度","deviceBound":true}
+        """.trimIndent()
+        val response = json.decodeFromString(TrialApplicationResponse.serializer(), raw)
+        assertTrue(response.applied)
+        assertTrue(response.deviceBound)
+        assertEquals(5, response.limits.aiPacksPerDay)
+        assertEquals(30, response.limits.audioMinutesPerDay)
+    }
+
+    @Test
     fun registrationAcceptsCompleteServerResponse() {
         val registration = json.decodeFromString(
             DeviceRegistration.serializer(),

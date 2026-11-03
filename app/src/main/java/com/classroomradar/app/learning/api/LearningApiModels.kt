@@ -60,6 +60,7 @@ data class TrialApplicationResponse(
     val applied: Boolean = false,
     val phoneMasked: String = "",
     val validUntil: String = "",
+    val limits: AccountLimitsDto = AccountLimitsDto(),
     val message: String = "",
     val deviceBound: Boolean = false,
 )
