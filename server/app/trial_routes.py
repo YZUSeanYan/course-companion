@@ -280,13 +280,6 @@ def register_trial_routes(app: FastAPI, settings: Settings) -> None:
             applied=True,
             phoneMasked=mask_phone(phone),
             validUntil=valid_until,
-            limits=TrialLimitsResponse(
-                aiPacksPerDay=settings.trial_default_ai_packs,
-                audioMinutesPerDay=settings.trial_default_audio_minutes,
-                textCharactersPerDay=settings.account_default_text_chars_daily_limit,
-                documentsPerDay=settings.account_default_document_daily_limit,
-                maxDevices=settings.account_default_max_devices,
-            ),
             message="申请成功，已开通试用额度" if device_bound else "申请成功，已加入试用名单",
             deviceBound=device_bound,
         )
