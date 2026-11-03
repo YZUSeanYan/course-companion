@@ -67,6 +67,18 @@ class LearningApiModelsTest {
     }
 
     @Test
+    fun trialApplicationAcceptsLegacyResponseWithoutLimits() {
+        // 服务端为兼容旧版严格 JSON 已不再返回 limits；新客户端必须用默认值解析。
+        val raw = """
+            {"applied":true,"phoneMasked":"139****0001","validUntil":"2027-01-03",
+             "message":"申请成功，已开通试用额度","deviceBound":true}
+        """.trimIndent()
+        val response = json.decodeFromString(TrialApplicationResponse.serializer(), raw)
+        assertTrue(response.applied)
+        assertEquals(0, response.limits.aiPacksPerDay)
+    }
+
+    @Test
     fun registrationAcceptsCompleteServerResponse() {
         val registration = json.decodeFromString(
             DeviceRegistration.serializer(),

@@ -46,7 +46,9 @@ class TrialApplicationResponse(StrictModel):
     applied: bool
     phone_masked: str = Field(alias="phoneMasked")
     valid_until: str = Field(alias="validUntil")
-    limits: TrialLimitsResponse
+    # 不再返回 limits：Android 2.0.9 及更早版本用严格 JSON（未知字段即报错），
+    # 多出的 limits 会让 201 被当成失败，导致首次自助开通卡住。额度可在
+    # /v1/accounts/me 获取，网页版也未使用这里的 limits。
     message: str = ""
     # 调用方带了有效设备令牌时，开卡后直接绑定该设备；浏览器自助申请因此只需一次短信。
     device_bound: bool = Field(default=False, alias="deviceBound")
