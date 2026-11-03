@@ -268,21 +268,21 @@
 - **发布**：网关从 `/opt/zhixi-gateway-20261102-r20` 切到 `/opt/zhixi-gateway-20261103-r21`。r21 由 r20 **完整复制**后只覆盖 `app/v2_provider.py` 与 `app/v2_routes.py`（先核对两文件与改动前 `main` 的 SHA-256 一致，确认没有生产侧私有补丁）；覆盖后远端 SHA-256 与本地一致（`6859609b…` / `c6a2a11e…`）。systemd 单元备份 `/etc/systemd/system/zhixi-gateway.service.bak-r20-20261103`；重启后 `active`、本机与公网 `/health` 均 200、`/web/` 200、journal 无 traceback。r20 目录保留。**回滚 = `cp /etc/systemd/system/zhixi-gateway.service.bak-r20-20261103 /etc/systemd/system/zhixi-gateway.service && systemctl daemon-reload && systemctl restart zhixi-gateway`**。
 - **边界**：仓库仍公开，`LICENSE` 只能约束使用、不能阻止阅读；本轮未做仓库私有化。服务端重启会中断当时正在进行的云端课堂 WebSocket，需要客户端重连。Mimosa 深度审计未完成，不据此声称通过安全审计。
 
-## V2.0.10 首次自助开通卡住修复（2026-11-03，已发布）
+## 首次自助开通卡住：服务端兼容修复，V2.0.10 APK 已撤回（2026-11-03）
 
 - **现象**：新手机号在 App 内首次激活时，短信验证通过、服务端已开卡，但页面仍停在「开通并激活」，用户重复点击只得到验证码失效；随后换设备重新获取激活验证码才成功。
 - **日志证据**（生产 `112.4.211.20`）：14:55:28 激活验证码请求返回 404 `account_not_found` → 14:55:32 自助验证码 200 → 14:56:00 `/v1/trial/apply` 201 Created（账号已创建并绑定设备）→ 14:56:01–14:56:04 连续 13 次 `apply` 400；期间**没有** `GET /v1/accounts/me`，直到 14:57:27 注册新设备、14:57:46 走激活接口才成功。
-- **根因**：服务端 `TrialApplicationResponse` 已增加 `limits` 字段，但 Android `TrialApplicationResponse` 没跟上；`LearningApiClient` 使用 `Json { ignoreUnknownKeys = false }`，201 响应在反序列化时因未知字段 `limits` 直接抛异常。客户端因此把「已开卡」当成失败，既不拉取账号状态也不退出表单；用户重试时验证码已被消费，只能收到 400。
-- **修复**：Android 响应模型补 `limits: AccountLimitsDto`；`applyTrial` 成功后检查 `deviceBound`，未绑定本机时明确提示「已开通，请重新获取验证码激活本设备」而不是谎报已激活；自助/激活通道切换时清空上一步验证码。新增严格 Json 下的完整 201 响应回归测试。
-- **验证**：Android JVM **107 项，0 失败**（新增自助开通响应解析 1 项）；`:app:lintDebug`、`assembleRelease` 通过。JS 侧无改动。
-- **发布**：V2.0.10 签名 APK **50,847,411 字节**，SHA-256 `B9F0864582701ED39D319A53173E0291026BD0E5406006A7348E6EAD2A8DADBF`；Gitee `https://gitee.com/seanyan-dev/zhixi-apk/releases/download/v2.0.10/zhixi-v2.0.10.apk` 已上传并完整下载复验同哈希。官网切换 2.0.10（线上 `index-DSJmPQKk.js`），启动公告同步改为 V2.0.10。网关保持 R21、网页版保持 r31，均未改动。
-- **回滚**：官网恢复 `/opt/shuike-site-backups/20261103-v210/`；APK 下载页回退 `release.ts` 2.0.9；网关与网页版无需回滚。
-- **边界**：只修客户端解析与状态机，服务端开卡/绑定逻辑未改；历史已开通账号不受影响；Mimosa 深度审计未完成，不据此声称通过安全审计。
+- **根因**：服务端 `TrialApplicationResponse` 已增加 `limits` 字段，但 Android 2.0.9 及更早版本的 DTO 没有；客户端使用 `Json { ignoreUnknownKeys = false }`，201 响应因未知字段 `limits` 反序列化失败。客户端把「已开卡」当成失败，既不拉取账号状态也不退出表单；用户重试时验证码已被消费，只能收到 400。
+- **修复（服务端，无需更新 App）**：网关 R22 从 `/v1/trial/apply` 的 201 响应中移除 `limits`，只保留旧客户端认识的 `applied`/`phoneMasked`/`validUntil`/`message`/`deviceBound` 五个字段。额度本来就可以从 `/v1/accounts/me` 获取，网页版也没有使用 apply 响应里的 `limits`，因此不影响任何现有功能；2.0.9 及更早版本可直接完成首次激活。
+- **验证**：server **160 项 pytest，0 失败**（自助开通测试改为断言 201 响应键集恰好为上述五项）；Android **108 项 JVM，0 失败**（新增严格 Json 解析「无 limits 的旧响应」回归测试）；webapp **142 项 vitest、tsc/vite build 通过**（仅把 `TrialApplication.limits` 从类型中移除，运行时未使用）。R22 上线后 `/openapi.json` 的 `TrialApplicationResponse` 字段为五项；`/v1/accounts/me` 仍返回完整额度。
+- **发布与撤回**：R22 部署在 `/opt/zhixi-gateway-20261103-r22`，systemd 单元备份 `/etc/systemd/system/zhixi-gateway.service.bak-r21-20261103`，重启后 active、`/health` 200。V2.0.10 APK 已从 Gitee 删除、官网下载页回退 2.0.9（线上 `index-DUHNu2BV.js`），启动公告改为「激活问题已修复，无需更新」。2.0.10 的客户端 DTO 修复只保留在源码，供下次正式发版使用，不再对外分发。
+- **回滚**：网关恢复 `zhixi-gateway.service.bak-r21-20261103` 并 `daemon-reload && restart`；官网恢复 `/opt/shuike-site-backups/20261103-v210-rollback/`；APK 保持 2.0.9，无需回滚 Gitee。
+- **边界**：服务端只删除 201 响应中的一个字段，开卡/绑定/额度结算逻辑未改；历史已开通账号不受影响；2.0.9 客户端仍会把「已开卡但设备未绑定」误报为已激活（仅设备令牌失效等边缘场景），下次发版再修。Mimosa 深度审计未完成，不据此声称通过安全审计。
 
 ## 产物
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
-- V2.0.10 签名 Release：桌面 `知习-V2.0.10.apk`，`versionName=2.0.10`、`versionCode=12`，v3 签名验证通过；大小 **50,847,411 字节**，SHA-256：`B9F0864582701ED39D319A53173E0291026BD0E5406006A7348E6EAD2A8DADBF`。
-- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.10 APK 已从 Gitee 完整下载并核对为同一 SHA-256；官网首页、下载页与隐私页已更新。
+- 当前公开 Release：V2.0.9，桌面 `知习-V2.0.9.apk`，`versionName=2.0.9`、`versionCode=11`，v3 签名验证通过；大小 **50,847,411 字节**，SHA-256：`ED9F4207A09563113C75BC3F60DC0C4568D150AAE91677E88515C79648F96E81`。V2.0.10 已于 2026-11-03 撤回，不再分发。
+- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.9 APK 已从 Gitee 完整下载并核对为同一 SHA-256；官网首页、下载页与隐私页已更新。
 - 运营后台：`https://zhixi.seanyan.store/admin/`，管理员密码只保存在服务器 `/opt/zhixi-gateway/.env`（600），不写入仓库、APK 或前端 bundle。
 - Release 默认网关为 `https://zhixi.seanyan.store`，不包含模型权重或 API 密钥；离线模型首次使用前需下载或恢复。
