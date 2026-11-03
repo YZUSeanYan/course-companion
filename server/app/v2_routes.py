@@ -36,6 +36,9 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
     app.state.learning_jobs = LearningPackJobManager(app.state.db, settings)
     translation_cache: OrderedDict[tuple[str, str, str], tuple[float, str, str]] = OrderedDict()
     translation_limiter = SlidingWindowRateLimiter(settings.lecsync_rate_limit, 60)
+    # 学习包生成成本高，也是被批量抓取/蒸馏的主要入口：除每日额度外再加一道
+    # 每设备分钟级闸门（正常一节课最多几次），让脚本化批量调用更早被挡住。
+    learning_pack_limiter = SlidingWindowRateLimiter(12, 60)
 
     @app.post("/v2/translate", response_model=TranslateResponse)
     async def translate(
@@ -103,6 +106,8 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
         provider: V2Provider | None = app.state.v2_provider
         if provider is None:
             raise HTTPException(status_code=503, detail="AI provider is not configured")
+        if not learning_pack_limiter.allow(device):
+            raise HTTPException(status_code=429, detail="Learning pack rate limit exceeded")
         if payload.visual_blocks and not vision_endpoints_from_env():
             raise HTTPException(status_code=503, detail="Vision provider is not configured; OCR alone is not treated as image understanding")
         digest = canonical_learning_pack_sha256(payload)
@@ -151,6 +156,8 @@ def register_v2_routes(app: FastAPI, settings: Settings) -> None:
         provider: V2Provider | None = app.state.v2_provider
         if provider is None:
             raise HTTPException(status_code=503, detail="AI provider is not configured")
+        if not learning_pack_limiter.allow(device):
+            raise HTTPException(status_code=429, detail="Learning pack rate limit exceeded")
         if payload.visual_blocks and not vision_endpoints_from_env():
             raise HTTPException(
                 status_code=503,
