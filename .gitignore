@@ -1,24 +1,46 @@
-# Local build tools and caches
+# Dependencies and local tools
+node_modules/
+.venv/
+venv/
+.vendor/
 .gradle/
+.kotlin/
 .codex-gradle-home/
 .codex-gradle-tmp/
-.kotlin/
-build/
-app/build/
-/.vendor/
-local.properties
-*.iml
-*.log
-
-# IDE
-.idea/
-.cxx/
-.externalNativeBuild/
 .codex-tmp/
 
-# Secrets and signing material
+# Build and generated output
+build/
+**/build/
+dist/
+**/dist/
+.vite/
+**/.vite/
+.cxx/
+.externalNativeBuild/
+*.apk
+*.aab
+*.iml
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tgz
+*.zip
+*.7z
+zhixi-gateway-bundle.tar.gz
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Environment files, credentials, and signing material
 .env
 .env.*
+!.env.example
 !**/.env.example
 *.jks
 *.keystore
@@ -26,23 +48,52 @@ local.properties
 *.pfx
 *.pem
 *.key
+*.mobileprovision
+local.properties
 
-# Local databases and user content
+# Databases, cookies, logs, and local user content
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+cookies.txt
+*.cookies
+.cookies/
+*.log
+logs/
 server/.runtime/
 server/lecsync_uploads/
 server/document_assets/
 
-# Offline models and large local test fixtures
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage/
+coverage.xml
+
+# Offline model weights and large downloaded fixtures
 app/src/main/assets/models/
 app/src/debug/assets/models/
 app/src/androidTest/assets/model-fixtures/
+webapp/public/models/
 *.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
 **/bbpe.model
 
-# Only arm64 is packaged by the Android app; keep other ABI binaries local.
+# Native runtime libraries: only the packaged arm64 variants are tracked.
 app/src/main/jniLibs/x86/
 app/src/main/jniLibs/x86_64/
 app/src/main/jniLibs/armeabi-v7a/
@@ -51,29 +102,3 @@ app/src/main/jniLibs/armeabi-v7a/
 app/src/androidTest/assets/lei-jun-test.wav
 test-data/download-inspect-*/
 test-data/*.wav
-*.tar.bz2
-zhixi-gateway-bundle.tar.gz
-
-# Android and release artifacts
-*.apk
-*.aab
-
-# Python
-server/.venv/
-server/.pytest_cache/
-server/**/__pycache__/
-__pycache__/
-*.pyc
-
-# Website
-node_modules/
-site/dist/
-site/.vite/
-site/.env
-site/.env.*
-!site/.env.example
-webapp/dist/
-
-# OS files
-.DS_Store
-Thumbs.db

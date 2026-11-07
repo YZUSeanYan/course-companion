@@ -54,7 +54,7 @@ export interface TrialApplication {
   applied: boolean;
   phoneMasked: string;
   validUntil: string;
-  limits: AccountLimits;
+  // limits 不再随 apply 返回（兼容旧版 Android 严格 JSON）；额度从 /v1/accounts/me 取。
   message: string;
   /** 申请时带了设备令牌：服务端已把当前设备绑定到新账号，无需再收一次验证码。 */
   deviceBound: boolean;

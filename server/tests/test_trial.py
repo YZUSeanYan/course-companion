@@ -101,12 +101,14 @@ def test_request_code_and_apply_creates_account_with_defaults(settings):
         date.fromisoformat(client.app.state.db.today()), 2
     ).isoformat()
     assert result["validUntil"] == expected_valid_until
-    assert result["limits"] == {
-        "aiPacksPerDay": 5,
-        "audioMinutesPerDay": 30,
-        "textCharactersPerDay": 20000,
-        "documentsPerDay": 5,
-        "maxDevices": 3,
+    # 旧版 Android 使用严格 JSON（未知字段即解析失败），201 只能保留这些键；
+    # limits 改由 /v1/accounts/me 获取，避免首次自助开通被多出的字段卡住。
+    assert set(result) == {
+        "applied",
+        "phoneMasked",
+        "validUntil",
+        "message",
+        "deviceBound",
     }
 
     account = client.app.state.db.account_by_phone_hash(
