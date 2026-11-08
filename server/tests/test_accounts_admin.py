@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.db import QuotaExceeded
 from app.main import create_app
+from app.security import activation_code_digest, phone_digest, token_digest
 from conftest import (
     bind_test_device,
     chat_response,
@@ -25,8 +26,24 @@ def _bearer(token: str) -> dict[str, str]:
 
 
 def _activate(client, token: str, phone: str):
+    # Tests mint valid OTP records directly rather than contacting SMS.
+    db = client.app.state.db
+    pepper = client.app.state.settings.token_pepper
+    code = "246810"
+    phone_hash = phone_digest(phone, pepper)
+    if db.account_by_phone_hash(phone_hash) is not None:
+        device = db.find_device_by_token_hash(token_digest(token, pepper))
+        db.create_activation_code(
+            phone_hash,
+            activation_code_digest(phone, code, pepper),
+            "2099-12-31T23:59:59+00:00",
+            None,
+            device,
+        )
     return client.post(
-        "/v1/accounts/activate", json={"phone": phone}, headers=_bearer(token)
+        "/v1/accounts/activate",
+        json={"phone": phone, "code": code},
+        headers=_bearer(token),
     )
 
 
@@ -361,8 +378,8 @@ def test_admin_can_unbind_one_device_and_clean_anonymous_data(settings):
     anonymous = register_unactivated(client)
     bound = register_unactivated(client)
     bind_test_device(client, bound["deviceId"], account)
-    assert client.post(
-        "/v1/accounts/activate", json={"phone": phone}, headers=_bearer(bound["token"])
+    assert client.get(
+        "/v1/accounts/me", headers=_bearer(bound["token"])
     ).status_code == 200
 
     accounts = client.get("/admin/api/accounts").json()["items"]

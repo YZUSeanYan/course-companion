@@ -59,8 +59,8 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - `POST /v1/accounts/activate/request-code`（设备 bearer 鉴权）向已在 `access_accounts` 中且状态为 active 的手机号发送 6 位激活验证码：响应 `{"sent":true,"phoneMasked":"139****0997","cooldownSeconds":60}`。手机号未注册返回 404 `account_not_found`，停用/到期沿用 `account_disabled`/`account_expired` 语义。
 - 验证码 5 分钟有效（`ACTIVATION_CODE_TTL_SECONDS`）、最多错误 5 次（`ACTIVATION_CODE_MAX_ATTEMPTS`）、同手机号 60 秒重发冷却（`ACTIVATION_CODE_RESEND_SECONDS`）。数据库只在 `activation_codes` 表保存 HMAC 摘要，并记录申请设备 ID，绝不保存明文。
 - 限流：每手机号 10 次/小时、每设备 20 次/小时、每 IP 30 次/小时（`ACTIVATION_CODE_PER_PHONE_HOUR`、`ACTIVATION_CODE_PER_DEVICE_HOUR`、`ACTIVATION_CODE_PER_IP_HOUR`）。
-- `POST /v1/accounts/activate` 新增可选 `code` 字段（6 位数字）：提供时先校验验证码（不匹配 400 且中文提示剩余次数；过期 400 `code_expired`；超次 429 `too_many_attempts`；校验成功即消耗该码），再执行原有绑定逻辑。
-- `REQUIRE_ACTIVATION_CODE=true` 时，不带 `code` 的激活请求返回 403 `activation_code_required`；默认 `false`，保持与已发布 Android 客户端兼容。开启前先确认新版客户端已带上验证码流程。
+- `POST /v1/accounts/activate` **必须提供** `code` 字段（6 位数字），服务端验证并消耗验证码后才能绑定设备；缺码返回 403 `activation_code_required`。不再支持旧版无验证码绑定流程（即使旧部署误配 `REQUIRE_ACTIVATION_CODE=false`）。
+- 上线前确认 Android / 网页版客户端均已更新为两步验证流程；更改配置不足以恢复旧的无验证码激活。
 
 ## 账号级云空间同步
 
