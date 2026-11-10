@@ -2,7 +2,7 @@
 
 初始验收日期：2026-10-31 至 2026-11-01。范围包括本地模拟器、设备仪器测试、本机 FastAPI、mock 模型，以及正式 HTTPS 网关的小额合成内容联调；不包含全部真实模型与完整生产质量认证。
 
-本文件按日期保留历史记录。早期章节中的“当前运行”“已上线”和测试数量只代表当次验收；最新状态见 [PR #106 同步与验证](#pr-106-同步与验证2026-11-11未部署)，不能把源码或 CI 更新视为生产已发布。
+本文件按日期保留历史记录。早期章节中的“当前运行”“已上线”和测试数量只代表当次验收；最新状态见 [2026-11-11 上线进度](#2026-11-11-上线进度)。同日部署前快照仍保留，不能把历史“未部署”当成最新状态，也不能把源码/CI 或部署完成等同于真实课堂验收通过。
 
 ## 自动化结果
 
@@ -281,7 +281,9 @@
 - **回滚**：网关恢复 `zhixi-gateway.service.bak-r21-20261103` 并 `daemon-reload && restart`；官网恢复 `/opt/shuike-site-backups/20261103-v210-rollback/`；APK 保持 2.0.9，无需回滚 Gitee。
 - **边界**：服务端只删除 201 响应中的一个字段，开卡/绑定/额度结算逻辑未改；历史已开通账号不受影响；2.0.9 客户端仍会把「已开卡但设备未绑定」误报为已激活（仅设备令牌失效等边缘场景），下次发版再修。Mimosa 深度审计未完成，不据此声称通过安全审计。
 
-## PR #106 同步与验证（2026-11-11，未部署）
+## PR #106 同步与验证（2026-11-11，部署前历史快照）
+
+以下为同日合并/部署前的核对记录，按原事实保留；OPEN、无审阅、未部署等状态已被下方 [上线进度](#2026-11-11-上线进度) 更新，不代表当前状态。
 
 - **GitHub**：功能候选 `9023fbee902c329c925f7814d9dde1c4d2b1c12d` 已推送；[PR #106](https://github.com/YZUSeanYan/course-companion/pull/106) 已转为待人工审阅（非 Draft）。本日核对为 OPEN、无审阅、未合并；main 仍为 `1233a51`。后续纯文档提交不改变这个功能验证基线，CI 需按最终 head 单独核对。
 - **CI**：该功能提交的 Admin、Android、Server、Site、Webapp 和 Python/JS-TS/Kotlin CodeQL 共 8 项实际检查全部成功。CodeQL 汇总项为 neutral/skipping，不表示三个分析任务失败；PR merge ref 查询无 open code-scanning findings，但不据此宣称没有未知问题。
@@ -292,10 +294,43 @@
 - **候选与发布**：本地候选按 `9023fbe` 封装网关源码、网页版/后台静态产物并记录 SHA-256，不包含密钥、数据库、用户讲义/音频或签名材料。候选未上传生产，官网及 APK 发布元数据未改；Android 源码 `versionName=2.0.10` / `versionCode=12` 不代表已重新发布。
 - **剩余门槛**：至少一位同学审阅、负责人确认 Squash merge、真实 iOS/Android 微信、Android arm64 讲义恢复和文件选择、生产备份/日志脱敏/代理限流与安全回退演练。步骤见 [上线检查表](ROLLOUT-20261110.md)。生产服务切换和正式 APK 签名/上传仅由负责人执行，本记录不是部署完成声明。
 
-## 产物
+## 2026-11-11 上线进度
+
+### 授权与合并
+
+- 用户在会话中明确批准本次生产操作的一次性例外并表示审阅完成，随后明确批准按最终 head `2119055` Squash merge PR #106，以及 V2.0.11 / `versionCode=13` 的 APK 和官网发布。实际 Squash 合并提交为 `a617dfc`，main CI 全部通过。
+- 审阅依据是用户在会话中的确认，不记作 GitHub Review/APPROVED 事件。该次例外不修改 `AGENTS.md`，不长期放宽生产限制；本节记录已完成事实，不为后续操作授予权限。
+
+### 网关、网页版、备份与数据变化
+
+- 切换前 R22 源码哈希与 `1233a51` 一致；网关已切至 `/opt/zhixi-gateway-20261111-r23`，随后网页版 `current` 软链切至 `/opt/zhixi-webapp/r32`，旧发布目录保留。
+- `/root/zhixi-backup-20261111` 内已有切换前/切换时一致性 SQLite 备份（`integrity_check=ok`）、对应文档备份，以及原 unit、nginx、官网备份。未展示秘密值；备份完整性检查不是恢复/安全回退演练。
+- 启动时既有保留策略清理 19 台过期未绑定设备；账号、绑定和任务数量均未变。不能把这次启动描述成“数据零变化”。
+- zhixi nginx 日志已不含查询串；Uvicorn 使用 warning / no-access-log。旧版本保留不代表可以裸回退到缺少文档归属或 URL token 防护的旧代码，仍须遵守上线检查表的安全回退限制。
+- 公网 `/health` 为 `ok`、`providerConfigured=true`；OpenAPI 已有 `/v2/lecsync/realtime/ticket`，无凭据 POST 返回 401。`TrialApplicationResponse` schema 恰好保留 `applied/deviceBound/message/phoneMasked/validUntil` 五字段；不是本轮真实短信申请验收。
+- 线上网页版 bundle `index-9L8IcNx0.js` 已确认含 ticket 与讲义恢复文案；这只证明发布产物已可见，不替代浏览器文件选择恢复或真实微信端到端验收。
+- 公网 WSS 负向冒烟：Realtime 合成无效 ticket、URL `access_token` 占位值以及 Voice Typing 合成无效 ticket 均升级后以 4401 关闭。未用真实凭据、未调用付费上游，不能写成合法 ticket、真实音频或生产付费 ASR 已通过。
+
+### Android 构建、APK 与官网
+
+- V2.0.11 / code 13 已获批准，构建输出 metadata 确认版本号；包名不变，签名证书与已归档公开 V2.0.9 一致，zipalign / apksigner 均通过。
+- release 构建、`:app:testDebugUnitTest`、`:app:lintRelease`、`:app:assembleRelease` 成功；**126 tests，0 failures，0 skips**。Release lint XML 为 **0 errors、48 warnings、4 hints**，不能沿用先前 Debug 的 46 warnings。
+- 首次尝试 `:app:testReleaseUnitTest` 因项目不存在该任务而失败；随后执行正确的 Debug JVM 测试及 release lint/assemble 成功。保留失败命令记录，没有跳过测试，也不声称运行过 Release 单测任务。
+- 签名 APK 已上传 `https://shuike.seanyan.store/downloads/zhixi-v2.0.11.apk`，大小 **50,863,795 字节**，SHA-256 `f1794c85bcbaa28805a8b7e1603095e21e15fffd9222df2fa34bfd720d2fd866`。服务端文件哈希一致；公网完整 GET **200**，Content-Length 与实收字节均为 50,863,795，耗时 125.1 秒，下载后 SHA-256 一致。
+- 官网已发布 17 个文件并切到 V2.0.11 / `index-BpWB-40T.js`；发布前备份在 `/root/zhixi-backup-20261111/site-before`，旧哈希资源、downloads 和 models 保留。
+- 公网 `https://shuike.seanyan.store/#/download` 渲染 DOM 冒烟通过：标题「知习 App v2.0.11」、50.9 MB、arm64、正确下载 URL、SHA-256 展示、页脚 2.0.11。该检查不代表新 APK 已安装或真机升级验证通过。
+
+### 保留的测试基线与未验证项
+
+- 先前 Server **218 passed、10 warnings、未跳过**；Webapp **183 passed（22 文件）**及 TypeScript/Vite 构建成功。合成 Uvicorn 联调仍记为 **50 passed / 1 cleanup failed / 0 skipped**，随后独立清理复查 **3/3 passed**，不追改为首次全绿。
+- 本轮未做真实 iOS/Android 微信、Android arm64 真机、新 APK 真机安装/升级、生产付费 ASR 或真实课堂检查；完整讲义恢复文件选择端到端仍未验证。备份恢复演练、非回环代理/限流与安全回退演练未提供完成证据，继续保留待验收状态。
+- 公网完整 APK 下载与官网切换均已完成，不再列为 pending；部署、完整性与负向冒烟通过不等同于所有功能或真实课堂质量通过。
+
+## 产物（截至 2026-11-11）
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
-- 最近一次已核验的公开 Release：V2.0.9，桌面 `知习-V2.0.9.apk`，`versionName=2.0.9`、`versionCode=11`，v3 签名验证通过；大小 **50,847,411 字节**，SHA-256：`ED9F4207A09563113C75BC3F60DC0C4568D150AAE91677E88515C79648F96E81`。V2.0.10 已于 2026-11-03 撤回，不再分发。
-- 官网下载：`https://shuike.seanyan.store/#/download`，公网 V2.0.9 APK 已从 Gitee 完整下载并核对为同一 SHA-256；官网首页、下载页与隐私页已更新。
+- 当前已发布并完成公网完整下载校验的 Release：**V2.0.11，`versionCode=13`，50,863,795 字节**，SHA-256 `f1794c85bcbaa28805a8b7e1603095e21e15fffd9222df2fa34bfd720d2fd866`；包名及证书延续归档公开 V2.0.9，zipalign / apksigner 通过。
+- 历史公开 Release V2.0.9：`versionCode=11`，50,847,411 字节，SHA-256 `ED9F4207A09563113C75BC3F60DC0C4568D150AAE91677E88515C79648F96E81`，当时已从 Gitee 完整下载复验。V2.0.10 于 2026-11-03 撤回，不再分发。
+- 官网下载页：`https://shuike.seanyan.store/#/download`；当前 APK：`https://shuike.seanyan.store/downloads/zhixi-v2.0.11.apk`。公网完整下载与页面渲染冒烟均已完成，未进行新包真机安装/升级验收。
 - 运营后台：`https://zhixi.seanyan.store/admin/`，管理员密码只保存在服务器 `/opt/zhixi-gateway/.env`（600），不写入仓库、APK 或前端 bundle。
 - Release 默认网关为 `https://zhixi.seanyan.store`，不包含模型权重或 API 密钥；离线模型首次使用前需下载或恢复。

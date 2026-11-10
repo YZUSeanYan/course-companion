@@ -35,10 +35,11 @@
 
 ## 发布状态（2026-11-11）
 
-- 功能候选 `9023fbe` 已推送至 [PR #106](https://github.com/YZUSeanYan/course-companion/pull/106)，已转为待人工审阅（非 Draft）；本次核对仍未合并，暂无审阅记录。
-- 对应功能源码的 8 项实际 GitHub CI 检查通过；下面的功能描述不表示本轮已部署生产。
-- 本日公网 `/health` 正常，但 OpenAPI 尚无 `/v2/lecsync/realtime/ticket`；旧 App 兼容响应仍为五字段。本轮未部署网关/网页版、未发布 APK，公开下载仍沿用 V2.0.9 的发布元数据，Android 源码 2.0.10 不代表重新发布。
-- 人工审阅、微信/arm64 真机验收及负责人备份/部署仍待完成。步骤和安全回退限制见 [上线检查表](docs/ROLLOUT-20261110.md)，实际证据见 [验收记录](docs/VERIFICATION.md)。
+- **已合并**：[PR #106](https://github.com/YZUSeanYan/course-companion/pull/106) 最终 head `2119055` 已 Squash merge 为 `a617dfc`，main CI 全部通过。用户在会话中确认审阅完成，不记作 GitHub Review 事件。
+- **已部署**：网关 **R23**（`/opt/zhixi-gateway-20261111-r23`）与网页版 **r32**（`/opt/zhixi-webapp/r32`）。公网健康、ticket 接口/未鉴权 401、旧 App 五字段兼容 schema、网页版 ticket/恢复文案及 WSS 负向鉴权冒烟已核对。
+- **已发布**：**V2.0.11 / versionCode 13** [签名 APK](https://shuike.seanyan.store/downloads/zhixi-v2.0.11.apk) 与[官网](https://shuike.seanyan.store/#/download)。包名/证书延续 V2.0.9，签名与对齐校验、公网完整下载哈希、下载页渲染冒烟通过；不是 App 真机安装验收。
+- **已备份与脱敏**：一致性 SQLite/文档及原部署配置、官网备份已保存，旧发布保留；日志不含查询串。启动保留策略清理 19 台过期未绑定设备，账号/绑定/任务数量未变；恢复与安全回退演练仍未验证。
+- **授权与边界**：本次生产操作及 APK/官网发布获用户明确的一次性例外批准，不修改 `AGENTS.md` 的长期限制。真实微信、arm64 真机、生产付费 ASR 和真实课堂本轮仍未验收。完整校验和、测试及失败记录见 [验收记录](docs/VERIFICATION.md#2026-11-11-上线进度)，剩余检查见 [上线检查表](docs/ROLLOUT-20261110.md)。
 
 ## 当前功能
 
@@ -72,7 +73,7 @@
 - MinerU、LibreOffice 是可选本地解析器，未配置时复杂页保留原图并标记 `NEEDS_VISION_PARSER`，不伪造结构化内容。
 - DOCX/PPTX 转换接口需 LibreOffice 环境；Android 文件入口目前以 TXT/PDF/图片为主。
 - 复杂页一次最多送 4 页给视觉模型，需后续按页队列扩展；云端音频任务和可选录音删除已实现，真实预生成缓存样例尚未提供。
-- 真实外教口音、长课续航、真机麦克风与模型成本未验收；正式 HTTPS 网关、运营后台、V2.0.9 签名包和官网下载页已完成，参赛 PPT 尚未准备。
+- 真实外教口音、长课续航、真机麦克风与模型成本未验收；正式 HTTPS 网关、运营后台、V2.0.11 签名 APK 与官网已发布，公网下载完整性及下载页渲染冒烟已通过，但不代表新包真机安装或真实课堂验收完成；参赛 PPT 尚未准备。
 
 ## 本地构建
 
@@ -128,13 +129,15 @@ npm run build
 - 离线模型原始文件来自 **k2-fsa/sherpa-onnx 官方 GitHub Releases**：Zipformer small CTC 中文流式包、Paraformer 中文终稿包和 Silero VAD，共 3 个包。APP 默认优先尝试 `https://shuike.seanyan.store/models/zhixi/` 自有国内镜像，网络异常时有界回退官方源；镜像与官方文件使用相同 SHA-256。设置页显示当前包序号、实际接收字节/总字节、百分比、解压、SHA-256 校验和启用阶段。
 - 下载在应用私有暂存目录进行，压缩包与全部 6 个安装文件均校验通过后才替换当前模型；连接重置、HTTP 错误或哈希失败不会覆盖下载前可用模型。失败暂存进入隔离目录，卸载模型进入应用内回收站。
 
-## 验证基线（功能候选 `9023fbe`）
+## 验证基线与发布验证（2026-11-11）
+
+先前功能候选 `9023fbe` 的本地测试基线保留如下；PR #106 最终 head `2119055` 已合并为 `a617dfc`，main CI 全部通过。后续 V2.0.11 / code 13 release 构建、`:app:testDebugUnitTest :app:lintRelease :app:assembleRelease` 成功，126 tests / 0 failures / 0 skips；Release lint 为 **0 errors、48 warnings、4 hints**。先前 `:app:testReleaseUnitTest` 因不存在该任务而失败，之后改用正确任务，并非跳过测试。下列 Debug lint 数量仅属于先前基线。
 
 - Android：126 项 JVM 单测通过，0 failures/errors/skips；lint 与 Debug 构建成功（0 errors、46 warnings + 4 hints）。覆盖课堂、导入、DTO、FSRS、CET6 词表、地址校验、术语编辑格式、FastAPI 错误解析、文本 PDF 视觉需求、学习列表复合 key、学习内容分类与复习分类统计、试用手机号规范化与账号 DTO、两步验证码请求/响应序列化、自助开通响应解析（含 limits 新旧两种响应）、学习包中英文输出语言、App 配置 DTO、模型下载进度/镜像回退与完整性校验、Realtime 重连码与云端延迟测量、纪要确认态解析、长表述分句（中英文标点、缩写/小数、超长硬切与英文词边界、译文按段拆分）；Room 2→11 迁移保留历史与复习卡，并新增学习条目更新时间。
 - 设备：历史记录为 25 项测试通过，**本轮真机/仪器测试未验证**；历史覆盖中英文 ASR、模型隔离与回收站、暂停/继续、学习包后台任务轮询/失败/鉴权恢复、本地重复学习包去重、试用额度激活与错误码、Realtime 消息（含 partial 与流式译文）和云端失败→本机识别回退。
 - 服务端：218 项 pytest 通过，10 warnings、未跳过，新增文档归属恢复和 ticket 鉴权/过期/并发消费回归；覆盖完整 Lecsync REST、Realtime/Voice Typing WebSocket、Webhook、账号激活（含两步验证码）/停用/到期/设备上限、多设备共享额度、官网短信申请/验证码校验/自动开户/默认额度/防刷限流、PNVS `SendSmsVerifyCode` 参数与错误、管理后台登录/CSRF/账号 CRUD/统计/公告标语配置校验、App 配置下发、学习包质量（数量预算/去重/学科适配/简明上限/中英文输出 prompt v4）、多品牌并行竞速与失败切换/冷却、视觉模型失败回退 OCR、重点缺失时从纪要派生、请求日志与账号归属、匿名设备清理、按账号筛选调用记录、配额、设备隔离、学习包异步任务、去重、总超时与配额回退、提供方结构回退与缺字段容错、PDF/图片页资产、SSRF 与失败路径，以及网页版 WebSocket 子协议鉴权与可选 CORS。
 - 网页版：183 项 vitest 通过（22 文件），TypeScript/Vite 构建成功；新增 ticket、停止/暂停竞态及原文件恢复回归，覆盖分类映射、minutes 拼接、术语/CET6 词表解析、复习分类汇总、FSRS 评分与间隔、WAV 编码、补转写分段解析、模型管理器下载/校验/拒绝、镜像同源约束与离线解码循环（注入假识别器）、长表述分句与译文拆分。
 - 本地真实 Uvicorn 联调：50 项功能/隔离检查通过，1 项清理探针因 Windows 连接拒绝耗时超出 1 秒失败；独立清理复查 3/3 通过。仅使用合成 PDF、静音和假上游，未调用生产付费模型。
-- 生产：此前已上线的网关、网页版、官网与后台继续运行；历史 R22、WSS、离线模型和公告/标语验收记录保留在 `docs/VERIFICATION.md`，**不代表 PR #106 已发布或完成生产验收**。
+- 生产：网关 R23、网页版 r32、V2.0.11 APK 与官网已发布；健康、ticket 接口/五字段兼容 schema、WSS 负向鉴权、APK 公网完整下载与下载页渲染冒烟已核对。历史 R22、WSS、离线模型和公告/标语验收仍保留在 `docs/VERIFICATION.md`；历史结果和本轮部署不代表真实微信/arm64/付费 ASR/课堂验收通过。
 
 完整结果与未完成项见 `docs/VERIFICATION.md`，AI 数据流见 `docs/AI_IMPLEMENTATION.md`。

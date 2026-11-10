@@ -2,13 +2,21 @@
 
 独立的 FastAPI 服务，将讲义/字幕块转换为带来源引用的结构化学习包。访问使用匿名设备令牌；AI/云端功能还需有效试用额度，可在 App/网页版自助申请或由管理员配置。服务不会修改或依赖 Android app。
 
-> 本文描述当前源码，不等同于线上部署。2026-11-11 已推送并通过 CI 的功能候选为 `9023fbe`，PR #106 待人工审阅、尚未合并。本日公网 OpenAPI 尚无 ticket 签发接口；不得按已部署使用。最新验证与发布门槛见 [上线检查表](../docs/ROLLOUT-20261110.md)。
+> 发布状态（2026-11-11）：用户在会话中确认审阅完成并明确批准一次性生产例外，PR #106 按 head `2119055` Squash merge 为 `a617dfc`，main CI 全部通过；这不是 GitHub Review 事件记录，也不修改 `AGENTS.md` 的长期限制。网关已切至 `/opt/zhixi-gateway-20261111-r23`，公网 `/health` 为 `ok`、`providerConfigured=true`；OpenAPI 已有 ticket 接口，无凭据 POST 返回 401。生产付费 ASR、真实微信/arm64/课堂本轮未验收。证据与安全回退限制见 [验收记录](../docs/VERIFICATION.md#2026-11-11-上线进度) 和 [上线检查表](../docs/ROLLOUT-20261110.md)。
+
+### 本次运行核对
+
+- 切换前 R22 源码哈希与 `1233a51` 一致；旧发布目录保留。`/root/zhixi-backup-20261111` 保存切换前/切换时一致性 SQLite 与文档备份，以及原 unit、nginx、官网备份；SQLite `integrity_check=ok`，不等同于完成恢复/安全回退演练。未展示任何真实凭据。
+- 启动时既有保留策略清理 19 台过期未绑定设备；账号、绑定和任务数量均未变，不能描述成数据库完全未变化。
+- zhixi nginx 日志已不记录查询串；Uvicorn 使用 warning / no-access-log。长期 token 仍不得放 URL，历史日志处理要求不因此取消。
+- `TrialApplicationResponse` schema 恰好保留 `applied/deviceBound/message/phoneMasked/validUntil` 五字段。公网 WSS 负向冒烟中，Realtime 的合成无效 ticket、URL `access_token` 占位值及 Voice Typing 的合成无效 ticket 均升级后以 4401 关闭；没有使用真实凭据或调用付费上游，不能替代合法 ticket 或真实语音验收。
+- 既有本地基线：Server 218 passed、10 warnings、未跳过；合成 Uvicorn 联调 50 passed / 1 cleanup failed，随后独立清理复查 3/3 passed。未把首次运行写成全绿。
 
 ## 安全与数据边界
 
 - 注册时返回一次设备 bearer token；数据库只保存 `HMAC-SHA256(token, TOKEN_PEPPER)`，没有 token 找回接口。
 - SQLite 仅保存设备、每日用量和分析元数据（哈希、版本、模型、时间），不保存 `courseName`、`glossary`、讲义或字幕正文。
-- 应用不写内容日志。uvicorn 的默认访问日志只应配置为请求元数据，不要启用请求/响应 body 日志。
+- 应用不写内容日志，也不得记录凭据查询串或请求/响应 body。Uvicorn 默认访问日志可能包含查询串，生产 R23 已使用 warning / no-access-log，zhixi nginx 已使用不含查询串的日志格式；其他环境同样需脱敏或禁用访问日志。
 - provider URL 只能来自服务端 `AI_PROVIDER_BASE_URL`，仅支持 HTTP/HTTPS。每次请求前会解析主机并拒绝 localhost、环回、私有、保留、link-local、multicast、unspecified 和其他非全局地址，包括 DNS 解析结果；不跟随重定向，也不会获取请求中的 URL。
 - 429、5xx、超时和连接错误采用有界指数退避。`AI_PROVIDER_MAX_RETRIES` 是首次请求之外的最大重试数（0 到 3）。内容 JSON/schema 错误只发起一次包含校验错误的修复请求。
 - 未完整配置 provider 时 `/health` 仍可用，`/v1/analyze` 明确返回 503，不生成模拟学习结果。`providerConfigured=true` 只表示服务端配置完整，不代表已发起付费模型请求或验证模型质量。
