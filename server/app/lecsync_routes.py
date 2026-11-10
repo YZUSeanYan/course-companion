@@ -25,15 +25,29 @@ from .lecsync_gateway_schemas import (
 from .lecsync_realtime import LecsyncRealtimeConnection, StreamLimiter
 from .provider import ProviderConfigurationError, ProviderInvalidResponse, resolve_global_address, validate_provider_url
 from .rate_limit import SlidingWindowRateLimiter
-from .security import token_digest
+from .security import new_device_token, token_digest
+
+WS_TICKET_TTL_SECONDS = 60
+
+
+async def reject_websocket(socket: WebSocket, code: int, reason: str = "", subprotocol: str | None = None) -> None:
+    """Reject after accept so browsers receive the close code.
+
+    Calling close() before accept() becomes an HTTP 403 handshake failure. iOS
+    WeChat's WKWebView often surfaces that as a silent hang (CONNECTING forever)
+    instead of a usable onclose code such as 4401/4403/4429.
+    """
+    try:
+        await socket.accept(subprotocol=subprotocol)
+    except Exception:
+        return
+    await socket.close(code=code, reason=reason)
 
 
 def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
     limiter = SlidingWindowRateLimiter(settings.lecsync_rate_limit, 60)
     streams = StreamLimiter(settings.lecsync_max_concurrent_streams)
     cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
-    upload_root = Path(os.getenv("LECSYNC_UPLOAD_ROOT", "lecsync_uploads")).resolve()
-    upload_root.mkdir(parents=True, exist_ok=True)
     if not hasattr(app.state, "lecsync_connection_factory"):
         app.state.lecsync_connection_factory = LecsyncRealtimeConnection
 
@@ -276,13 +290,8 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(422, {"code": "INVALID_INPUT", "message": "音频处理选项不正确"}) from exc
         data, seconds = await read_audio(file, 200 * 1024 * 1024, 7200, device)
         identifier = uuid.uuid4().hex
-        try:
-            # Parsed so the staging filename can only contain UUID characters.
-            device_key = uuid.UUID(device)
-        except ValueError as exc:
-            raise HTTPException(401, {"code": "INVALID_TOKEN", "message": "设备身份无效"}) from exc
-        path = upload_root / f"{device_key}-{identifier}"
-        path.write_bytes(data)
+        # Classroom audio stays in memory until it is handed to the provider.
+        # Do not write raw audio into LECSYNC_UPLOAD_ROOT or any other staging file.
         try:
             upload = await call(client().create_audio_upload, len(data), hashlib.sha256(data).hexdigest())
             await call(client().upload_created_file, upload, data)
@@ -291,9 +300,6 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         except HTTPException:
             app.state.db.settle_lecsync_audio(device, seconds, 0)
             raise
-        finally:
-            # The staging file is retained for retry/recovery, never served publicly.
-            pass
         identifier = task_id(result, identifier)
         app.state.db.create_lecsync_task(device, identifier, "transcription_job", upstream_request_id=result.get("request_id"), reserved_seconds=seconds)
         return finish_task(device, identifier, "transcription_job", result, seconds)
@@ -395,25 +401,60 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(404, {"code": "NOT_FOUND", "message": "找不到该任务"})
         return normalize(await call(client().voice_typing_status, request_id))
 
+    @app.post("/v2/lecsync/realtime/ticket")
+    async def realtime_ticket(response: Response, device: str = Depends(authenticated)) -> dict:
+        # Browsers cannot set WebSocket headers, and WKWebView drops the
+        # subprotocol handshake, so the browser has to authenticate through the
+        # URL. A long-lived device token there would be written to every access
+        # log, so the URL only ever carries a single-use ticket.
+        check_rate(device)
+        ticket = new_device_token()
+        app.state.db.create_ws_ticket(
+            device,
+            token_digest(ticket, settings.token_pepper),
+            WS_TICKET_TTL_SECONDS,
+        )
+        # Bypass normalize()/public() on purpose: public() strips "ticket".
+        response.headers["Cache-Control"] = "no-store"
+        return {"ticket": ticket, "expiresIn": WS_TICKET_TTL_SECONDS}
+
     async def proxy_socket(socket: WebSocket, kind: str):
         scheme, _, token = (socket.headers.get("authorization") or "").partition(" ")
         ws_subprotocol: str | None = None
+        protocols = [p.strip() for p in (socket.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
+        if protocols and protocols[0].lower() == "bearer":
+            ws_subprotocol = "bearer"
+        if "access_token" in socket.query_params:
+            # Reject even alongside valid credentials: long-lived URL tokens
+            # would still be written to Uvicorn and nginx access logs.
+            await reject_websocket(socket, 4401, "Use a short-lived ticket", ws_subprotocol)
+            return
         if scheme.lower() != "bearer":
             # 浏览器无法为 WebSocket 设置 Authorization 头；允许客户端以
             # Sec-WebSocket-Protocol: bearer, <token> 的形式携带，成功后回显 bearer。
-            protocols = [p.strip() for p in (socket.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
             if len(protocols) == 2 and protocols[0].lower() == "bearer":
                 scheme, token = "bearer", protocols[1]
-                ws_subprotocol = "bearer"
+        ticket_device: str | None = None
         if scheme.lower() != "bearer":
-            await socket.close(code=4401, reason="Authentication required")
-            return
+            # iOS 微信等 WKWebView 经常丢弃 Sec-WebSocket-Protocol；网页版在这类
+            # 环境下改走 query ticket（不带子协议）。
+            ticket_value = socket.query_params.get("ticket")
+            if ticket_value:
+                outcome, ticket_device = app.state.db.consume_ws_ticket(
+                    token_digest(ticket_value, settings.token_pepper)
+                )
+                if outcome != "ok" or not ticket_device:
+                    await reject_websocket(socket, 4401, "Ticket is no longer valid", ws_subprotocol)
+                    return
+            else:
+                await reject_websocket(socket, 4401, "Authentication required", ws_subprotocol)
+                return
         started = time.monotonic()
         device: str | None = None
         subject = None
         accepted = False
         try:
-            device = device_id(token)
+            device = ticket_device or device_id(token)
             subject = resolve_quota_subject(app.state.db, settings, device)
             if not limiter.allow(device):
                 raise LecsyncError("Too many requests", status=429, code="RESOURCE_LIMIT")
@@ -424,10 +465,15 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
                 "account_expired": "额度已到期",
                 "account_disabled": "账号已停用",
             }
-            await socket.close(code=4403, reason=reasons.get(account_error.code, "试用额度不可用"))
+            await reject_websocket(socket, 4403, reasons.get(account_error.code, "试用额度不可用"), ws_subprotocol)
             return
         except (HTTPException, LecsyncError) as auth_error:
-            await socket.close(code=4401 if isinstance(auth_error, HTTPException) else 4429)
+            await reject_websocket(
+                socket,
+                4401 if isinstance(auth_error, HTTPException) else 4429,
+                "Authentication required" if isinstance(auth_error, HTTPException) else "Too many requests",
+                ws_subprotocol,
+            )
             return
         await socket.accept(subprotocol=ws_subprotocol)
         accepted = True

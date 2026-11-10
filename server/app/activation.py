@@ -83,10 +83,13 @@ def register_activation_routes(app: FastAPI, settings: Settings) -> None:
     ip_limiter = SlidingWindowRateLimiter(settings.activation_code_per_ip_hour, 3600)
 
     def client_ip(request: Request) -> str:
-        return (
-            request.headers.get("x-real-ip")
-            or (request.client.host if request.client else "unknown")
-        )
+        # Never trust a client-supplied X-Real-IP header for rate limiting.
+        # Only honor it when the immediate peer is a loopback reverse proxy.
+        peer = request.client.host if request.client else "unknown"
+        forwarded = (request.headers.get("x-real-ip") or "").strip()
+        if forwarded and peer in {"127.0.0.1", "::1"}:
+            return forwarded.split(",")[0].strip() or peer
+        return peer
 
     def normalize_or_error(raw: str) -> str:
         try:

@@ -76,6 +76,11 @@ def _process_pdf(source: Path, document_id: str, pages_dir: Path) -> list[PageAs
         native = pdf_page.get_text("text").strip()
         page_id = f"{document_id}:p:{index}"
         image_path = pages_dir / f"page-{index:04d}.jpg"
+        # Bound rendered dimensions before PyMuPDF allocates a pixel buffer.
+        width = int(pdf_page.rect.width * RENDER_DPI / 72 + 1)
+        height = int(pdf_page.rect.height * RENDER_DPI / 72 + 1)
+        if width <= 0 or height <= 0 or width * height > 40_000_000:
+            raise ValueError("PDF page exceeds the 40-megapixel render limit")
         pixmap = pdf_page.get_pixmap(dpi=RENDER_DPI, alpha=False)
         pixmap.save(image_path)
         if _reliable_text(native):

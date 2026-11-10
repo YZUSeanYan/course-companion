@@ -1,6 +1,8 @@
 # Course Companion 学习分析服务
 
-独立的 FastAPI 服务，将讲义/字幕块转换为带来源引用的结构化学习包。访问使用匿名设备令牌；AI/云端功能还需激活管理员发放的手机号试用额度。服务不会修改或依赖 Android app。
+独立的 FastAPI 服务，将讲义/字幕块转换为带来源引用的结构化学习包。访问使用匿名设备令牌；AI/云端功能还需有效试用额度，可在 App/网页版自助申请或由管理员配置。服务不会修改或依赖 Android app。
+
+> 本文描述当前源码，不等同于线上部署。2026-11-11 已推送并通过 CI 的功能候选为 `9023fbe`，PR #106 待人工审阅、尚未合并。本日公网 OpenAPI 尚无 ticket 签发接口；不得按已部署使用。最新验证与发布门槛见 [上线检查表](../docs/ROLLOUT-20261110.md)。
 
 ## 安全与数据边界
 
@@ -42,16 +44,18 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - 每个 `/v1/*`、`/v2/*` 请求会写入 `api_requests`（设备、账号、方法、路由模板、状态码、耗时、时间），不含 query 明文或请求正文；`/health`、`/admin/*` 不计入服务用量。WebSocket 在关闭时单独记录。
 - 手机号、管理员密码、会话密钥、加密密钥只能来自服务器环境变量；不要写入源码、示例、测试、APK 或前端 bundle。
 
-## 官网试用申请
+## App / 网页版自助试用申请
 
-- `GET /v1/trial/status` 返回短信通道是否已配置和默认额度，官网申请页据此在未配置时显示“短信通道配置中”并禁用发送，避免用户填完才失败。
+独立官网申请页已下架，当前入口为 App 或网页版「设置 → 试用额度」。以下为共用网关接口。
+
+- `GET /v1/trial/status` 返回短信通道是否已配置和默认额度，客户端据此提示通道状态，避免用户填完才失败。
 - `POST /v1/trial/request-code` 接收手机号，校验格式、是否已注册、手机号/IP 限流和 60 秒重发冷却后，通过阿里云短信发送 6 位验证码。
 - `POST /v1/trial/apply` 校验验证码、姓名、昵称和同意标记，成功后自动创建账号：默认每天 5 个 AI 学习包、30 分钟云端音频，翻译字符/文档解析/设备数沿用 `ACCOUNT_DEFAULT_*`，有效期按北京时间自然月 +2 个月。姓名写入账号备注，昵称写入显示名，管理后台立即可见。
 - 验证码 5 分钟有效、最多错误 5 次，单次使用；数据库只保存 HMAC 摘要，不保存明文。手机号仍使用 Fernet 密文保存。
 - 阿里云号码认证（PNVS）短信认证配置：`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`、`ALIYUN_SMS_REGION`（默认 `cn-hangzhou`）。服务端调用 `https://dypnsapi.aliyuncs.com/` 的 `SendSmsVerifyCode`，不是独立的短信服务（Dysms）。
 - 必须使用 PNVS 控制台“短信认证参数配置”中审核通过的系统赠送签名和模板。当前生产使用签名 `恒创联众`、登录/注册模板 `100001`，模板变量为 `code` 和 `min`。服务端自行生成 6 位验证码并以具体值填入 `TemplateParam`，阿里云只负责发送，验证码仍由本站按 HMAC 摘要校验；AccessKey 只需具备 PNVS 的 `SendSmsVerifyCode` 权限。
-- 未配置时 `/v1/trial/status` 返回 `smsConfigured=false`，申请页禁用发送；不要用未开通的 Dysms 签名/模板代替。
-- 未配置短信时接口返回 503 `sms_not_configured`，官网申请页会明确提示；后台手动添加手机号不受影响。官网 `shuike.seanyan.store/api/trial/*` 由 nginx 反代到 `/v1/trial/*`，保持同源，不需要 CORS。
+- 未配置时 `/v1/trial/status` 返回 `smsConfigured=false`；不要用未开通的 Dysms 签名/模板代替。
+- 未配置短信时接口返回 503 `sms_not_configured`，客户端应明确提示；后台手动添加手机号不受影响。历史官网 `/api/trial/*` 代理说明不作为当前生产配置依据，负责人发布前需自行核对现状。
 - 可调参数：`TRIAL_DEFAULT_AI_PACKS`、`TRIAL_DEFAULT_AUDIO_MINUTES`、`TRIAL_DEFAULT_VALID_MONTHS`、`TRIAL_CODE_TTL_SECONDS`、`TRIAL_CODE_MAX_ATTEMPTS`、`TRIAL_CODE_RESEND_SECONDS`、`TRIAL_CODE_PER_PHONE_HOUR`、`TRIAL_CODE_PER_IP_HOUR`、`TRIAL_APPLY_PER_IP_HOUR`。
 
 ## 激活验证码
@@ -80,6 +84,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - `POST /v2/lecsync/audio/transcriptions` 同步转写；`/audio/jobs` 上传/任务/状态/分页/取消/删除，`/audio/jobs/url` 公网音频链接。音频大小、时长、格式与实际 usage 由服务端核验。
 - `POST /v2/lecsync/voice-typing` 和 `/voice-typing/ws`；不可重放的最终文本及时保存。
 - `/v2/lecsync/realtime` 自有 WebSocket 代理，支持语言提示、单语言对双向翻译、说话人、术语/背景、AI 润色、实时纪要、区域、可选存储和实际用量事件。
+- `POST /v2/lecsync/realtime/ticket` 为已激活设备签发一次性 WebSocket 凭据：`expiresIn=60` 秒、用后即失效，响应 `Cache-Control: no-store`，数据库只存 HMAC 摘要（`ws_tickets`，随签发及 `cleanup_old_metrics` 清理）。部分 WKWebView 环境无法使用子协议，网页版在微信环境用 `wss://<网关>/v2/lecsync/realtime?ticket=<一次性凭据>` 建连；长期设备令牌不得放 URL，网关对任何 `access_token` 参数（即使同时有合法 Bearer）回 4401。拒绝请求不能抹除访问日志：负责人仍须配置代理/应用日志隐藏敏感查询参数，ticket 在消费前的 60 秒内仍属于凭据。
 - `/v2/lecsync/recordings/{id}` 查看/删除，`.../audio`、`.../transcript` 经网关下载。未开启 30 天存储时不提供这些操作。
 - `/admin/lecsync/webhooks/*` 使用独立 `LECSYNC_ADMIN_TOKEN`，仅服务端管理。入站 `/v2/lecsync/webhooks/events` 验证 HMAC、时间窗和去重；secret 由 `TOKEN_PEPPER` 派生密钥加密保存。
 

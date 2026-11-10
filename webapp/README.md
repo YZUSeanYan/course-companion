@@ -1,10 +1,12 @@
 # 知习 · 网页版（webapp）
 
-「知习」Android App 的网页移植版（一期：云端版）。复用 `server/` FastAPI 网关与账号额度体系，浏览器内完成课堂录音、云端实时转写与翻译、AI 学习包、文档解析和 FSRS 复习；本地数据保存在 IndexedDB。
+「知习」Android App 的网页移植版。复用 `server/` FastAPI 网关与账号额度体系，支持云端听课及可选浏览器离线识别、AI 学习包、文档解析和 FSRS 复习；本地数据保存在 IndexedDB。
+
+> 发布状态（2026-11-11）：功能候选 `9023fbe` 已同步到 GitHub，PR #106 已转为待审阅但未合并，8 项实际 CI 检查通过；本轮未发布生产。下文 ticket 鉴权与讲义恢复描述的是候选源码，不表示线上已经具备。最近本地验证为 183 项测试（22 文件）及 TypeScript/Vite 构建通过；微信真机和文件选择恢复端到端仍待验收。
 
 ## 功能范围（一期 · 云端）
 
-- **听课**：麦克风采集（AudioWorklet → 16kHz PCM）→ 网关 `/v2/lecsync/realtime` 实时转写与双向翻译；开始/停止、暂停/继续、手动标记疑问；本地可选录音存档（webm）。
+- **听课**：麦克风采集（AudioWorklet → 16kHz PCM）→ 网关 `/v2/lecsync/realtime` 实时转写与双向翻译；开始/停止、暂停/继续、手动标记疑问；本地可选录音存档（WAV，默认关闭）。
 - **译文队列**：原文先落库，定稿行逐条经 `/v2/translate` 翻译，失败不阻塞、可重试（与 Android 同口径）。
 - **AI 学习包**：课堂转写或讲义文本经 `/v2/learning-pack/jobs`（202 + 轮询，360s 超时）生成纪要/疑问解答/重点/词汇/短语/自测/练习，按固定分类展示；同内容本地查重不重复计费。
 - **讲义**：PDF/PNG/JPG 上传至 `/v2/documents/analyze`（≤50MB），页面文本进入 MATERIAL 学习包。
@@ -22,7 +24,7 @@
 - 镜像发布步骤（与 Android 模型镜像同域）：
   1. 下载上游 `sherpa-onnx-wasm-simd-v1.13.7-zh-en-asr-zipformer.tar.bz2`（完整包，含 .wasm 与带模型的 .data）；
   2. 解压，把 `sherpa-onnx-asr.js`、`sherpa-onnx-wasm-main-asr.js`、`sherpa-onnx-wasm-main-asr.wasm`、`sherpa-onnx-wasm-main-asr.data` 四个文件上传到 `https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/`；
-  3. `sha256sum` 四个文件，把哈希与字节数登记到 `src/lib/offline/model-manager.ts` 的 `OFFLINE_ASR_MODEL.assets`（JS 两项已登记；wasm/data 待登记处有注释标记）；
+  3. `sha256sum` 四个文件，模型更新时同步登记 `src/lib/offline/model-manager.ts` 的 `OFFLINE_ASR_MODEL.assets` 哈希与字节数（当前四项均已登记）；
   4. 本地联调：设置页「离线识别模型镜像」可覆盖根地址（如 `http://127.0.0.1:8901/`）。
 - 离线模式不消耗账号额度；识别失败或需要翻译/纪要时在课堂设置切回云端。设置页可随时覆盖镜像地址。
 
@@ -32,7 +34,13 @@
 
 - Chrome / Edge / Safari 较新版本；HTTPS 或 localhost 才能使用麦克风。
 - 录音期间页面须保持前台：浏览器安全模型不支持锁屏/后台持续录音（与 App 的核心差异）。
-- 实时课堂 WebSocket 鉴权：浏览器无法设置 Authorization 头，客户端以 `Sec-WebSocket-Protocol: bearer, <token>` 携带令牌，网关 `proxy_socket` 解析并回显 `bearer`（见 `server/app/lecsync_routes.py`，对 Android 无影响）。
+- 实时课堂 WebSocket 鉴权：桌面浏览器以 `Sec-WebSocket-Protocol: bearer, <token>` 携带设备令牌，网关 `proxy_socket` 解析并回显 `bearer`（见 `server/app/lecsync_routes.py`，对 Android 无影响）。iOS 微信等 WKWebView 会丢子协议，这类环境改走 URL query `ticket=`：先 `POST /v2/lecsync/realtime/ticket` 换一张 60 秒、只能用一次的 ticket（`src/lib/api/client.ts`、`src/lib/classroom.ts`）。长期设备令牌不允许出现在 URL 里——否则会留在 Uvicorn/nginx 访问日志中，网关对 `?access_token=` 直接 4401。
+
+## 历史讲义恢复
+
+课程页「恢复预览」要求重新选择原文件：浏览器先核对 `SHA-256(file)[:24]` 与旧 `documentId`，不一致则不上传、不改旧记录。校验通过后由用户主动上传并重新解析，消耗文档解析额度，不生成学习包；保留讲义标题、同步 uid、首次导入时间及来源标识。缺少原文件校验信息的记录不能安全原地恢复，应另行导入为新讲义。
+
+安全发布顺序、回滚限制和真机验收见 [上线检查表](../docs/ROLLOUT-20261110.md)。
 
 ## 本地开发
 
@@ -58,4 +66,4 @@ npm run build      # tsc --noEmit && vite build
 | 分类 | `src/lib/pack.ts`（`LEARNING_CATEGORIES`） | `learning/LearningCategories.kt` |
 | 云空间同步 | `src/lib/sync/sync.ts`（uid + LWW，分批 ≤400 条） | 同一 `/v1/sync` 网关契约，各端独立实现 |
 
-一期不实现：锁屏/后台录音、桌面小组件、系统通知、浏览器离线识别。
+浏览器限制下不实现：锁屏/后台持续录音、桌面小组件、系统通知。浏览器离线识别已实现，模型下载与运行仍受浏览器兼容性和前台生命周期限制。

@@ -114,7 +114,16 @@ export default function ClassroomMini({ pipWindow, onReturn }: ClassroomMiniProp
                   <i />
                 </span>
               )}
-              <span>{snapshot.partialText || (listening ? "正在聆听…" : "已暂停")}</span>
+              <span>
+                {snapshot.partialText ||
+                  (listening
+                    ? "正在聆听…"
+                    : snapshot.phase === "connecting"
+                      ? "正在连接音频服务器…"
+                      : snapshot.phase === "stopping"
+                        ? "正在结束课堂…"
+                        : "已暂停")}
+              </span>
             </div>
             {snapshot.partialTranslation && <div className="pip__translation">{snapshot.partialTranslation}</div>}
           </div>

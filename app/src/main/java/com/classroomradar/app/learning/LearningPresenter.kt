@@ -28,7 +28,10 @@ import com.classroomradar.app.learning.importer.GlossaryImporter
 import java.security.MessageDigest
 import com.classroomradar.app.learning.review.ReviewScheduler
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -73,6 +76,9 @@ class LearningPresenter(private val appContext: Context) {
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
     private val _isAnalyzing = MutableStateFlow(false)
     val isAnalyzing: StateFlow<Boolean> = _isAnalyzing.asStateFlow()
+    private val previewRestorationTracker = PreviewRestorationTracker()
+    val previewRestoration: StateFlow<PreviewRestorationState> = previewRestorationTracker.state
+    private val isRestoringPreview: Boolean get() = previewRestoration.value.materialId != null
     private val _serviceStatus = MutableStateFlow("尚未检查 AI 服务 · ${aiServiceConfig.displayTarget}")
     val serviceStatus: StateFlow<String> = _serviceStatus.asStateFlow()
     private val _aiServiceUrl = MutableStateFlow(aiServiceConfig.baseUrl)
@@ -211,7 +217,7 @@ class LearningPresenter(private val appContext: Context) {
             _message.value = "请先选择课程"
             return
         }
-        if (_isImporting.value) return
+        if (_isImporting.value || isRestoringPreview) return
         _isImporting.value = true
         scope.launch {
             try {
@@ -246,7 +252,7 @@ class LearningPresenter(private val appContext: Context) {
         manualDoubts: List<ManualDoubtInput> = emptyList(),
         visualBlocks: List<VisualBlockInput> = emptyList(),
     ) {
-        if (_isAnalyzing.value) return
+        if (_isAnalyzing.value || isRestoringPreview) return
         _isAnalyzing.value = true
         scope.launch {
             val startedAt = System.currentTimeMillis()
@@ -285,12 +291,15 @@ class LearningPresenter(private val appContext: Context) {
     }
 
     fun analyzeMaterial(materialId: Long) {
+        if (_isAnalyzing.value || _isImporting.value || isRestoringPreview) return
         val course = _courseDetail.value.course ?: run {
             _message.value = "课程不存在，无法生成学习包"
             return
         }
         scope.launch {
             val material = withContext(Dispatchers.IO) { repository.getMaterial(materialId) }
+            // Restoration may have acquired its lock while the Room lookup was suspended.
+            if (_isAnalyzing.value || isRestoringPreview) return@launch
             if (material == null) {
                 _message.value = "讲义不存在，请重新导入"
                 return@launch
@@ -363,6 +372,77 @@ class LearningPresenter(private val appContext: Context) {
                 material.id,
                 listOf(AnalysisChunkInput("material-${material.id}", text.take(20_000), page = 1)),
             )
+        }
+    }
+
+    /** Called only after explicit upload/cost confirmation. Never generates a learning pack. */
+    fun restoreMaterialPreview(materialId: Long) = restorePreview(materialId) { record, existing ->
+        val original = record.originalRelativePath?.let { File(appContext.filesDir, it) }
+        require(original?.isFile == true) {
+            "这台设备上没有《${record.title}》的原文件，请点「重新选择原文件」"
+        }
+        parseRestoredDocument(existing, original, record.mimeType)
+    }
+
+    /** Selection is not consent: MainActivity confirms the selected file before calling here. */
+    fun restoreMaterialFromFile(materialId: Long, uri: Uri, displayName: String?, mimeType: String?) =
+        restorePreview(materialId) { _, existing ->
+            lectureImporter.withStagedOriginal(appContext, uri, displayName, mimeType) { original, mime ->
+                parseRestoredDocument(existing, original, mime)
+            }
+        }
+
+    private suspend fun parseRestoredDocument(
+        existing: DocumentAssetDto,
+        original: File,
+        mimeType: String,
+    ): DocumentAssetDto {
+        // Reject another document before any upload or billable parsing request.
+        withContext(Dispatchers.IO) { verifyRestoreFile(existing, original) }
+        currentCoroutineContext().ensureActive()
+        val asset = learningApi.analyzeDocument(original, mimeType)
+        verifyRestoredDocument(existing, asset)
+        return asset
+    }
+
+    private fun restorePreview(
+        materialId: Long,
+        parse: suspend (MaterialEntity, DocumentAssetDto) -> DocumentAssetDto,
+    ) {
+        if (_isAnalyzing.value || _isImporting.value || !previewRestorationTracker.tryStart(materialId)) return
+        // The lock is held before launch and before the first Room/file/network suspension.
+        scope.launch {
+            try {
+                val record = withContext(Dispatchers.IO) { repository.getMaterial(materialId) }
+                    ?: error("讲义不存在，请重新导入")
+                require(record.mimeType == "application/pdf" || record.mimeType.startsWith("image/")) {
+                    "只有 PDF 或图片讲义才有页面预览"
+                }
+                val existing = record.documentJson?.let {
+                    protocolJson.decodeFromString(DocumentAssetDto.serializer(), it)
+                } ?: error("原讲义缺少可验证的文档标识，请作为新讲义导入")
+                val asset = parse(record, existing)
+                withContext(Dispatchers.IO) {
+                    currentCoroutineContext().ensureActive()
+                    val current = repository.getMaterial(materialId) ?: error("讲义已删除，未替换")
+                    check(current.documentJson == record.documentJson) { "讲义已更改，请重新确认后恢复" }
+                    // Retain title, material/course identity, and all existing original/text paths.
+                    repository.updateMaterial(
+                        current.copy(
+                            documentJson = protocolJson.encodeToString(DocumentAssetDto.serializer(), asset),
+                            pageCount = asset.pages.size,
+                        ),
+                    )
+                }
+                previewRestorationTracker.restored(materialId)
+                _message.value = "《${record.title}》的页面预览已恢复（未生成学习包）"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _message.value = "恢复页面预览失败：${error.message ?: "请重试"}"
+            } finally {
+                previewRestorationTracker.finish()
+            }
         }
     }
 

@@ -327,7 +327,17 @@ export default function ClassroomPage() {
 
               <div className="stage__timer">
                 {formatSeconds(snapshot.elapsedSeconds)}
-                <small>{active ? (listening ? "Recording" : "Paused") : "Ready"}</small>
+                <small>
+                  {snapshot.phase === "listening"
+                    ? "Recording"
+                    : snapshot.phase === "connecting"
+                      ? "Connecting"
+                      : snapshot.phase === "stopping"
+                        ? "Stopping"
+                        : snapshot.phase === "paused"
+                          ? "Paused"
+                          : "Ready"}
+                </small>
               </div>
 
               <div className="stage__actions">
@@ -435,7 +445,16 @@ export default function ClassroomPage() {
                           <i />
                         </span>
                       )}
-                      <span>{snapshot.partialText || (listening ? "正在聆听…" : "已暂停，点「继续」恢复")}</span>
+                      <span>
+                        {snapshot.partialText ||
+                          (listening
+                            ? "正在聆听…"
+                            : snapshot.phase === "connecting"
+                              ? "正在连接音频服务器…"
+                              : snapshot.phase === "stopping"
+                                ? "正在结束课堂…"
+                                : "已暂停，点「继续」恢复")}
+                      </span>
                     </div>
                     {snapshot.partialTranslation && (
                       <div className="en transcript-line__preview">{snapshot.partialTranslation}</div>

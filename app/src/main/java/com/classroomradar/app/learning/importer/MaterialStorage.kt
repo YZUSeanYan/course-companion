@@ -34,6 +34,25 @@ internal class MaterialStorage(
         )
     }
 
+    /** Only pass a directory allocated for this attempt by create; never an existing record's path. */
+    fun quarantine(material: MaterialFiles): File? {
+        val directory = material.directory
+        val root = File(filesDir, materialsDirectory).canonicalFile
+        require(directory.parentFile?.canonicalFile == root && uuidPattern.matches(directory.name)) {
+            "只能隔离本次导入的讲义暂存目录"
+        }
+        require(directory.canonicalFile == File(root, directory.name)) { "不能隔离链接目录" }
+        if (!directory.exists()) return null
+        val quarantine = File(filesDir, "material-quarantine")
+        check(quarantine.isDirectory || quarantine.mkdirs()) { "无法创建讲义隔离目录，暂存文件已保留" }
+        require(quarantine.canonicalFile == File(filesDir.canonicalFile, "material-quarantine")) {
+            "不能使用链接隔离目录"
+        }
+        val destination = File(quarantine, "${directory.name}-${UUID.randomUUID()}")
+        check(!destination.exists() && directory.renameTo(destination)) { "无法隔离讲义暂存文件，文件已保留" }
+        return destination
+    }
+
     private companion object {
         const val materialsDirectory = "materials"
         const val textFileName = "text.txt"

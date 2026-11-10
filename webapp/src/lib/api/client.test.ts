@@ -85,6 +85,38 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("realtimeTicket", () => {
+  it("使用 Bearer POST 取新 ticket，不把设备凭据放 URL，不缓存或持久化 ticket", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${GATEWAY}/v2/lecsync/realtime/ticket`);
+      return jsonResponse({ ticket: `single-use-${calls.length}`, expiresIn: 60 });
+    });
+    expect(await zhixi.realtimeTicket()).toBe("single-use-1");
+    expect(await zhixi.realtimeTicket()).toBe("single-use-2");
+    expect(calls).toHaveLength(2);
+    for (const { url, init } of calls) {
+      expect(url).not.toContain("token-1");
+      expect(init).toMatchObject({ method: "POST", cache: "no-store" });
+      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer token-1");
+    }
+    expect([...store.values()].join("")).not.toContain("single-use-");
+  });
+
+  it.each([{}, null, { ticket: 123, expiresIn: 60 }, { ticket: " ", expiresIn: 60 }, { ticket: "t", expiresIn: 0 }])(
+    "拒绝无效 ticket 响应 %j，不降级发送长期设备凭据",
+    async (body) => {
+      mockFetch(() => jsonResponse(body));
+      await expect(zhixi.realtimeTicket()).rejects.toThrow("无法获取课堂连接凭据");
+    },
+  );
+
+  it("签发被限流时保留错误，不返回设备 token", async () => {
+    mockFetch(() => jsonResponse({ detail: "Too many requests" }, { status: 429 }));
+    await expect(zhixi.realtimeTicket()).rejects.toMatchObject({ status: 429 });
+    expect(calls).toHaveLength(1);
+  });
+});
+
 const ACCOUNT_STATUS: AccountStatus = {
   activated: true,
   required: true,

@@ -437,6 +437,22 @@ export class ZhixiClient {
     const credential = await this.ensureDevice();
     return credential.token;
   }
+
+  /**
+   * 一次性 WebSocket ticket：60 秒内有效、只能建连一次。
+   * WKWebView 丢掉子协议时只能把凭据放进 URL，长期设备 token 会留在访问日志里，
+   * 因此 URL 通道一律用这里返回的短时效 ticket。
+   */
+  async realtimeTicket(): Promise<string> {
+    const issued = await this.requestJson<{ ticket?: string; expiresIn?: number }>(
+      "/v2/lecsync/realtime/ticket",
+      { method: "POST", cache: "no-store" },
+    );
+    if (typeof issued?.ticket !== "string" || !issued.ticket.trim() || typeof issued.expiresIn !== "number" || issued.expiresIn <= 0) {
+      throw new ZhixiApiError("无法获取课堂连接凭据，请刷新页面后重试。", 502, "server");
+    }
+    return issued.ticket;
+  }
 }
 
 function mapJobErrorCode(code: string): ErrorCode {

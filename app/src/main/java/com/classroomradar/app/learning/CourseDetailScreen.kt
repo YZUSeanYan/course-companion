@@ -62,9 +62,13 @@ fun CourseDetailScreen(
     state: CourseDetailState,
     isImporting: Boolean,
     isAnalyzing: Boolean,
+    previewRestoration: PreviewRestorationState,
+    restorePending: Boolean,
     message: String?,
     onImportMaterial: () -> Unit,
     onAnalyzeMaterial: (Long) -> Unit,
+    onRestoreMaterialPreview: (Long) -> Unit,
+    onPickMaterialOriginal: (Long) -> Unit,
     onImportGlossary: () -> Unit,
     onExport: () -> Unit,
     onOpenCategory: (String) -> Unit,
@@ -79,6 +83,8 @@ fun CourseDetailScreen(
         }
         return
     }
+    val isRestoring = previewRestoration.materialId != null
+    val materialActionsEnabled = !isAnalyzing && !isImporting && !isRestoring && !restorePending
     val categoryGroups = remember(state.learningItems) { groupLearningItems(state.learningItems) }
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
@@ -140,15 +146,19 @@ fun CourseDetailScreen(
                 modifier = Modifier.fillMaxWidth(),
                 icon = Icons.Outlined.FileUpload,
                 tone = GlassTone.Success,
-                enabled = !isImporting,
+                enabled = materialActionsEnabled,
             )
         }
-        if (isImporting || isAnalyzing) {
+        if (isImporting || isAnalyzing || isRestoring) {
             item {
                 GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            if (isAnalyzing) "AI 正在理解讲义并生成学习内容。含图示、公式的复杂讲义可能需要几分钟，请勿重复提交。" else "正在提取文字，请稍候。大文件和扫描图片需要更多时间。",
+                            when {
+                                isRestoring -> "正在校验原文件并恢复页面预览，仅进行文档解析，不生成学习包。请勿重复提交。"
+                                isAnalyzing -> "AI 正在理解讲义并生成学习内容。含图示、公式的复杂讲义可能需要几分钟，请勿重复提交。"
+                                else -> "正在提取文字，请稍候。大文件和扫描图片需要更多时间。"
+                            },
                             color = LiquidTextSecondary,
                         )
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = RadarBrand)
@@ -194,14 +204,25 @@ fun CourseDetailScreen(
                             modifier = Modifier.fillMaxWidth(),
                             icon = Icons.Outlined.AutoAwesome,
                             tone = GlassTone.Accent,
-                            enabled = !isAnalyzing && !isImporting,
+                            enabled = materialActionsEnabled,
                         )
                         material.documentJson?.let { raw ->
                             val asset = remember(raw) {
                                 runCatching { Json.decodeFromString(DocumentAssetDto.serializer(), raw) }.getOrNull()
                             }
                             if (asset != null) {
-                                DocumentPagePreview(asset, onLoadPageImage)
+                                DocumentPagePreview(
+                                    asset = asset,
+                                    onLoadImage = onLoadPageImage,
+                                    previewRevision = previewRestoration.revisions[material.id] ?: 0L,
+                                    restoreEnabled = materialActionsEnabled,
+                                    onRestoreFromOriginal = if (material.originalRelativePath != null) {
+                                        ({ onRestoreMaterialPreview(material.id) })
+                                    } else {
+                                        null
+                                    },
+                                    onPickOriginalFile = { onPickMaterialOriginal(material.id) },
+                                )
                             }
                         }
                     }

@@ -270,6 +270,20 @@ class Database:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS document_access (
+                    document_id TEXT NOT NULL,
+                    owner_key TEXT NOT NULL,
+                    PRIMARY KEY (document_id, owner_key)
+                );
+                CREATE TABLE IF NOT EXISTS ws_tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                    ticket_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ws_tickets_expires ON ws_tickets(expires_at);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -683,6 +697,78 @@ class Database:
                     (device_id, usage_date),
                 )
 
+
+    def grant_document_access(self, document_id: str, owner_key: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO document_access (document_id, owner_key) VALUES (?, ?)",
+                (document_id, owner_key),
+            )
+
+    def has_document_access(self, document_id: str, owner_key: str) -> bool:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM document_access WHERE document_id = ? AND owner_key = ?",
+                (document_id, owner_key),
+            ).fetchone()
+        return row is not None
+
+    def create_ws_ticket(self, device_id: str, ticket_hash: str, ttl_seconds: int = 60) -> None:
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat()
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM ws_tickets WHERE expires_at <= ? OR consumed_at IS NOT NULL",
+                (now.isoformat(),),
+            )
+            connection.execute(
+                "INSERT INTO ws_tickets(device_id, ticket_hash, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?)",
+                (device_id, ticket_hash, now.isoformat(), expires_at),
+            )
+
+    def consume_ws_ticket(self, ticket_hash: str) -> tuple[str, str | None]:
+        """Atomically consume a short-lived browser WebSocket ticket."""
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            # Waiting for another writer must not extend the ticket's lifetime.
+            now = self._now()
+            row = connection.execute(
+                "SELECT * FROM ws_tickets WHERE ticket_hash = ?",
+                (ticket_hash,),
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return "not_found", None
+            if row["consumed_at"] is not None:
+                connection.commit()
+                return "consumed", None
+            if str(row["expires_at"]) <= now:
+                connection.commit()
+                return "expired", None
+            cursor = connection.execute(
+                "UPDATE ws_tickets SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+                (now, row["id"]),
+            )
+            if cursor.rowcount != 1:
+                connection.commit()
+                return "consumed", None
+            connection.commit()
+            return "ok", str(row["device_id"])
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def purge_ws_tickets(self) -> int:
+        with self.connect() as connection:
+            return connection.execute(
+                "DELETE FROM ws_tickets WHERE expires_at <= ? OR consumed_at IS NOT NULL",
+                (self._now(),),
+            ).rowcount
+
     def reserve_document(
         self, device_id: str, daily_quota: int, account_id: str | None = None
     ) -> None:
@@ -894,21 +980,30 @@ class Database:
                 "SELECT account_id FROM account_devices WHERE device_id = ?",
                 (device_id,),
             ).fetchone()
-            if existing is not None:
-                if existing["account_id"] == account_id:
-                    connection.commit()
-                    return
+            if existing is not None and existing["account_id"] != account_id:
                 raise DeviceBoundElsewhere()
-            if max_devices > 0:
-                count = connection.execute(
-                    "SELECT COUNT(*) AS total FROM account_devices WHERE account_id = ?",
-                    (account_id,),
-                ).fetchone()["total"]
-                if int(count) >= max_devices:
-                    raise DeviceLimitReached(max_devices)
+            if existing is None:
+                if max_devices > 0:
+                    count = connection.execute(
+                        "SELECT COUNT(*) AS total FROM account_devices WHERE account_id = ?",
+                        (account_id,),
+                    ).fetchone()["total"]
+                    if int(count) >= max_devices:
+                        raise DeviceLimitReached(max_devices)
+                connection.execute(
+                    "INSERT INTO account_devices(account_id, device_id, activated_at) VALUES (?, ?, ?)",
+                    (account_id, device_id, self._now()),
+                )
             connection.execute(
-                "INSERT INTO account_devices(account_id, device_id, activated_at) VALUES (?, ?, ?)",
-                (account_id, device_id, self._now()),
+                """
+                INSERT OR IGNORE INTO document_access (document_id, owner_key)
+                SELECT document_id, ? FROM document_access WHERE owner_key = ?
+                """,
+                (f"account:{account_id}", f"device:{device_id}"),
+            )
+            connection.execute(
+                "DELETE FROM document_access WHERE owner_key = ?",
+                (f"device:{device_id}",),
             )
             connection.commit()
         except Exception:
@@ -1483,12 +1578,14 @@ class Database:
         requests = self.purge_api_requests(request_days)
         codes = self.purge_expired_codes(code_days)
         orphans = self.purge_orphan_sync_records()
+        tickets = self.purge_ws_tickets()
         return {
             "anonymousDevices": devices["devices"],
             "apiRequests": requests,
             "smsCodes": codes["smsCodes"],
             "activationCodes": codes["activationCodes"],
             "orphanSyncRecords": orphans,
+            "wsTickets": tickets,
         }
 
     def record_api_request(
