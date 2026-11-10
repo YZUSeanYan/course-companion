@@ -172,23 +172,77 @@ def test_realtime_accepts_browser_subprotocol_auth(monkeypatch):
     assert events == [{"type": "session.ready", "sessionId": "session-web", "store": False}]
 
 
-def test_realtime_rejects_malformed_subprotocol():
-    """非 bearer,<token> 形式的子协议不能通过鉴权，连接以 4401 关闭。"""
+def _assert_websocket_close_code(client, path, headers=None, expected=4401):
     from fastapi import WebSocketDisconnect
 
+    try:
+        with client.websocket_connect(path, headers=headers or {}) as device:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                device.receive_text()
+            assert excinfo.value.code == expected
+    except WebSocketDisconnect as exc:
+        assert exc.code == expected
+
+
+def test_realtime_rejects_malformed_subprotocol():
+    """非 bearer,<token> 形式的子协议不能通过鉴权，连接以 4401 关闭。"""
     async def run():
         from app.main import create_app
         from fastapi.testclient import TestClient
         app = create_app(make_settings())
         app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
         with TestClient(app) as client:
-            with pytest.raises(WebSocketDisconnect) as excinfo:
-                with client.websocket_connect(
-                    "/v2/lecsync/realtime",
-                    headers={"sec-websocket-protocol": "bearer"},
-                ):
-                    pass
-            assert excinfo.value.code == 4401
+            _assert_websocket_close_code(
+                client,
+                "/v2/lecsync/realtime",
+                headers={"sec-websocket-protocol": "bearer"},
+                expected=4401,
+            )
+    asyncio.run(run())
+
+
+def test_realtime_accepts_query_access_token(monkeypatch):
+    """iOS 微信等环境无法发送子协议：允许 ?access_token= 作为兼容鉴权通道。"""
+    socket = FakeSocket([json.dumps({"type": "session.ready", "sessionId": "session-wechat", "store": False})])
+    events = []
+
+    class Connection:
+        def __init__(self, *args, **kwargs):
+            self.session_id = "session-wechat"
+
+        async def __aenter__(self):
+            self.events = socket.events
+            self.send_audio = socket.send_audio
+            self.control = socket.control
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    async def run():
+        from app.main import create_app
+        from fastapi.testclient import TestClient
+        app = create_app(make_settings())
+        app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
+        app.state.lecsync_connection_factory = Connection
+        with TestClient(app) as client:
+            token = auth_headers(client)["Authorization"].split(" ", 1)[1]
+            with client.websocket_connect(f"/v2/lecsync/realtime?access_token={token}") as device:
+                device.send_json({"type": "configure", "config": {"transcribe": {"languages": ["en", "zh"]}}})
+                events.append(device.receive_json())
+    asyncio.run(run())
+    assert events == [{"type": "session.ready", "sessionId": "session-wechat", "store": False}]
+
+
+def test_realtime_rejects_missing_auth_with_close_code():
+    """无 Authorization、无子协议、无 query token 时以 4401 关闭（先 accept 再 close）。"""
+    async def run():
+        from app.main import create_app
+        from fastapi.testclient import TestClient
+        app = create_app(make_settings())
+        app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
+        with TestClient(app) as client:
+            _assert_websocket_close_code(client, "/v2/lecsync/realtime", expected=4401)
     asyncio.run(run())
 
 
