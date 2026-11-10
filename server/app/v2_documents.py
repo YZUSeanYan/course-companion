@@ -22,6 +22,12 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
     root = Path(os.getenv("DOCUMENT_STORAGE_ROOT", "document_assets")).resolve()
     root.mkdir(parents=True, exist_ok=True)
 
+    def document_owner(device: str) -> str:
+        # Identical files may share on-disk assets, but access is per account
+        # (or per standalone device when no account is bound).
+        subject = resolve_quota_subject(app.state.db, settings, device)
+        return f"account:{subject.account_id}" if subject.account_id else f"device:{device}"
+
     @app.post("/v2/documents/analyze")
     async def upload_document(
         file: UploadFile = File(...), device: str = Depends(activated_device)
@@ -64,11 +70,12 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
             except Exception:
                 app.state.db.release_document(device, subject.account_id)
                 raise
+            app.state.db.grant_document_access(asset.documentId, document_owner(device))
             return asset.to_dict()
 
     @app.get("/v2/documents/{document_id}/pages/{filename}")
     def page_image(
-        document_id: str, filename: str, _: str = Depends(activated_device)
+        document_id: str, filename: str, device: str = Depends(activated_device)
     ) -> FileResponse:
         document_match = re.fullmatch(r"([0-9a-f]{24})", document_id)
         page_match = re.fullmatch(r"page-(\d{4})\.jpg", filename)
@@ -77,9 +84,15 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
         # Rebuild both components from parsed integers so the path can only
         # contain characters produced by this formatting, never raw input.
         document_key = f"{int(document_match.group(1), 16):024x}"
+        if not app.state.db.has_document_access(document_key, document_owner(device)):
+            raise HTTPException(status_code=404, detail="Page not found")
         safe_filename = f"page-{int(page_match.group(1)):04d}.jpg"
         path = (root / document_key / "pages" / safe_filename).resolve()
         path.relative_to(root)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Page not found")
-        return FileResponse(path, media_type="image/jpeg")
+        return FileResponse(
+            path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store", "Vary": "Authorization"},
+        )

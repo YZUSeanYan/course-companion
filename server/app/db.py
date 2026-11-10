@@ -270,6 +270,11 @@ class Database:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS document_access (
+                    document_id TEXT NOT NULL,
+                    owner_key TEXT NOT NULL,
+                    PRIMARY KEY (document_id, owner_key)
+                );
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -682,6 +687,22 @@ class Database:
                     """,
                     (device_id, usage_date),
                 )
+
+
+    def grant_document_access(self, document_id: str, owner_key: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO document_access (document_id, owner_key) VALUES (?, ?)",
+                (document_id, owner_key),
+            )
+
+    def has_document_access(self, document_id: str, owner_key: str) -> bool:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM document_access WHERE document_id = ? AND owner_key = ?",
+                (document_id, owner_key),
+            ).fetchone()
+        return row is not None
 
     def reserve_document(
         self, device_id: str, daily_quota: int, account_id: str | None = None
