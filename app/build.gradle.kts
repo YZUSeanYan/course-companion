@@ -88,7 +88,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
     implementation("io.github.open-spaced-repetition:fsrs:1.0.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
-    compileOnly("org.projectlombok:lombok:1.18.42")
+    compileOnly("org.projectlombok:lombok:1.18.48")
     ksp("androidx.room:room-compiler:2.8.4")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
