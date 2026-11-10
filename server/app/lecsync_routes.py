@@ -32,8 +32,6 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
     limiter = SlidingWindowRateLimiter(settings.lecsync_rate_limit, 60)
     streams = StreamLimiter(settings.lecsync_max_concurrent_streams)
     cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
-    upload_root = Path(os.getenv("LECSYNC_UPLOAD_ROOT", "lecsync_uploads")).resolve()
-    upload_root.mkdir(parents=True, exist_ok=True)
     if not hasattr(app.state, "lecsync_connection_factory"):
         app.state.lecsync_connection_factory = LecsyncRealtimeConnection
 
@@ -276,13 +274,8 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(422, {"code": "INVALID_INPUT", "message": "音频处理选项不正确"}) from exc
         data, seconds = await read_audio(file, 200 * 1024 * 1024, 7200, device)
         identifier = uuid.uuid4().hex
-        try:
-            # Parsed so the staging filename can only contain UUID characters.
-            device_key = uuid.UUID(device)
-        except ValueError as exc:
-            raise HTTPException(401, {"code": "INVALID_TOKEN", "message": "设备身份无效"}) from exc
-        path = upload_root / f"{device_key}-{identifier}"
-        path.write_bytes(data)
+        # Classroom audio stays in memory until it is handed to the provider.
+        # Do not write raw audio into LECSYNC_UPLOAD_ROOT or any other staging file.
         try:
             upload = await call(client().create_audio_upload, len(data), hashlib.sha256(data).hexdigest())
             await call(client().upload_created_file, upload, data)
@@ -291,9 +284,6 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         except HTTPException:
             app.state.db.settle_lecsync_audio(device, seconds, 0)
             raise
-        finally:
-            # The staging file is retained for retry/recovery, never served publicly.
-            pass
         identifier = task_id(result, identifier)
         app.state.db.create_lecsync_task(device, identifier, "transcription_job", upstream_request_id=result.get("request_id"), reserved_seconds=seconds)
         return finish_task(device, identifier, "transcription_job", result, seconds)
