@@ -4,6 +4,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
+from .schemas import (
+    Chunk,
+    GlossaryItem,
+    KeyPointItem,
+    PhraseItem,
+    QuestionItem,
+    QuizCard,
+    VocabularyItem,
+)
+
 
 class StrictV2Model(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -43,17 +53,13 @@ class LearningPackRequest(StrictV2Model):
     language: str = Field(min_length=1, max_length=50)
     output_language: Literal["zh", "source"] = Field(alias="outputLanguage", default="zh")
     analysis_mode: Literal["SESSION", "MATERIAL", "EXAM"] = Field(alias="analysisMode")
-    chunks: list[dict] = Field(min_length=1, max_length=100)
-    glossary: list[dict] = Field(default_factory=list, max_length=100)
+    chunks: list[Chunk] = Field(min_length=1, max_length=100)
+    glossary: list[GlossaryItem] = Field(default_factory=list, max_length=100)
     manual_doubts: list[ManualDoubt] = Field(alias="manualDoubts", default_factory=list, max_length=50)
     visual_blocks: list[VisualBlock] = Field(alias="visualBlocks", default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_input(self):
-        from .schemas import Chunk, GlossaryItem
-
-        self.chunks = [Chunk.model_validate(chunk) for chunk in self.chunks]
-        self.glossary = [GlossaryItem.model_validate(item) for item in self.glossary]
         sources = [chunk.source_id for chunk in self.chunks]
         if len(sources) != len(set(sources)):
             raise ValueError("sourceId values must be unique")
@@ -98,21 +104,14 @@ class LearningPackV2(StrictV2Model):
     minutes: Minutes
     doubt_answers: list[DoubtAnswer] = Field(alias="doubtAnswers", default_factory=list, max_length=50)
     visual_notes: list[VisualNote] = Field(alias="visualNotes", default_factory=list, max_length=20)
-    vocabulary: list[dict] = Field(default_factory=list, max_length=30)
-    phrases: list[dict] = Field(default_factory=list, max_length=30)
-    key_points: list[dict] = Field(alias="keyPoints", default_factory=list, max_length=20)
-    questions: list[dict] = Field(default_factory=list, max_length=20)
-    quiz_cards: list[dict] = Field(alias="quizCards", default_factory=list, max_length=30)
+    vocabulary: list[VocabularyItem] = Field(default_factory=list, max_length=30)
+    phrases: list[PhraseItem] = Field(default_factory=list, max_length=30)
+    key_points: list[KeyPointItem] = Field(alias="keyPoints", default_factory=list, max_length=20)
+    questions: list[QuestionItem] = Field(default_factory=list, max_length=20)
+    quiz_cards: list[QuizCard] = Field(alias="quizCards", default_factory=list, max_length=30)
 
     @model_validator(mode="after")
     def validate_references(self, info: ValidationInfo):
-        from .schemas import KeyPointItem, PhraseItem, QuestionItem, QuizCard, VocabularyItem
-
-        self.vocabulary = [VocabularyItem.model_validate(item) for item in self.vocabulary]
-        self.phrases = [PhraseItem.model_validate(item) for item in self.phrases]
-        self.key_points = [KeyPointItem.model_validate(item) for item in self.key_points]
-        self.questions = [QuestionItem.model_validate(item) for item in self.questions]
-        self.quiz_cards = [QuizCard.model_validate(item) for item in self.quiz_cards]
         context = info.context or {}
         sources = context.get("sources", set())
         doubt_ids = context.get("doubt_ids", set())
