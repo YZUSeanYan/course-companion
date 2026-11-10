@@ -1,19 +1,17 @@
 import fitz
 
-from conftest import auth_headers, make_client
+from conftest import auth_headers, bind_test_device, make_client, register
 
 
-def test_upload_document_and_read_page_image(settings, monkeypatch, tmp_path):
-    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
-    source = tmp_path / "lecture.pdf"
+def _write_lecture_pdf(path):
     document = fitz.open()
     page = document.new_page()
     page.insert_text((72, 100), "A complex engineering diagram is described on this page.")
-    document.save(source)
+    document.save(path)
     document.close()
 
-    client = make_client(settings, lambda request: None)
-    headers = auth_headers(client)
+
+def _upload_lecture(client, headers, source):
     with source.open("rb") as stream:
         response = client.post(
             "/v2/documents/analyze",
@@ -21,7 +19,17 @@ def test_upload_document_and_read_page_image(settings, monkeypatch, tmp_path):
             files={"file": ("lecture.pdf", stream, "application/pdf")},
         )
     assert response.status_code == 200, response.text
-    asset = response.json()
+    return response.json()
+
+
+def test_upload_document_and_read_page_image(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    headers = auth_headers(client)
+    asset = _upload_lecture(client, headers, source)
     assert asset["pages"][0]["pageIndex"] == 0
     assert asset["pages"][0]["nativeText"]
 
@@ -30,3 +38,73 @@ def test_upload_document_and_read_page_image(settings, monkeypatch, tmp_path):
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/jpeg"
     assert image.content.startswith(b"\xff\xd8")
+    assert "private" in image.headers.get("cache-control", "")
+    assert "no-store" in image.headers.get("cache-control", "")
+
+
+def test_foreign_account_cannot_read_document_pages(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    owner = auth_headers(client)
+    asset = _upload_lecture(client, owner, source)
+    filename = asset["pages"][0]["imageRelativePath"].rsplit("/", 1)[-1]
+    page_url = f"/v2/documents/{asset['documentId']}/pages/{filename}"
+
+    foreign = client.get(page_url, headers=auth_headers(client))
+    missing = client.get(
+        "/v2/documents/aaaaaaaaaaaaaaaaaaaaaaaa/pages/page-0000.jpg",
+        headers=owner,
+    )
+    assert foreign.status_code == 404
+    assert foreign.json()["detail"] == "Page not found"
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == foreign.json()["detail"]
+
+
+def test_sibling_device_on_same_account_can_read_pages(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    first = register(client, activate=True)
+    owner_headers = {"Authorization": f"Bearer {first['token']}"}
+    asset = _upload_lecture(client, owner_headers, source)
+    filename = asset["pages"][0]["imageRelativePath"].rsplit("/", 1)[-1]
+    page_url = f"/v2/documents/{asset['documentId']}/pages/{filename}"
+
+    sibling = register(client, activate=False)
+    bind_test_device(
+        client,
+        sibling["deviceId"],
+        {
+            "id": first["accountId"],
+            "max_devices": client.app.state.settings.account_default_max_devices,
+        },
+    )
+    sibling_headers = {"Authorization": f"Bearer {sibling['token']}"}
+    image = client.get(page_url, headers=sibling_headers)
+    assert image.status_code == 200, image.text
+    assert image.content.startswith(b"\xff\xd8")
+
+
+def test_legacy_document_without_owner_record_returns_404(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    headers = auth_headers(client)
+    asset = _upload_lecture(client, headers, source)
+    filename = asset["pages"][0]["imageRelativePath"].rsplit("/", 1)[-1]
+    with client.app.state.db.connect() as connection:
+        connection.execute("DELETE FROM document_access")
+    image = client.get(
+        f"/v2/documents/{asset['documentId']}/pages/{filename}",
+        headers=headers,
+    )
+    assert image.status_code == 404
+    assert image.json()["detail"] == "Page not found"

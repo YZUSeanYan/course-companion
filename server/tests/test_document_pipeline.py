@@ -46,3 +46,18 @@ def test_missing_input_is_rejected(tmp_path: Path):
         assert "does not exist" in str(error)
     else:
         raise AssertionError("missing document should fail")
+
+
+def test_oversized_pdf_page_is_rejected_before_pixmap_allocation(tmp_path: Path):
+    source = tmp_path / "oversized.pdf"
+    document = fitz.open()
+    document.new_page(width=3000, height=3000)
+    document.save(source)
+    document.close()
+
+    try:
+        analyze_document(source, "application/pdf", tmp_path / "out")
+    except ValueError as exc:
+        assert "40-megapixel" in str(exc)
+    else:
+        raise AssertionError("expected a render-pixel limit error")

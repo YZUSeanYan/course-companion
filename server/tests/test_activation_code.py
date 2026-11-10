@@ -288,3 +288,31 @@ def test_activate_without_code_stays_compatible_by_default(settings):
     response = activate(client, token, phone)
     assert response.status_code == 200, response.text
     assert response.json()["activated"] is True
+
+def test_forged_x_real_ip_does_not_bypass_ip_rate_limit(settings):
+    limited = activation_settings(
+        replace(
+            settings,
+            activation_code_per_ip_hour=1,
+            activation_code_per_device_hour=100,
+            activation_code_per_phone_hour=100,
+        )
+    )
+    client = TestClient(create_app(limited))
+    fake = FakeSmsSender()
+    client.app.state.sms_sender = fake
+
+    _, phone_a = create_test_account(client)
+    _, phone_b = create_test_account(client)
+    _, token_a = register_device(client)
+    _, token_b = register_device(client)
+
+    first = request_code(client, token_a, phone_a)
+    assert first.status_code == 200, first.text
+    forged = client.post(
+        "/v1/accounts/activate/request-code",
+        json={"phone": phone_b},
+        headers={**bearer(token_b), "X-Real-IP": "203.0.113.50"},
+    )
+    assert forged.status_code == 429
+    assert forged.headers["X-Zhixi-Error-Code"] == "rate_limited"
