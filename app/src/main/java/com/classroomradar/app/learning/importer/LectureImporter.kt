@@ -35,7 +35,8 @@ class LectureImporter {
         }
 
         val format = LectureFormat.resolve(displayName, mimeType)
-        val material = MaterialStorage(context.filesDir).create(format)
+        val storage = MaterialStorage(context.filesDir)
+        val material = storage.create(format)
         try {
             copyOriginal(context, uri, material.original)
             val extraction = when (format) {
@@ -62,8 +63,46 @@ class LectureImporter {
                 mimeType = format.mimeType,
             )
         } catch (failure: Throwable) {
-            material.directory.deleteRecursively()
+            try {
+                storage.quarantine(material)
+            } catch (cleanup: Exception) {
+                failure.addSuppressed(cleanup)
+            }
             throw failure
+        }
+    }
+
+    /** Restoration only needs bytes, not OCR or a replacement of the existing local source files. */
+    internal suspend fun <T> withStagedOriginal(
+        context: Context,
+        uri: Uri,
+        displayName: String?,
+        mimeType: String?,
+        restore: suspend (File, String) -> T,
+    ) = withContext(Dispatchers.IO) {
+        require(uri.scheme?.lowercase(Locale.ROOT) == ContentResolver.SCHEME_CONTENT) {
+            "请通过系统文件选择器选择原文件"
+        }
+        val format = LectureFormat.resolve(displayName, mimeType)
+        require(format == LectureFormat.PDF || format == LectureFormat.JPEG || format == LectureFormat.PNG) {
+            "只有 PDF 或图片讲义才有页面预览"
+        }
+        val storage = MaterialStorage(context.filesDir)
+        val material = storage.create(format)
+        var failure: Throwable? = null
+        try {
+            copyOriginal(context, uri, material.original)
+            restore(material.original, format.mimeType)
+        } catch (error: Throwable) {
+            failure = error
+            throw error
+        } finally {
+            // Synchronous rename also runs on cancellation. Never remove existing originals.
+            try {
+                storage.quarantine(material)
+            } catch (cleanup: Exception) {
+                if (failure != null) failure.addSuppressed(cleanup) else throw cleanup
+            }
         }
     }
 

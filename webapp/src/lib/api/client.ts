@@ -446,9 +446,9 @@ export class ZhixiClient {
   async realtimeTicket(): Promise<string> {
     const issued = await this.requestJson<{ ticket?: string; expiresIn?: number }>(
       "/v2/lecsync/realtime/ticket",
-      { method: "POST" },
+      { method: "POST", cache: "no-store" },
     );
-    if (!issued.ticket) {
+    if (typeof issued?.ticket !== "string" || !issued.ticket.trim() || typeof issued.expiresIn !== "number" || issued.expiresIn <= 0) {
       throw new ZhixiApiError("无法获取课堂连接凭据，请刷新页面后重试。", 502, "server");
     }
     return issued.ticket;

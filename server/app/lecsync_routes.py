@@ -402,7 +402,7 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         return normalize(await call(client().voice_typing_status, request_id))
 
     @app.post("/v2/lecsync/realtime/ticket")
-    async def realtime_ticket(device: str = Depends(authenticated)) -> dict:
+    async def realtime_ticket(response: Response, device: str = Depends(authenticated)) -> dict:
         # Browsers cannot set WebSocket headers, and WKWebView drops the
         # subprotocol handshake, so the browser has to authenticate through the
         # URL. A long-lived device token there would be written to every access
@@ -415,6 +415,7 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             WS_TICKET_TTL_SECONDS,
         )
         # Bypass normalize()/public() on purpose: public() strips "ticket".
+        response.headers["Cache-Control"] = "no-store"
         return {"ticket": ticket, "expiresIn": WS_TICKET_TTL_SECONDS}
 
     async def proxy_socket(socket: WebSocket, kind: str):
@@ -423,6 +424,11 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         protocols = [p.strip() for p in (socket.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
         if protocols and protocols[0].lower() == "bearer":
             ws_subprotocol = "bearer"
+        if "access_token" in socket.query_params:
+            # Reject even alongside valid credentials: long-lived URL tokens
+            # would still be written to Uvicorn and nginx access logs.
+            await reject_websocket(socket, 4401, "Use a short-lived ticket", ws_subprotocol)
+            return
         if scheme.lower() != "bearer":
             # 浏览器无法为 WebSocket 设置 Authorization 头；允许客户端以
             # Sec-WebSocket-Protocol: bearer, <token> 的形式携带，成功后回显 bearer。
@@ -440,11 +446,6 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
                 if outcome != "ok" or not ticket_device:
                     await reject_websocket(socket, 4401, "Ticket is no longer valid", ws_subprotocol)
                     return
-            elif socket.query_params.get("access_token"):
-                # Never authenticate with the long-lived device token from the
-                # URL: it would end up in Uvicorn and nginx access logs.
-                await reject_websocket(socket, 4401, "Use a short-lived ticket", ws_subprotocol)
-                return
             else:
                 await reject_websocket(socket, 4401, "Authentication required", ws_subprotocol)
                 return

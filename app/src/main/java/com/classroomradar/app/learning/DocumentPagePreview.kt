@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -26,19 +27,14 @@ import com.classroomradar.app.GlassTextAction
 import com.classroomradar.app.GlassTone
 import com.classroomradar.app.LiquidTextSecondary
 import com.classroomradar.app.learning.api.DocumentAssetDto
-import kotlinx.coroutines.CancellationException
-
-/** 页面原图三态：加载中 / 已加载 / 失败。失败不能显示成永远「正在加载」。 */
-private sealed interface PageImage {
-    data object Loading : PageImage
-    data class Loaded(val bytes: ByteArray) : PageImage
-    data object Failed : PageImage
-}
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DocumentPagePreview(
     asset: DocumentAssetDto,
     onLoadImage: suspend (String, String) -> ByteArray,
+    previewRevision: Long = 0L,
     restoreEnabled: Boolean = true,
     onRestoreFromOriginal: (() -> Unit)? = null,
     onPickOriginalFile: (() -> Unit)? = null,
@@ -46,25 +42,20 @@ fun DocumentPagePreview(
     val page = asset.pages.firstOrNull() ?: return
     val filename = page.imageRelativePath.substringAfterLast('/')
     // 失败后必须能重试：旧版讲义会被网关回 404，网络抖动也可能失败。
-    var attempt by remember(page.pageId) { mutableIntStateOf(0) }
-    val state by produceState<PageImage>(initialValue = PageImage.Loading, page.pageId, attempt) {
+    var attempt by remember(asset.documentId, page.pageId) { mutableIntStateOf(0) }
+    val request = PageImageRequest(asset.documentId, page.pageId, page.imageRelativePath, previewRevision, attempt)
+    val state by produceState<PageImage<ImageBitmap>>(initialValue = PageImage.Loading, request) {
         value = PageImage.Loading
-        value = try {
-            val bytes = onLoadImage(asset.documentId, filename)
-            if (bytes.isEmpty()) PageImage.Failed else PageImage.Loaded(bytes)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            PageImage.Failed
+        value = withContext(Dispatchers.IO) {
+            loadPageImage(
+                load = { onLoadImage(asset.documentId, filename) },
+                decode = { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() },
+            )
         }
     }
     GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val bitmap = remember(state) {
-                (state as? PageImage.Loaded)?.bytes?.let {
-                    BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
-                }
-            }
+            val bitmap = (state as? PageImage.Loaded)?.image
             when {
                 bitmap != null -> Image(
                     bitmap = bitmap,

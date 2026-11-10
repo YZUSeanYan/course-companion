@@ -729,10 +729,11 @@ class Database:
 
     def consume_ws_ticket(self, ticket_hash: str) -> tuple[str, str | None]:
         """Atomically consume a short-lived browser WebSocket ticket."""
-        now = self._now()
         connection = self.connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            # Waiting for another writer must not extend the ticket's lifetime.
+            now = self._now()
             row = connection.execute(
                 "SELECT * FROM ws_tickets WHERE ticket_hash = ?",
                 (ticket_hash,),

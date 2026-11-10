@@ -40,6 +40,8 @@ export default function CourseDetailPage() {
   const cet6InputRef = useRef<HTMLInputElement | null>(null);
   const restoreInputRef = useRef<HTMLInputElement | null>(null);
   const restoreTargetRef = useRef<number | null>(null);
+  const materialOperationRef = useRef(false);
+  const [generating, setGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -82,7 +84,11 @@ export default function CourseDetailPage() {
   const groups = groupLearningItems(items ?? []);
   const totalItems = (items ?? []).length;
 
+  const materialBusy = uploading || restoringId !== null || generating;
+
   const uploadDocument = async (file: File) => {
+    if (materialOperationRef.current) return;
+    materialOperationRef.current = true;
     setUploading(true);
     setStatus(`正在上传并解析 ${file.name}…`);
     try {
@@ -102,11 +108,14 @@ export default function CourseDetailPage() {
     } catch (error) {
       reportError(error);
     } finally {
+      materialOperationRef.current = false;
       setUploading(false);
     }
   };
 
   const restoreDocument = async (materialId: number, file: File) => {
+    if (materialOperationRef.current) return;
+    materialOperationRef.current = true;
     setRestoringId(materialId);
     setStatus(`正在重新解析 ${file.name}…`);
     try {
@@ -116,11 +125,15 @@ export default function CourseDetailPage() {
     } catch (error) {
       reportError(error);
     } finally {
+      materialOperationRef.current = false;
       setRestoringId(null);
     }
   };
 
   const generateFromMaterial = async (materialId: number) => {
+    if (materialOperationRef.current) return;
+    materialOperationRef.current = true;
+    setGenerating(true);
     setStatus("正在创建生成任务…");
     try {
       const outcome = await generatePackForMaterial({ materialId, onStatus: setStatus });
@@ -128,6 +141,9 @@ export default function CourseDetailPage() {
       setStatus(`已生成 ${outcome.itemCount} 项学习内容、${outcome.cardCount} 张复习卡`);
     } catch (error) {
       reportError(error);
+    } finally {
+      materialOperationRef.current = false;
+      setGenerating(false);
     }
   };
 
@@ -228,7 +244,7 @@ export default function CourseDetailPage() {
             </div>
             <p className="card-desc">支持 PDF / PNG / JPG（≤50MB）。生成学习包消耗当日文档解析与 AI 学习包额度。</p>
             <p className="card-desc">
-              旧版讲义的页面预览会提示无法访问：点「恢复预览」重新选择当时的原文件即可恢复，内容需与当初完全一致。
+              历史讲义无法访问时，可点「恢复预览」重选同一原文件；校验通过后会上传云端重新解析，消耗文档解析额度，不生成学习包。选错文件不会上传或覆盖旧讲义。
             </p>
             <input
               ref={fileInputRef}
@@ -266,11 +282,11 @@ export default function CourseDetailPage() {
               }}
             />
             <div className="btn-row" style={{ marginTop: 0 }}>
-              <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()} disabled={materialBusy}>
                 {uploading ? "上传中…" : "导入讲义"}
               </button>
               {course.examProfile === "CET6" && (
-                <button className="btn" onClick={() => cet6InputRef.current?.click()} disabled={uploading}>
+                <button className="btn" onClick={() => cet6InputRef.current?.click()} disabled={materialBusy}>
                   导入 CET6 词表
                 </button>
               )}
@@ -292,12 +308,12 @@ export default function CourseDetailPage() {
                         restoreTargetRef.current = material.id!;
                         restoreInputRef.current?.click();
                       }}
-                      disabled={uploading || restoringId !== null}
+                      disabled={materialBusy}
                       title="旧版讲义的页面预览会提示无法访问，重新选择当时的原文件即可恢复"
                     >
                       {restoringId === material.id ? "恢复中…" : "恢复预览"}
                     </button>
-                    <button className="btn btn-sm" onClick={() => void generateFromMaterial(material.id!)} disabled={uploading}>
+                    <button className="btn btn-sm" onClick={() => void generateFromMaterial(material.id!)} disabled={materialBusy}>
                       生成学习包
                     </button>
                   </div>

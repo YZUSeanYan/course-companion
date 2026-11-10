@@ -248,6 +248,7 @@ class MainActivity : ComponentActivity() {
                 val courseDetail by rememberState(learningPresenter.courseDetail)
                 val isImporting by rememberState(learningPresenter.isImporting)
                 val isAnalyzing by rememberState(learningPresenter.isAnalyzing)
+                val previewRestoration by rememberState(learningPresenter.previewRestoration)
                 val aiServiceStatus by rememberState(learningPresenter.serviceStatus)
                 val aiServiceUrl by rememberState(learningPresenter.aiServiceUrl)
                 val accountStatus by rememberState(learningPresenter.accountStatus)
@@ -270,7 +271,9 @@ class MainActivity : ComponentActivity() {
                 val pageStateHolder = rememberSaveableStateHolder()
                 var page by remember { mutableStateOf(AppPage.Home) }
                 var pendingAnalysisId by remember { mutableStateOf<Long?>(null) }
+                var pendingAnalysisIsSession by remember { mutableStateOf(false) }
                 var pendingRestoreMaterialId by remember { mutableStateOf<Long?>(null) }
+                var pendingPreviewRestore by remember { mutableStateOf<PreviewRestoreRequest?>(null) }
                 var showDoubtEditor by remember { mutableStateOf(false) }
                 var doubtSourceText by remember { mutableStateOf("") }
                 var showTranslationNotice by remember { mutableStateOf(false) }
@@ -357,8 +360,10 @@ class MainActivity : ComponentActivity() {
                     val target = pendingRestoreMaterialId
                     pendingRestoreMaterialId = null
                     if (uri != null && target != null) {
-                        learningPresenter.restoreMaterialFromFile(
+                        // Picking a file never uploads it; require a separate per-request confirmation.
+                        pendingPreviewRestore = PreviewRestoreRequest(
                             materialId = target,
+                            title = courseDetail.materials.firstOrNull { it.id == target }?.title ?: "原讲义",
                             uri = uri,
                             displayName = queryDisplayName(context, uri),
                             mimeType = context.contentResolver.getType(uri),
@@ -509,18 +514,47 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                pendingPreviewRestore?.let { request ->
+                    GlassConfirmDialog(
+                        title = "上传原文件恢复预览？",
+                        message = "将把${request.displayName?.let { "所选文件《$it》" } ?: "《${request.title}》的本机原文件"}上传到当前 AI 服务进行文档解析，可能消耗文档解析额度或产生费用，以服务端计费为准。仅恢复《${request.title}》的页面预览，不生成 AI 学习包、不消耗学习包生成次数。上传前会核对原文件内容，不一致则拒绝上传；保留原讲义标题和学习内容来源。请确认你有权上传且文件不含敏感信息。",
+                        confirmLabel = "同意上传并恢复",
+                        dismissLabel = "取消",
+                        onConfirm = {
+                            // Consume before dispatch so a stale double click cannot submit twice.
+                            if (pendingPreviewRestore == request) {
+                                pendingPreviewRestore = null
+                                if (request.uri == null) {
+                                    learningPresenter.restoreMaterialPreview(request.materialId)
+                                } else {
+                                    learningPresenter.restoreMaterialFromFile(
+                                        request.materialId, request.uri, request.displayName, request.mimeType,
+                                    )
+                                }
+                            }
+                        },
+                        onDismiss = { pendingPreviewRestore = null },
+                    )
+                }
+
                 pendingAnalysisId?.let { materialId ->
                     GlassConfirmDialog(
                         title = "生成 AI 学习包？",
-                        message = "将把本节课的定稿字幕（不含原始录音）发送给 AI 服务，用于生成词汇、短语、重难点和练习题。请确认内容不含敏感信息。",
+                        message = if (pendingAnalysisIsSession) {
+                            "将把本节课的定稿字幕和手动标记的疑问（不含原始录音）发送给当前 AI 服务，生成学习包并消耗学习包额度或产生费用，以服务端计费为准。请确认内容不含敏感信息。"
+                        } else {
+                            "将把所选讲义的原文件（PDF / 图片）、提取正文及必要的页面图像发送给当前 AI 服务，进行文档解析和学习包生成，可能消耗解析及学习包额度或产生费用，以服务端计费为准。请确认你有权上传且内容不含敏感信息。"
+                        },
                         confirmLabel = "发送并生成",
                         dismissLabel = "取消",
                         onConfirm = {
-                            pendingAnalysisId = null
-                            if (page == AppPage.SessionDetail) {
-                                learningPresenter.analyzeSession(materialId)
-                            } else {
-                                learningPresenter.analyzeMaterial(materialId)
+                            if (pendingAnalysisId == materialId) {
+                                pendingAnalysisId = null
+                                if (pendingAnalysisIsSession) {
+                                    learningPresenter.analyzeSession(materialId)
+                                } else {
+                                    learningPresenter.analyzeMaterial(materialId)
+                                }
                             }
                         },
                         onDismiss = { pendingAnalysisId = null },
@@ -754,17 +788,28 @@ class MainActivity : ComponentActivity() {
                             state = courseDetail,
                             isImporting = isImporting,
                             isAnalyzing = isAnalyzing,
+                            previewRestoration = previewRestoration,
+                            restorePending = pendingRestoreMaterialId != null || pendingPreviewRestore != null,
                             message = learningMessage,
                             onImportMaterial = {
                                 materialLauncher.launch(
                                     arrayOf("application/pdf", "image/*", "text/plain", "text/markdown"),
                                 )
                             },
-                            onAnalyzeMaterial = { pendingAnalysisId = it },
-                            onRestoreMaterialPreview = { learningPresenter.restoreMaterialPreview(it) },
+                            onAnalyzeMaterial = { pendingAnalysisIsSession = false; pendingAnalysisId = it },
+                            onRestoreMaterialPreview = { materialId ->
+                                if (pendingPreviewRestore == null && pendingRestoreMaterialId == null) {
+                                    pendingPreviewRestore = PreviewRestoreRequest(
+                                        materialId,
+                                        courseDetail.materials.firstOrNull { it.id == materialId }?.title ?: "原讲义",
+                                    )
+                                }
+                            },
                             onPickMaterialOriginal = { materialId ->
-                                pendingRestoreMaterialId = materialId
-                                restoreMaterialLauncher.launch(arrayOf("application/pdf", "image/*"))
+                                if (pendingRestoreMaterialId == null && pendingPreviewRestore == null) {
+                                    pendingRestoreMaterialId = materialId
+                                    restoreMaterialLauncher.launch(arrayOf("application/pdf", "image/*"))
+                                }
                             },
                             onImportGlossary = {
                                 glossaryLauncher.launch(arrayOf("text/plain", "text/csv", "text/comma-separated-values"))
@@ -920,7 +965,7 @@ class MainActivity : ComponentActivity() {
                             onOpenTimeline = { page = AppPage.Timeline },
                             onExportMarkdown = { detail.session?.id?.let { presenter.prepareExport(it, true) { pendingExport = it } } },
                             onExportText = { detail.session?.id?.let { presenter.prepareExport(it, false) { pendingExport = it } } },
-                            onAnalyze = { detail.session?.id?.let { pendingAnalysisId = it } },
+                            onAnalyze = { detail.session?.id?.let { pendingAnalysisIsSession = true; pendingAnalysisId = it } },
                             onMarkDoubt = {
                                 doubtSourceText = detail.transcript.lastOrNull()?.text.orEmpty()
                                 showDoubtEditor = true
@@ -1017,6 +1062,14 @@ private data class SettingsState(
     val modelDownloadInProgress: Boolean = false,
     val modelDownloadProgress: ModelDownloadProgress? = null,
     val modelDownloadMessage: String? = null,
+)
+
+private data class PreviewRestoreRequest(
+    val materialId: Long,
+    val title: String,
+    val uri: Uri? = null,
+    val displayName: String? = null,
+    val mimeType: String? = null,
 )
 
 private data class ExportRequest(val fileName: String, val content: String)

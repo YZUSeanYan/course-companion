@@ -28,7 +28,10 @@ import com.classroomradar.app.learning.importer.GlossaryImporter
 import java.security.MessageDigest
 import com.classroomradar.app.learning.review.ReviewScheduler
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -73,6 +76,9 @@ class LearningPresenter(private val appContext: Context) {
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
     private val _isAnalyzing = MutableStateFlow(false)
     val isAnalyzing: StateFlow<Boolean> = _isAnalyzing.asStateFlow()
+    private val previewRestorationTracker = PreviewRestorationTracker()
+    val previewRestoration: StateFlow<PreviewRestorationState> = previewRestorationTracker.state
+    private val isRestoringPreview: Boolean get() = previewRestoration.value.materialId != null
     private val _serviceStatus = MutableStateFlow("尚未检查 AI 服务 · ${aiServiceConfig.displayTarget}")
     val serviceStatus: StateFlow<String> = _serviceStatus.asStateFlow()
     private val _aiServiceUrl = MutableStateFlow(aiServiceConfig.baseUrl)
@@ -211,7 +217,7 @@ class LearningPresenter(private val appContext: Context) {
             _message.value = "请先选择课程"
             return
         }
-        if (_isImporting.value) return
+        if (_isImporting.value || isRestoringPreview) return
         _isImporting.value = true
         scope.launch {
             try {
@@ -246,7 +252,7 @@ class LearningPresenter(private val appContext: Context) {
         manualDoubts: List<ManualDoubtInput> = emptyList(),
         visualBlocks: List<VisualBlockInput> = emptyList(),
     ) {
-        if (_isAnalyzing.value) return
+        if (_isAnalyzing.value || isRestoringPreview) return
         _isAnalyzing.value = true
         scope.launch {
             val startedAt = System.currentTimeMillis()
@@ -285,12 +291,15 @@ class LearningPresenter(private val appContext: Context) {
     }
 
     fun analyzeMaterial(materialId: Long) {
+        if (_isAnalyzing.value || _isImporting.value || isRestoringPreview) return
         val course = _courseDetail.value.course ?: run {
             _message.value = "课程不存在，无法生成学习包"
             return
         }
         scope.launch {
             val material = withContext(Dispatchers.IO) { repository.getMaterial(materialId) }
+            // Restoration may have acquired its lock while the Room lookup was suspended.
+            if (_isAnalyzing.value || isRestoringPreview) return@launch
             if (material == null) {
                 _message.value = "讲义不存在，请重新导入"
                 return@launch
@@ -366,102 +375,73 @@ class LearningPresenter(private val appContext: Context) {
         }
     }
 
-    /**
-     * 旧版讲义导入时没有记录账号归属，页面原图接口按设计回 404。
-     * 设备上还留着原文件时，重新解析一次就能按当前账号重新登记归属——
-     * 只刷新页面预览，不生成学习包，也不改动讲义标题。
-     */
-    fun restoreMaterialPreview(materialId: Long) {
-        if (_isAnalyzing.value || _isImporting.value) return
-        scope.launch {
-            val material = withContext(Dispatchers.IO) {
-                val record = repository.getMaterial(materialId)
-                val original = record?.originalRelativePath?.let { File(appContext.filesDir, it) }
-                record to (original?.isFile == true)
-            }
-            val record = material.first
-            if (record == null) {
-                _message.value = "讲义不存在，请重新导入"
-                return@launch
-            }
-            val mime = record.mimeType
-            if (mime != "application/pdf" && !mime.startsWith("image/")) {
-                _message.value = "只有 PDF 或图片讲义才有页面预览"
-                return@launch
-            }
-            if (!material.second) {
-                _message.value = "这台设备上没有《${record.title}》的原文件，请点「重新选择原文件」"
-                return@launch
-            }
-            val original = File(appContext.filesDir, record.originalRelativePath!!)
-            _isAnalyzing.value = true
-            try {
-                val asset = learningApi.analyzeDocument(original, mime)
-                withContext(Dispatchers.IO) {
-                    repository.updateMaterial(
-                        record.copy(
-                            documentJson = protocolJson.encodeToString(DocumentAssetDto.serializer(), asset),
-                            pageCount = asset.pages.size,
-                        ),
-                    )
-                }
-                _message.value = "《${record.title}》的页面预览已恢复"
-            } catch (error: Exception) {
-                _message.value = analysisErrorMessage(error)
-                refreshAccount(silent = true)
-            } finally {
-                _isAnalyzing.value = false
-            }
+    /** Called only after explicit upload/cost confirmation. Never generates a learning pack. */
+    fun restoreMaterialPreview(materialId: Long) = restorePreview(materialId) { record, existing ->
+        val original = record.originalRelativePath?.let { File(appContext.filesDir, it) }
+        require(original?.isFile == true) {
+            "这台设备上没有《${record.title}》的原文件，请点「重新选择原文件」"
         }
+        parseRestoredDocument(existing, original, record.mimeType)
     }
 
-    /**
-     * 本机没有原文件（换设备或清理过缓存）时的恢复入口：用户重新选一次原文件，
-     * 就地更新这条讲义，不新增记录。必须是用户主动选择，不做静默重传。
-     */
-    fun restoreMaterialFromFile(materialId: Long, uri: Uri, displayName: String?, mimeType: String?) {
-        if (_isImporting.value || _isAnalyzing.value) return
-        _isImporting.value = true
+    /** Selection is not consent: MainActivity confirms the selected file before calling here. */
+    fun restoreMaterialFromFile(materialId: Long, uri: Uri, displayName: String?, mimeType: String?) =
+        restorePreview(materialId) { _, existing ->
+            lectureImporter.withStagedOriginal(appContext, uri, displayName, mimeType) { original, mime ->
+                parseRestoredDocument(existing, original, mime)
+            }
+        }
+
+    private suspend fun parseRestoredDocument(
+        existing: DocumentAssetDto,
+        original: File,
+        mimeType: String,
+    ): DocumentAssetDto {
+        // Reject another document before any upload or billable parsing request.
+        withContext(Dispatchers.IO) { verifyRestoreFile(existing, original) }
+        currentCoroutineContext().ensureActive()
+        val asset = learningApi.analyzeDocument(original, mimeType)
+        verifyRestoredDocument(existing, asset)
+        return asset
+    }
+
+    private fun restorePreview(
+        materialId: Long,
+        parse: suspend (MaterialEntity, DocumentAssetDto) -> DocumentAssetDto,
+    ) {
+        if (_isAnalyzing.value || _isImporting.value || !previewRestorationTracker.tryStart(materialId)) return
+        // The lock is held before launch and before the first Room/file/network suspension.
         scope.launch {
-            var importedOriginal: String? = null
             try {
                 val record = withContext(Dispatchers.IO) { repository.getMaterial(materialId) }
-                if (record == null) {
-                    _message.value = "讲义不存在，请重新导入"
-                    return@launch
+                    ?: error("讲义不存在，请重新导入")
+                require(record.mimeType == "application/pdf" || record.mimeType.startsWith("image/")) {
+                    "只有 PDF 或图片讲义才有页面预览"
                 }
-                val imported = lectureImporter.import(appContext, uri, displayName, mimeType)
-                importedOriginal = imported.originalRelativePath
-                if (imported.mimeType != "application/pdf" && !imported.mimeType.startsWith("image/")) {
-                    throw IllegalStateException("只有 PDF 或图片讲义才有页面预览")
-                }
-                val asset = learningApi.analyzeDocument(
-                    File(appContext.filesDir, imported.originalRelativePath),
-                    imported.mimeType,
-                )
+                val existing = record.documentJson?.let {
+                    protocolJson.decodeFromString(DocumentAssetDto.serializer(), it)
+                } ?: error("原讲义缺少可验证的文档标识，请作为新讲义导入")
+                val asset = parse(record, existing)
                 withContext(Dispatchers.IO) {
+                    currentCoroutineContext().ensureActive()
+                    val current = repository.getMaterial(materialId) ?: error("讲义已删除，未替换")
+                    check(current.documentJson == record.documentJson) { "讲义已更改，请重新确认后恢复" }
+                    // Retain title, material/course identity, and all existing original/text paths.
                     repository.updateMaterial(
-                        record.copy(
-                            mimeType = imported.mimeType,
-                            originalRelativePath = imported.originalRelativePath,
-                            textRelativePath = imported.textRelativePath,
+                        current.copy(
                             documentJson = protocolJson.encodeToString(DocumentAssetDto.serializer(), asset),
                             pageCount = asset.pages.size,
                         ),
                     )
                 }
-                _message.value = "《${record.title}》的页面预览已恢复"
+                previewRestorationTracker.restored(materialId)
+                _message.value = "《${record.title}》的页面预览已恢复（未生成学习包）"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
-                // 恢复失败时清掉这次刚复制进来的文件，避免留下无人引用的原文件。
-                importedOriginal?.let { relative ->
-                    withContext(Dispatchers.IO) {
-                        File(appContext.filesDir, relative).parentFile?.deleteRecursively()
-                    }
-                }
-                _message.value = error.message ?: "恢复页面预览失败，请重试"
-                refreshAccount(silent = true)
+                _message.value = "恢复页面预览失败：${error.message ?: "请重试"}"
             } finally {
-                _isImporting.value = false
+                previewRestorationTracker.finish()
             }
         }
     }

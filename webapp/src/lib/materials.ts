@@ -14,14 +14,33 @@ export async function restoreMaterialDocument(
   materialId: number,
   file: File,
 ): Promise<DocumentAsset> {
+  const original = await db.materials.get(materialId);
+  if (!original) throw new Error("讲义记录已不存在，请刷新后重试。");
+  if (!original.documentId || !/^[0-9a-f]{24}$/.test(original.documentId)) {
+    throw new Error("讲义缺少原文件校验信息，请重新导入为新讲义，旧记录不会被替换。");
+  }
+  if (file.size === 0 || file.size > 50 * 1024 * 1024) {
+    throw new Error("请选择非空且不超过 50MB 的原文件。");
+  }
+  // 与服务端 documentId 一致；先在本机校验，选错文件不上传、不消耗解析额度。
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const documentId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 24);
+  if (documentId !== original.documentId) {
+    throw new Error("所选文件与原文件不一致，请选择当时导入的同一文件；旧讲义未修改。");
+  }
   const asset = await zhixi.analyzeDocument(file);
-  const updated = await db.materials.update(materialId, {
-    title: file.name,
-    mimeType: asset.mimeType,
-    documentId: asset.documentId,
-    documentJson: JSON.stringify(asset),
-    pageCount: asset.pages.length,
+  if (asset.documentId !== documentId) throw new Error("云端返回的文档标识不一致，旧讲义未修改。");
+  await db.transaction("rw", db.materials, async () => {
+    const current = await db.materials.get(materialId);
+    if (!current) throw new Error("讲义记录已不存在，请刷新后重试。");
+    if (current.uid !== original.uid || current.documentId !== original.documentId) {
+      throw new Error("讲义记录已变化，请刷新后重试。");
+    }
+    await db.materials.update(materialId, {
+      mimeType: asset.mimeType,
+      documentJson: JSON.stringify(asset),
+      pageCount: asset.pages.length,
+    });
   });
-  if (updated === 0) throw new Error("讲义记录已不存在，请刷新后重试。");
   return asset;
 }

@@ -87,7 +87,7 @@ const { fakeRealtime, fakeCapture, fakeClient } = vi.hoisted(() => {
     fakeRealtime: { RealtimeSession, instances },
     fakeCapture: {
       requestMicrophone: vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })),
-      startPcmCapture: vi.fn(async () => ({
+      startPcmCapture: vi.fn(async (_stream: unknown, _options: { onFrame: (frame: Int16Array) => void }) => ({
         backend: "worklet" as const,
         paused: false,
         setPaused: vi.fn(),
@@ -135,6 +135,21 @@ vi.mock("./offline/engine", () => ({
 }));
 
 import { ClassroomController } from "./classroom";
+import { db } from "./db/db";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+const controllers: ClassroomController[] = [];
+function createController() {
+  const controller = new ClassroomController();
+  controllers.push(controller);
+  return controller;
+}
 
 const START_OPTIONS = {
   courseId: null,
@@ -151,7 +166,8 @@ const IOS_WECHAT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.50 NetType/WIFI Language/zh_CN";
 
 describe("ClassroomController 云端连接相位", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await db.sessions.clear();
     fakeRealtime.instances.length = 0;
     fakeClient.deviceToken.mockClear();
     fakeClient.realtimeTicket.mockClear();
@@ -164,11 +180,151 @@ describe("ClassroomController 云端连接相位", () => {
   });
 
   afterEach(async () => {
+    for (const controller of controllers.splice(0)) await controller.stop();
     vi.unstubAllGlobals();
   });
 
+  it("等待首张 ticket 时停止，不再建连或启动采集且关闭本地会话", async () => {
+    vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
+    const ticket = deferred<string>();
+    fakeClient.realtimeTicket.mockImplementationOnce(() => ticket.promise);
+    const controller = createController();
+    const start = controller.start(START_OPTIONS);
+    await vi.waitFor(() => expect(fakeClient.realtimeTicket).toHaveBeenCalledOnce());
+    expect(fakeCapture.requestMicrophone.mock.invocationCallOrder[0]).toBeLessThan(
+      fakeClient.realtimeTicket.mock.invocationCallOrder[0]!,
+    );
+    await controller.stop();
+    ticket.resolve("late-ticket");
+    await start;
+    expect(fakeRealtime.instances).toHaveLength(0);
+    expect(fakeCapture.startPcmCapture).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().phase).toBe("ended");
+    const sessions = await db.sessions.toArray();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.endedAtMillis).not.toBeNull();
+  });
+
+  it("采集器还在初始化时暂停，返回后仍静音且不发送音频", async () => {
+    const capture = deferred<Awaited<ReturnType<typeof fakeCapture.startPcmCapture>>>();
+    fakeCapture.startPcmCapture.mockImplementationOnce(() => capture.promise);
+    const controller = createController();
+    const start = controller.start(START_OPTIONS);
+    await vi.waitFor(() => expect(fakeCapture.startPcmCapture).toHaveBeenCalledOnce());
+    const realtime = fakeRealtime.instances[0]!;
+    const send = vi.spyOn(realtime, "sendPcm");
+    realtime.open();
+    realtime.ready();
+    await controller.pause();
+    const handle = { backend: "worklet" as const, paused: false, setPaused: vi.fn(), stop: vi.fn(async () => undefined) };
+    capture.resolve(handle);
+    await start;
+    expect(handle.setPaused).toHaveBeenCalledWith(true);
+    expect(controller.getSnapshot().phase).toBe("paused");
+    fakeCapture.startPcmCapture.mock.calls[0]![1].onFrame(new Int16Array([1, 2]));
+    expect(send).not.toHaveBeenCalled();
+    await controller.resume();
+    fakeCapture.startPcmCapture.mock.calls[0]![1].onFrame(new Int16Array([1, 2]));
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("账号检查尚未返回时停止，也立即释放已授权的麦克风", async () => {
+    const status = deferred<{ activated: boolean }>();
+    const trackStop = vi.fn();
+    fakeCapture.requestMicrophone.mockResolvedValueOnce({ getTracks: () => [{ stop: trackStop }] });
+    fakeClient.accountStatus.mockImplementationOnce(() => status.promise);
+    const controller = createController();
+    const start = controller.start(START_OPTIONS);
+    await vi.waitFor(() => expect(fakeClient.accountStatus).toHaveBeenCalledOnce());
+    await controller.stop();
+    expect(trackStop).toHaveBeenCalled();
+    status.resolve({ activated: true });
+    await start;
+    expect(fakeRealtime.instances).toHaveLength(0);
+    expect(await db.sessions.count()).toBe(0);
+  });
+
+  it("旧 ticket 请求失败时不能结束后来启动的新课", async () => {
+    vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
+    const ticket = deferred<string>();
+    fakeClient.realtimeTicket.mockImplementationOnce(() => ticket.promise);
+    const controller = createController();
+    const firstStart = controller.start(START_OPTIONS);
+    await vi.waitFor(() => expect(fakeClient.realtimeTicket).toHaveBeenCalledOnce());
+    await controller.stop();
+    await controller.start(START_OPTIONS);
+    const sessionId = controller.getSnapshot().sessionId;
+    ticket.reject(new Error("late failure"));
+    await firstStart;
+    expect(controller.getSnapshot().sessionId).toBe(sessionId);
+    expect(controller.getSnapshot().phase).toBe("connecting");
+    expect(fakeRealtime.instances).toHaveLength(1);
+  });
+
+  it("ticket 签发失败时释放麦克风并关闭未完成会话", async () => {
+    vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
+    const trackStop = vi.fn();
+    fakeCapture.requestMicrophone.mockResolvedValueOnce({ getTracks: () => [{ stop: trackStop }] });
+    fakeClient.realtimeTicket.mockRejectedValueOnce(new Error("ticket unavailable"));
+    const controller = createController();
+    await expect(controller.start(START_OPTIONS)).rejects.toThrow("ticket unavailable");
+    expect(trackStop).toHaveBeenCalled();
+    expect(fakeRealtime.instances).toHaveLength(0);
+    const sessions = await db.sessions.toArray();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.endedAtMillis).not.toBeNull();
+  });
+
+  it("降级取 ticket 期间停止后开新课，旧响应不能重连或覆盖新课", async () => {
+    const controller = createController();
+    await controller.start(START_OPTIONS);
+    const ticket = deferred<string>();
+    fakeClient.realtimeTicket.mockImplementationOnce(() => ticket.promise);
+    const oldConnection = fakeRealtime.instances[0]!;
+    oldConnection.fail();
+    await vi.waitFor(() => expect(fakeClient.realtimeTicket).toHaveBeenCalledOnce());
+    await controller.stop();
+    await controller.start(START_OPTIONS);
+    const newSessionId = controller.getSnapshot().sessionId;
+    ticket.resolve("old-ticket");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    oldConnection.ready();
+    expect(fakeRealtime.instances).toHaveLength(2);
+    expect(controller.getSnapshot().phase).toBe("connecting");
+    expect(controller.getSnapshot().sessionId).toBe(newSessionId);
+  });
+
+  it("query 断线重连重新签发 ticket，不能复用前一张", async () => {
+    vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
+    fakeClient.realtimeTicket.mockResolvedValueOnce("first-ticket").mockResolvedValueOnce("second-ticket");
+    const controller = createController();
+    await controller.start(START_OPTIONS);
+    fakeRealtime.instances[0]!.open();
+    fakeRealtime.instances[0]!.ready();
+    fakeRealtime.instances[0]!.close();
+    await vi.waitFor(() => expect(fakeRealtime.instances).toHaveLength(2));
+    expect(fakeRealtime.instances.map((session) => session.credential)).toEqual(["first-ticket", "second-ticket"]);
+  });
+
+  it("重连等待 ticket 时停止，不会再建连接", async () => {
+    vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
+    const controller = createController();
+    await controller.start(START_OPTIONS);
+    const ticket = deferred<string>();
+    fakeClient.realtimeTicket.mockImplementationOnce(() => ticket.promise);
+    fakeRealtime.instances[0]!.open();
+    fakeRealtime.instances[0]!.ready();
+    fakeRealtime.instances[0]!.close();
+    await vi.waitFor(() => expect(fakeClient.realtimeTicket).toHaveBeenCalledTimes(2));
+    await controller.stop();
+    ticket.resolve("late-reconnect-ticket");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakeRealtime.instances).toHaveLength(1);
+    expect(controller.getSnapshot().phase).toBe("ended");
+  });
+
   it("麦克风就绪后仍保持 connecting，直到 session.ready 才进入 listening", async () => {
-    const controller = new ClassroomController();
+    const controller = createController();
     const phases: string[] = [];
     controller.subscribe({ onSnapshot: (snapshot) => phases.push(snapshot.phase) });
 
@@ -194,7 +350,7 @@ describe("ClassroomController 云端连接相位", () => {
 
   it("iOS 微信 UA 首次连接就走 query 鉴权，且 URL 凭据是一次性 ticket", async () => {
     vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
-    const controller = new ClassroomController();
+    const controller = createController();
     await controller.start(START_OPTIONS);
     expect(fakeRealtime.instances[0]?.authMode).toBe("query");
     // 设备 token 绝不能进 URL：query 通道必须换成 ticket 接口签发的短时效凭据。
@@ -203,7 +359,7 @@ describe("ClassroomController 云端连接相位", () => {
   });
 
   it("子协议握手从未打开时立即改用 query 兼容模式，且不把 UI 标成听课中", async () => {
-    const controller = new ClassroomController();
+    const controller = createController();
     await controller.start(START_OPTIONS);
     expect(fakeRealtime.instances[0]?.authMode).toBe("protocol");
 

@@ -34,6 +34,12 @@
 - 录音期间页面须保持前台：浏览器安全模型不支持锁屏/后台持续录音（与 App 的核心差异）。
 - 实时课堂 WebSocket 鉴权：桌面浏览器以 `Sec-WebSocket-Protocol: bearer, <token>` 携带设备令牌，网关 `proxy_socket` 解析并回显 `bearer`（见 `server/app/lecsync_routes.py`，对 Android 无影响）。iOS 微信等 WKWebView 会丢子协议，这类环境改走 URL query `ticket=`：先 `POST /v2/lecsync/realtime/ticket` 换一张 60 秒、只能用一次的 ticket（`src/lib/api/client.ts`、`src/lib/classroom.ts`）。长期设备令牌不允许出现在 URL 里——否则会留在 Uvicorn/nginx 访问日志中，网关对 `?access_token=` 直接 4401。
 
+## 历史讲义恢复
+
+课程页「恢复预览」要求重新选择原文件：浏览器先核对 `SHA-256(file)[:24]` 与旧 `documentId`，不一致则不上传、不改旧记录。校验通过后由用户主动上传并重新解析，消耗文档解析额度，不生成学习包；保留讲义标题、同步 uid、首次导入时间及来源标识。缺少原文件校验信息的记录不能安全原地恢复，应另行导入为新讲义。
+
+安全发布顺序、回滚限制和真机验收见 [上线检查表](../docs/ROLLOUT-20261110.md)。
+
 ## 本地开发
 
 ```bash
