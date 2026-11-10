@@ -61,6 +61,7 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
             )
             try:
                 asset = await asyncio.to_thread(analyze_document, source, mime, root)
+                app.state.db.grant_document_access(asset.documentId, document_owner(device))
             except ValueError as exc:
                 app.state.db.release_document(device, subject.account_id)
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -70,7 +71,6 @@ def register_document_routes(app: FastAPI, settings: Settings) -> None:
             except Exception:
                 app.state.db.release_document(device, subject.account_id)
                 raise
-            app.state.db.grant_document_access(asset.documentId, document_owner(device))
             return asset.to_dict()
 
     @app.get("/v2/documents/{document_id}/pages/{filename}")

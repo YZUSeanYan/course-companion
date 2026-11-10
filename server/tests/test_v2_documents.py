@@ -1,6 +1,8 @@
+from dataclasses import replace
+
 import fitz
 
-from conftest import auth_headers, bind_test_device, make_client, register
+from conftest import auth_headers, bind_test_device, create_test_account, make_client, register
 
 
 def _write_lecture_pdf(path):
@@ -108,3 +110,56 @@ def test_legacy_document_without_owner_record_returns_404(settings, monkeypatch,
     )
     assert image.status_code == 404
     assert image.json()["detail"] == "Page not found"
+
+
+def test_binding_account_transfers_standalone_document_access(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(replace(settings, require_account_activation=False), lambda request: None)
+    standalone = register(client, activate=False)
+    headers = {"Authorization": f"Bearer {standalone['token']}"}
+    asset = _upload_lecture(client, headers, source)
+    filename = asset["pages"][0]["imageRelativePath"].rsplit("/", 1)[-1]
+    page_url = f"/v2/documents/{asset['documentId']}/pages/{filename}"
+
+    account, _ = create_test_account(client)
+    bind_test_device(client, standalone["deviceId"], account)
+
+    image = client.get(page_url, headers=headers)
+    assert image.status_code == 200, image.text
+    with client.app.state.db.connect() as connection:
+        owners = connection.execute(
+            "SELECT owner_key FROM document_access WHERE document_id = ?",
+            (asset["documentId"],),
+        ).fetchall()
+    assert [row["owner_key"] for row in owners] == [f"account:{account['id']}"]
+
+
+def test_document_access_failure_releases_document_quota(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    owner = register(client)
+    headers = {"Authorization": f"Bearer {owner['token']}"}
+
+    def fail_grant(document_id, owner_key):
+        raise RuntimeError("grant failed")
+
+    monkeypatch.setattr(client.app.state.db, "grant_document_access", fail_grant)
+    with source.open("rb") as stream:
+        response = client.post(
+            "/v2/documents/analyze",
+            headers=headers,
+            files={"file": ("lecture.pdf", stream, "application/pdf")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "grant failed"
+    usage = client.app.state.db.account_usage_today(
+        owner["accountId"], client.app.state.db.today()
+    )
+    assert usage["documents"] == 0

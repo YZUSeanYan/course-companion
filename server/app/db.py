@@ -915,21 +915,30 @@ class Database:
                 "SELECT account_id FROM account_devices WHERE device_id = ?",
                 (device_id,),
             ).fetchone()
-            if existing is not None:
-                if existing["account_id"] == account_id:
-                    connection.commit()
-                    return
+            if existing is not None and existing["account_id"] != account_id:
                 raise DeviceBoundElsewhere()
-            if max_devices > 0:
-                count = connection.execute(
-                    "SELECT COUNT(*) AS total FROM account_devices WHERE account_id = ?",
-                    (account_id,),
-                ).fetchone()["total"]
-                if int(count) >= max_devices:
-                    raise DeviceLimitReached(max_devices)
+            if existing is None:
+                if max_devices > 0:
+                    count = connection.execute(
+                        "SELECT COUNT(*) AS total FROM account_devices WHERE account_id = ?",
+                        (account_id,),
+                    ).fetchone()["total"]
+                    if int(count) >= max_devices:
+                        raise DeviceLimitReached(max_devices)
+                connection.execute(
+                    "INSERT INTO account_devices(account_id, device_id, activated_at) VALUES (?, ?, ?)",
+                    (account_id, device_id, self._now()),
+                )
             connection.execute(
-                "INSERT INTO account_devices(account_id, device_id, activated_at) VALUES (?, ?, ?)",
-                (account_id, device_id, self._now()),
+                """
+                INSERT OR IGNORE INTO document_access (document_id, owner_key)
+                SELECT document_id, ? FROM document_access WHERE owner_key = ?
+                """,
+                (f"account:{account_id}", f"device:{device_id}"),
+            )
+            connection.execute(
+                "DELETE FROM document_access WHERE owner_key = ?",
+                (f"device:{device_id}",),
             )
             connection.commit()
         except Exception:
