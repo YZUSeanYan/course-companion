@@ -1,0 +1,32 @@
+<view class="page tab-page {{reduceMotion ? 'reduced-motion' : ''}}">
+  <view class="spread"><text class="eyebrow">RECALL / 温故知新</text><text class="pill">间隔复习</text></view>
+  <view class="title">记住，慢慢来。</view>
+  <view class="subtitle">先想一想，再翻开答案。每一次回想都有价值。</view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <block wx:if="{{current}}">
+    <view class="spread session-meta"><text>{{courseName}}</text><text>{{completed + 1}} / {{total}}</text></view>
+    <view class="progress-track"><view class="progress-fill" style="width: {{progress}}%;"></view></view>
+    <view class="flip-stage">
+      <view class="flip-card {{revealed ? 'is-flipped' : ''}}">
+        <view class="face front" aria-hidden="{{revealed}}"><text class="badge">问题 · 手动卡片</text><scroll-view scroll-y class="card-body"><text selectable class="body-text">{{current.front}}</text></scroll-view><text class="muted">不用急，给自己一点回想的时间</text></view>
+        <view class="face back" aria-hidden="{{!revealed}}"><text class="badge">参考答案 · {{current.origin === 'DEMO' ? '合成示例' : '手动整理'}}</text><scroll-view scroll-y class="card-body"><text selectable class="body-text">{{current.back}}</text></scroll-view><text class="muted">不是 AI 生成，请结合原始资料核对</text></view>
+      </view>
+    </view>
+    <button wx:if="{{!revealed}}" class="button-primary" bindtap="reveal" hover-class="button-hover">翻开答案</button>
+    <view wx:else class="rating-grid">
+      <button data-rating="again" bindtap="rate" disabled="{{busy}}" class="rating again" hover-class="button-hover">不认识<text>稍后再看</text></button>
+      <button data-rating="hard" bindtap="rate" disabled="{{busy}}" class="rating" hover-class="button-hover">模糊<text>缩短间隔</text></button>
+      <button data-rating="good" bindtap="rate" disabled="{{busy}}" class="rating" hover-class="button-hover">认识<text>正常间隔</text></button>
+      <button data-rating="easy" bindtap="rate" disabled="{{busy}}" class="rating easy" hover-class="button-hover">很简单<text>延长间隔</text></button>
+    </view>
+    <button wx:if="{{current.sourceId}}" class="button-ghost" bindtap="openSource">查看原始学习资料 →</button>
+  </block>
+  <view wx:elif="{{!error}}" class="card empty finished">
+    <view class="done-mark">✓</view>
+    <view class="empty-title">{{completed ? '今天，又记住了一点。' : '此刻，没有待复习卡片。'}}</view>
+    <view class="muted">{{completed ? '这一轮已完成 ' + completed + ' 张卡片，评分已保存。' : '在课程里创建卡片，到期后就会出现在这里。'}}</view>
+    <button class="button-primary done-button" bindtap="goLearn" hover-class="button-hover">回到学习</button>
+    <button class="button-ghost" bindtap="startSession">检查新到期卡片</button>
+  </view>
+  <view class="algorithm-note">首版采用简单间隔策略（非 FSRS），不会发送后台提醒。离开页面不影响已经保存的复习记录。</view>
+</view>

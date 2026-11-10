@@ -1,0 +1,12 @@
+.dock-wrap { position: fixed; bottom: 0; left: 0; right: 0; padding: 16rpx 40rpx calc(20rpx + env(safe-area-inset-bottom)); z-index: 10; background: linear-gradient(0deg, #FCFCFC 60%, rgba(252,252,252,0)); }
+.dock { display: flex; background: #FFFFFF; border: 1rpx solid #E6E5E3; border-radius: 72rpx; padding: 10rpx; box-shadow: 0 12rpx 40rpx rgba(55,35,15,.06); }
+.tab { flex: 1; margin: 0; padding: 16rpx 10rpx; border-radius: 50rpx; background: transparent; color: #6F6F6F; line-height: 1.4; font-size: 22rpx; display: flex; align-items: center; justify-content: center; gap: 14rpx; }
+.tab::after { border: 0; }
+.active { color: #A33A00; background: #FFF1E8; font-weight: 600; }
+.pressed { opacity: .7; }
+.icon { width: 30rpx; height: 30rpx; box-sizing: border-box; position: relative; border: 3rpx solid currentColor; border-radius: 7rpx; }
+.icon-learn view { position: absolute; left: 11rpx; top: 0; bottom: 0; border-left: 2rpx solid currentColor; }
+.icon-review { transform: rotate(-12deg); }
+.icon-review view { position: absolute; width: 12rpx; border-top: 2rpx solid currentColor; top: 10rpx; left: 6rpx; }
+.icon-mine { border-radius: 50%; height: 18rpx; width: 18rpx; margin: 0 6rpx 12rpx; }
+.icon-mine view { position: absolute; width: 26rpx; height: 12rpx; border: 3rpx solid currentColor; border-bottom: 0; border-radius: 16rpx 16rpx 0 0; top: 18rpx; left: -7rpx; }

@@ -1,0 +1,70 @@
+<view class="page course-page {{reducedMotion ? 'reduced-motion' : ''}}">
+  <view wx:if="{{loading}}" class="card empty">
+    <view class="empty-title">正在读取课程</view>
+    <text class="muted">资料仅保存在本机。</text>
+  </view>
+  <view wx:elif="{{errorMessage}}" class="card empty">
+    <view class="error">{{errorMessage}}</view>
+    <button class="button-secondary" bindtap="refresh" hover-class="none">重新读取</button>
+  </view>
+  <view wx:elif="{{!course}}" class="card empty">
+    <view class="eyebrow">COURSE</view>
+    <view class="empty-title">课程不存在或已归档</view>
+    <view class="muted empty-note">本机没有这门课程的可用资料。已归档内容可在「我的」的回收站恢复。</view>
+    <button class="button-secondary" bindtap="goHome" hover-class="none">返回课程列表</button>
+  </view>
+  <block wx:else>
+    <view class="course-heading">
+      <view class="eyebrow">COURSE / 课程档案</view>
+      <view class="title course-name">{{course.name}}</view>
+      <view class="subtitle">{{course.teacher || '未填写教师'}} · {{course.language || '中英双语'}}</view>
+      <view class="local-label"><text class="badge">仅保存在本机</text></view>
+    </view>
+
+    <view class="card card-accent course-overview">
+      <view class="overview-stats">
+        <view class="overview-stat"><view class="count">{{sessions.length}}</view><text class="muted">课堂记录</text></view>
+        <view class="overview-stat"><view class="count">{{cards.length}}</view><text class="muted">复习卡片</text></view>
+      </view>
+      <view class="overview-note">把课堂内容留下来，再把值得记住的知识整理成卡片。</view>
+      <button class="button-primary" bindtap="addSession" disabled="{{archiving}}" hover-class="none">新增课堂记录</button>
+    </view>
+
+    <view class="spread section-heading"><view class="section-title">课堂记录</view><text class="pill">{{sessions.length}} 节</text></view>
+    <view wx:if="{{!sessions.length}}" class="card empty">
+      <view class="empty-title">从第一节课堂开始</view>
+      <text class="muted">手动粘贴或输入课堂文字，保留原文，再标记你的疑问。</text>
+    </view>
+    <button wx:for="{{sessions}}" wx:key="id" class="card session-entry" data-id="{{item.id}}" bindtap="openSession" hover-class="none" aria-label="{{'查看课堂：' + item.title}}">
+      <view class="spread"><text class="entry-date">{{item.dateLabel}}</text><text class="entry-arrow" aria-hidden="true">→</text></view>
+      <view class="entry-title">{{item.title}}</view>
+      <view class="entry-meta">{{item.characterCount}} 字课堂原文 · {{item.doubtCount}} 个疑问</view>
+    </button>
+
+    <view class="spread section-heading"><view class="section-title">复习卡片</view><text class="pill">{{cards.length}} 张</text></view>
+    <view class="muted section-note">手动整理；示例卡片会单独标注。可在「复习」中回顾。</view>
+    <view wx:if="{{!cards.length}}" class="card empty">
+      <view class="empty-title">让一个知识点留下来</view>
+      <text class="muted">写下问题与答案，创建你自己的第一张复习卡片。</text>
+    </view>
+    <view wx:for="{{cards}}" wx:key="id" class="card study-card">
+      <view class="spread"><text class="badge">{{item.originLabel}}</text><text class="muted">{{item.dueLabel}}</text></view>
+      <view class="card-side-label">问题</view>
+      <text class="card-body" selectable>{{item.front}}</text>
+      <view class="divider"></view>
+      <view class="card-side-label">答案</view>
+      <text class="card-body" selectable>{{item.back}}</text>
+      <view class="card-source">
+        <button wx:if="{{item.sourceSessionId}}" class="button-ghost source-link" data-id="{{item.id}}" bindtap="openCardSource" hover-class="none">来源课堂 · {{item.sourceLabel}} →</button>
+        <text wx:else class="muted">{{item.sourceLabel}}</text>
+      </view>
+      <button class="button-ghost archive-card" data-id="{{item.id}}" bindtap="archiveCard" disabled="{{archiving}}" hover-class="none">归档卡片</button>
+    </view>
+    <button class="button-secondary" bindtap="addCard" disabled="{{archiving}}" hover-class="none">手动添加卡片</button>
+
+    <view class="archive-section">
+      <view class="muted">所有整理均由你手动完成，不调用 AI，不上传课堂内容。</view>
+      <button class="button-ghost" bindtap="archiveCourse" disabled="{{archiving}}" hover-class="none">归档课程</button>
+    </view>
+  </block>
+</view>
