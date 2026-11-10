@@ -12,7 +12,7 @@
 // 断言不能用「1 秒恰好 16000 个」，要按「每秒样本数」算并留一帧容差。
 
 import { describe, expect, it } from "vitest";
-import { FRAME_SAMPLES, TARGET_SAMPLE_RATE, WORKLET_SOURCE } from "./capture";
+import { FRAME_SAMPLES, TARGET_SAMPLE_RATE, WORKLET_SOURCE, createPcmDownsampler } from "./capture";
 
 interface FakeProcessor {
   port: { onmessage: ((event: { data: unknown }) => void) | null; postMessage: (message: unknown) => void };
@@ -160,5 +160,25 @@ describe("worklet 降采样", () => {
     const { processor } = loadProcessor(48000);
     expect(processor.process([[]])).toBe(true);
     expect(processor.process([])).toBe(true);
+  });
+});
+
+
+describe("createPcmDownsampler 与 worklet 同源", () => {
+  it("主线程回退路径与 worklet 对同一 48kHz 输入产出相同样本", () => {
+    const worklet = collect(48000, 2, 440);
+    const frames: Int16Array[] = [];
+    const down = createPcmDownsampler(48000, (frame) => frames.push(frame));
+    const total = 48000 * 2;
+    for (let offset = 0; offset < total; offset += 128) {
+      const chunk = new Float32Array(Math.min(128, total - offset));
+      for (let i = 0; i < chunk.length; i++) {
+        chunk[i] = Math.sin((2 * Math.PI * 440 * (offset + i)) / 48000);
+      }
+      down.push(chunk);
+    }
+    const samples = frames.reduce((sum, frame) => sum + frame.length, 0);
+    expect(samples).toBe(worklet.samples);
+    expect(frames.flatMap((frame) => Array.from(frame))).toEqual(worklet.all);
   });
 });

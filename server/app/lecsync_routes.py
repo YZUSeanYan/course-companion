@@ -28,6 +28,20 @@ from .rate_limit import SlidingWindowRateLimiter
 from .security import token_digest
 
 
+async def reject_websocket(socket: WebSocket, code: int, reason: str = "", subprotocol: str | None = None) -> None:
+    """Reject after accept so browsers receive the close code.
+
+    Calling close() before accept() becomes an HTTP 403 handshake failure. iOS
+    WeChat's WKWebView often surfaces that as a silent hang (CONNECTING forever)
+    instead of a usable onclose code such as 4401/4403/4429.
+    """
+    try:
+        await socket.accept(subprotocol=subprotocol)
+    except Exception:
+        return
+    await socket.close(code=code, reason=reason)
+
+
 def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
     limiter = SlidingWindowRateLimiter(settings.lecsync_rate_limit, 60)
     streams = StreamLimiter(settings.lecsync_max_concurrent_streams)
@@ -398,15 +412,22 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
     async def proxy_socket(socket: WebSocket, kind: str):
         scheme, _, token = (socket.headers.get("authorization") or "").partition(" ")
         ws_subprotocol: str | None = None
+        protocols = [p.strip() for p in (socket.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
+        if protocols and protocols[0].lower() == "bearer":
+            ws_subprotocol = "bearer"
         if scheme.lower() != "bearer":
             # 浏览器无法为 WebSocket 设置 Authorization 头；允许客户端以
             # Sec-WebSocket-Protocol: bearer, <token> 的形式携带，成功后回显 bearer。
-            protocols = [p.strip() for p in (socket.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
             if len(protocols) == 2 and protocols[0].lower() == "bearer":
                 scheme, token = "bearer", protocols[1]
-                ws_subprotocol = "bearer"
         if scheme.lower() != "bearer":
-            await socket.close(code=4401, reason="Authentication required")
+            # iOS 微信等 WKWebView 经常丢弃 Sec-WebSocket-Protocol；网页版在这类
+            # 环境下改走 query access_token（不带子协议）。
+            query_token = socket.query_params.get("access_token")
+            if query_token:
+                scheme, token = "bearer", query_token
+        if scheme.lower() != "bearer":
+            await reject_websocket(socket, 4401, "Authentication required", ws_subprotocol)
             return
         started = time.monotonic()
         device: str | None = None
@@ -424,10 +445,15 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
                 "account_expired": "额度已到期",
                 "account_disabled": "账号已停用",
             }
-            await socket.close(code=4403, reason=reasons.get(account_error.code, "试用额度不可用"))
+            await reject_websocket(socket, 4403, reasons.get(account_error.code, "试用额度不可用"), ws_subprotocol)
             return
         except (HTTPException, LecsyncError) as auth_error:
-            await socket.close(code=4401 if isinstance(auth_error, HTTPException) else 4429)
+            await reject_websocket(
+                socket,
+                4401 if isinstance(auth_error, HTTPException) else 4429,
+                "Authentication required" if isinstance(auth_error, HTTPException) else "Too many requests",
+                ws_subprotocol,
+            )
             return
         await socket.accept(subprotocol=ws_subprotocol)
         accepted = True
