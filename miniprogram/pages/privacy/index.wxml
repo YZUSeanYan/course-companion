@@ -1,0 +1,23 @@
+<view class="page {{reduceMotion ? 'reduced-motion' : ''}}">
+  <text class="eyebrow">PRIVACY / 说清楚，再使用</text>
+  <view class="title">你的学习资料，{{'\n'}}当前只在本机。</view>
+  <view class="badge">开发版本说明 · 2026-11-11</view>
+  <view class="section-title">我们目前处理什么</view>
+  <view class="card body-text">本地保存你主动输入的课程名称、可选教师备注、文本资料、疑问、手动答案、复习卡、评分记录和动画偏好。教师备注不必使用真实姓名，请勿输入他人隐私或无权使用的课堂内容。
+
+本版没有账号、手机号、微信登录、广告、统计 SDK、麦克风录音、位置采集或开发者服务器请求；微信平台自身的数据处理以其说明为准。</view>
+  <view class="section-title">备份与删除</view>
+  <view class="card body-text">只有你主动选择导出和目标会话，备份文件才通过微信文件分享发送。导入只读取你选择的知习小程序 JSON 备份，不自动读取聊天记录或剪贴板。
+
+JSON 备份未加密，包含回收站和复习记录。请自行妥善保管，勿发给不可信联系人。导出文件可能留在微信文件沙箱中。
+
+“移入回收站”仅隐藏并保留恢复能力，不是永久删除。清除小程序全部本地数据可通过微信管理功能完成，且可能不可恢复；已经主动分享的备份不随本机清除自动撤回。</view>
+  <view class="section-title">这不是完整 App</view>
+  <view class="card body-text">本版仅支持手动文本资料和卡片，不支持离线语音识别、后台录音、实时翻译、PDF/OCR、AI 学习包、云同步、系统通知或 App 数据库直接导入。
+
+复习使用 spaced-interval-v1 简单间隔策略，非 App 的 FSRS。合成示例会明确标注，不是 AI 实时生成的结果。</view>
+  <view class="section-title">正式发布之前</view>
+  <view class="card body-text">本说明是开发首版的实际行为说明，不是已完成的正式运营隐私政策。运营者名称、有效联系渠道、个人信息处理与权利响应方式，须由主体在发布前补齐，并与微信后台隐私保护指引一致。
+
+新增云端 AI、文件上传或录音功能前，必须重新确认主体类目与资质、数据流、告知同意和删除机制。不能通过隐藏入口后远程开启来绕过审核。</view>
+</view>
