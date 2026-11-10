@@ -3,8 +3,9 @@
 
 import { db, newUid } from "./db/db";
 import { zhixi, sleep } from "./api/client";
-import { startPcmCapture, requestMicrophone, type PcmCaptureHandle } from "./audio/capture";
-import { RealtimeSession, closeReason } from "./audio/realtime";
+import { startPcmCapture, requestMicrophone, createClassroomAudioContext, type PcmCaptureHandle } from "./audio/capture";
+import { RealtimeSession, closeReason, type RealtimeAuthMode } from "./audio/realtime";
+import { shouldFallbackFromProtocolAuth, shouldUseQueryWebSocketAuth, weChatOpenInSafariHint } from "./audio/browser-env";
 import { encodeWav } from "./audio/wav";
 import { normalizeSegmentId, partialTextOf, partialTranslationOf, segmentKeyOf } from "./classroom-events";
 import { saveFinalTranscript, saveSegmentTranslation } from "./transcript-store";
@@ -179,6 +180,12 @@ export class ClassroomController {
   private fatalSessionError = false;
   /** 结束流程幂等：用户停止、session.ended 与连接关闭可能同时触发。 */
   private finishPromise: Promise<void> | null = null;
+  /** 云课堂 WS 鉴权方式：微信内置浏览器默认走 query，其他环境先走子协议。 */
+  private cloudAuthMode: RealtimeAuthMode = "protocol";
+  private queryAuthFallbackUsed = false;
+  /** 重连成功后应回到的相位：暂停期间断线不应在 ready 后被标成听课中。 */
+  private resumePhaseAfterReady: "listening" | "paused" = "listening";
+  private audioContext: AudioContext | null = null;
 
   /** 订阅快照更新；返回取消订阅函数。重复订阅/切页都不会重置控制器。 */
   subscribe(callbacks: ClassroomCallbacks): () => void {
@@ -226,17 +233,31 @@ export class ClassroomController {
       this.reconnectAttempts = 0;
       this.fatalSessionError = false;
       this.reconnectGeneration += 1;
+      this.resumePhaseAfterReady = "listening";
+      const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+      this.cloudAuthMode = shouldUseQueryWebSocketAuth(userAgent) ? "query" : "protocol";
+      this.queryAuthFallbackUsed = this.cloudAuthMode === "query";
+      // iOS 微信 WKWebView：getUserMedia / AudioContext.resume() 必须赶在任何 await
+      // 消耗掉用户点击手势之前启动，否则可能静默失败或上下文一直 suspended。
+      this.audioContext = createClassroomAudioContext();
+      const micPromise = requestMicrophone();
       let token: string | null = null;
       if (options.mode === "cloud") {
         // 云端：先注册设备并确认账号可用；未激活/过期时网关会在 WS 握手阶段直接拒绝，
         // 提前检查可以给出可执行的引导，而不是让连接悄悄挂起。
-        token = await zhixi.deviceToken();
-        const account = await zhixi.accountStatus();
-        if (!account.activated) {
-          throw new Error("需要先激活试用额度：在「设置 → 试用额度」用手机号激活，即可开始云端听课。");
+        try {
+          token = await zhixi.deviceToken();
+          const account = await zhixi.accountStatus();
+          if (!account.activated) {
+            throw new Error("需要先激活试用额度：在「设置 → 试用额度」用手机号激活，即可开始云端听课。");
+          }
+        } catch (error) {
+          const stream = await micPromise.catch(() => null);
+          stream?.getTracks().forEach((track) => track.stop());
+          throw error;
         }
       }
-      this.stream = await requestMicrophone();
+      this.stream = await micPromise;
       const sessionId = await db.sessions.add({
         uid: newUid(),
         startedAtMillis: Date.now(),
@@ -271,20 +292,36 @@ export class ClassroomController {
           // 只有开启「保存原始录音」才累积 PCM（约 115KB/s，长课几百 MB），
           // 否则默认路径完全用不上，只会白占内存。
           if (this.saveAudio) this.pcmFrames.push(frame);
-          if (this.realtime?.isActive) this.realtime.sendPcm(frame);
+          // 必须等 session.ready：套接字虽已打开也不等于上游音频会话已建立。
+          if (this.realtime?.isReady) this.realtime.sendPcm(frame);
           if (this.mode === "offline" && this.offlineCallbacks) {
             getOfflineEngine().feed(frame, this.offlineCallbacks);
           }
         },
         onError: (error) => this.emit({ statusMessage: error.message }),
+        audioContext: this.audioContext ?? undefined,
       });
+      // 采集初始化期间连接可能已经失败并结束，不能再把 UI 标成听课中。
+      // 用 getSnapshot() 重新取值：start() 入口把 this.snapshot.phase 收窄成了 idle|ended。
+      const phaseAfterCapture = this.getSnapshot().phase;
+      if (phaseAfterCapture !== "connecting" && phaseAfterCapture !== "listening") {
+        await this.releaseMedia();
+        return;
+      }
       this.ticker = window.setInterval(() => {
         this.emit({
           elapsedSeconds: Math.floor(this.elapsedMs() / 1000),
           usageSeconds: Math.round(this.usageSeconds),
         });
       }, 500);
-      this.emit({ phase: "listening", sessionId, statusMessage: null });
+      if (this.mode === "offline") {
+        this.emit({ phase: "listening", sessionId, statusMessage: null });
+      } else if (this.getSnapshot().phase === "connecting") {
+        this.emit({
+          sessionId,
+          statusMessage: this.snapshot.statusMessage ?? "正在连接云端课堂…",
+        });
+      }
     } catch (error) {
       await this.releaseMedia();
       const message = error instanceof Error ? error.message : String(error);
@@ -300,20 +337,30 @@ export class ClassroomController {
     // 每条上游连接一个流代号：重连后段号可能从头发，不能和上一轮的段键撞在一起。
     this.streamSeq += 1;
     this.streamToken = `s${this.streamSeq}`;
-    this.realtime = new RealtimeSession(zhixi.realtimeUrl(), token, defaultConfig(options), {
-      onEvent: (event) => {
-        // 单个事件处理失败不能变成未捕获拒绝；给用户一个可读提示，录音继续。
-        void this.handleEvent(sessionId, event).catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          this.emit({ statusMessage: `转写保存失败：${message}` });
-        });
+    const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+    this.realtime = new RealtimeSession(
+      zhixi.realtimeUrl(),
+      token,
+      defaultConfig(options),
+      {
+        onEvent: (event) => {
+          // 单个事件处理失败不能变成未捕获拒绝；给用户一个可读提示，录音继续。
+          void this.handleEvent(sessionId, event).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            this.emit({ statusMessage: `转写保存失败：${message}` });
+          });
+        },
+        onClose: (code, reason) => void this.handleClose(sessionId, code, reason),
+        onError: (error) => {
+          const hint = weChatOpenInSafariHint(userAgent);
+          this.emit({ statusMessage: `${error.message}${hint}` });
+        },
+        onOpen: () => {
+          this.cloudOpenedAt = Date.now();
+        },
       },
-      onClose: (code, reason) => void this.handleClose(sessionId, code, reason),
-      onError: (error) => this.emit({ statusMessage: error.message }),
-      onOpen: () => {
-        this.cloudOpenedAt = Date.now();
-      },
-    });
+      { authMode: this.cloudAuthMode },
+    );
     this.realtime.connect();
   }
 
@@ -357,6 +404,7 @@ export class ClassroomController {
     this.capture?.setPaused(true);
     this.pauseStartedAt = Date.now();
     this.accumulatedMs += this.pauseStartedAt - this.startedAt;
+    this.resumePhaseAfterReady = "paused";
     this.emit({ phase: "paused", statusMessage: "已暂停，麦克风保持静音" });
   }
 
@@ -365,6 +413,7 @@ export class ClassroomController {
     this.capture?.setPaused(false);
     this.pauseStartedAt = null;
     this.startedAt = Date.now();
+    this.resumePhaseAfterReady = "listening";
     this.emit({ phase: "listening", statusMessage: null });
   }
 
@@ -414,6 +463,33 @@ export class ClassroomController {
     if (this.snapshot.phase === "stopping" || this.snapshot.phase === "ended" || this.snapshot.phase === "idle") {
       return;
     }
+    const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+    // 子协议握手从未打开：常见于 iOS 微信丢掉 Sec-WebSocket-Protocol。
+    // 必须在 4401 等「语义性拒绝」判断之前降级，因为网关收不到 token 时就会回 4401/握手 403。
+    if (
+      this.mode === "cloud" &&
+      shouldFallbackFromProtocolAuth({
+        didOpen: this.realtime?.didOpen ?? false,
+        alreadyUsedQuery: this.queryAuthFallbackUsed,
+      })
+    ) {
+      this.queryAuthFallbackUsed = true;
+      this.cloudAuthMode = "query";
+      this.emit({
+        phase: "connecting",
+        partialText: "",
+        statusMessage: "当前环境无法用标准方式连接音频服务器，正在改用兼容模式重试…",
+      });
+      try {
+        const token = await zhixi.deviceToken();
+        if (this.cloudSessionId != null && this.cloudOptions) {
+          this.startCloud(this.cloudSessionId, this.cloudOptions, token);
+          return;
+        }
+      } catch (error) {
+        this.emit({ statusMessage: error instanceof Error ? error.message : String(error) });
+      }
+    }
     // 瞬时断开自动重连（最多 3 次，指数退避）：非用户停止、非语义性拒绝。
     if (
       this.mode === "cloud" &&
@@ -429,13 +505,13 @@ export class ClassroomController {
       const delay = reconnectDelayMs(this.reconnectAttempts);
       const generation = this.reconnectGeneration;
       this.emit({
-        phase: "listening",
+        phase: "connecting",
         partialText: "",
         statusMessage: `连接中断，${Math.round(delay / 1000)} 秒后自动重连（${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}）…`,
       });
       await sleep(delay);
       if (
-        this.snapshot.phase !== "listening" ||
+        this.snapshot.phase !== "connecting" ||
         this.mode !== "cloud" ||
         generation !== this.reconnectGeneration
       ) {
@@ -452,9 +528,13 @@ export class ClassroomController {
         this.emit({ statusMessage: error instanceof Error ? error.message : String(error) });
       }
     }
+    const hint = weChatOpenInSafariHint(userAgent);
     const message = closeReason(code) ?? (reason || null);
     await this.finishSession();
-    this.emit({ phase: "ended", statusMessage: message ?? this.snapshot.statusMessage ?? "课堂连接已结束" });
+    const fallback = this.snapshot.statusMessage ?? "课堂连接已结束";
+    const raw = message ?? fallback;
+    const withHint = hint && !raw.includes(hint.trim()) ? `${raw}${hint}` : raw;
+    this.emit({ phase: "ended", statusMessage: withHint });
     void sessionId;
   }
 
@@ -470,7 +550,6 @@ export class ClassroomController {
       window.clearInterval(this.ticker);
       this.ticker = null;
     }
-    await this.capture?.stop().catch(() => undefined);
     // 只有用户显式开启「保存原始录音」才把 PCM 编码成 WAV 落库（用于云端补转写）。
     // 默认关闭：录音不进 IndexedDB，与隐私页口径一致，也避免整节课音频占满存储配额。
     let audioBlob: Blob | null = null;
@@ -503,18 +582,23 @@ export class ClassroomController {
   }
 
   private async releaseMedia(): Promise<void> {
+    await this.capture?.stop().catch(() => undefined);
+    this.capture = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
-    this.capture = null;
+    if (this.audioContext && this.audioContext.state !== "closed") {
+      await this.audioContext.close().catch(() => undefined);
+    }
+    this.audioContext = null;
   }
 
   private async handleEvent(sessionId: number, event: RealtimeEvent): Promise<void> {
     switch (event.type) {
       case "session.ready":
-        // 重连成功：重置重连计数并清掉状态提示。
+        // 重连成功：重置重连计数并清掉状态提示。此时才把 UI 标成听课中。
         this.reconnectAttempts = 0;
         this.cloudOpenedAt = Date.now();
-        this.emit({ statusMessage: null });
+        this.emit({ phase: this.resumePhaseAfterReady, statusMessage: null });
         break;
       case "transcript.partial":
         // sentence 模式的 partial 是快照：原文可能只在 paragraphs/tail/pending 里，

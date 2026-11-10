@@ -3,6 +3,10 @@
 // 事件类型与 Android LecsyncRealtimeEngine.handleEvent 一致：
 // session.ready / transcript.partial / transcript.final / translation.final /
 // digest.update / usage.update / session.ended / session.error / result。
+//
+// 鉴权：桌面浏览器用 Sec-WebSocket-Protocol: bearer, <token>（网关回显 bearer）。
+// iOS 微信等 WKWebView 经常丢弃或拒绝该子协议，改为 URL query access_token，
+// 不带子协议；网关两种方式都认。
 
 import type { RealtimeConfig, RealtimeEvent } from "../api/types";
 
@@ -13,30 +17,64 @@ export interface RealtimeCallbacks {
   onError?(error: Error): void;
 }
 
+export type RealtimeAuthMode = "protocol" | "query";
+
+export interface RealtimeSessionOptions {
+  authMode?: RealtimeAuthMode;
+}
+
 const STOP_WAIT_MS = 3000;
 const READY_TIMEOUT_MS = 12000;
+
+/** 把设备 token 放到 WebSocket URL 的 access_token 查询参数里（微信兼容通道）。 */
+export function websocketUrlWithAccessToken(url: string, token: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set("access_token", token);
+  return parsed.toString();
+}
+
+/** 按鉴权模式构造 WebSocket 的 url 与子协议，便于单测且避免 token 误进 protocol 模式的 URL。 */
+export function buildRealtimeSocketTarget(
+  url: string,
+  token: string,
+  mode: RealtimeAuthMode,
+): { url: string; protocols?: [string, string] } {
+  if (mode === "query") {
+    return { url: websocketUrlWithAccessToken(url, token) };
+  }
+  return { url, protocols: ["bearer", token] };
+}
 
 export class RealtimeSession {
   private socket: WebSocket | null = null;
   private closedByClient = false;
   private ended = false;
+  private ready = false;
+  private opened = false;
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly authMode: RealtimeAuthMode;
 
   constructor(
     private readonly url: string,
     private readonly token: string,
     private readonly config: RealtimeConfig,
     private readonly callbacks: RealtimeCallbacks,
-  ) {}
+    options: RealtimeSessionOptions = {},
+  ) {
+    this.authMode = options.authMode ?? "protocol";
+  }
 
   connect(): void {
-    // 浏览器无法设置 Authorization 头，token 通过 Sec-WebSocket-Protocol
-    // 以 ["bearer", token] 形式传递；网关在 proxy_socket 中解析并回显 bearer。
-    const socket = new WebSocket(this.url, ["bearer", this.token]);
+    const target = buildRealtimeSocketTarget(this.url, this.token, this.authMode);
+    const socket = target.protocols
+      ? new WebSocket(target.url, target.protocols)
+      : new WebSocket(target.url);
     socket.binaryType = "arraybuffer";
     this.socket = socket;
+    this.ready = false;
+    this.opened = false;
     this.readyTimer = setTimeout(() => {
-      if (!this.ended && this.socket === socket) {
+      if (!this.ended && !this.ready && this.socket === socket) {
         this.callbacks.onError?.(new Error("云端课堂连接超时，请检查网络或稍后重试。"));
         try {
           socket.close();
@@ -46,6 +84,7 @@ export class RealtimeSession {
       }
     }, READY_TIMEOUT_MS);
     socket.onopen = () => {
+      this.opened = true;
       socket.send(JSON.stringify({ config: this.config }));
       this.callbacks.onOpen?.();
     };
@@ -58,6 +97,7 @@ export class RealtimeSession {
         return;
       }
       if (parsed.type === "session.ready") {
+        this.ready = true;
         if (this.readyTimer !== null) {
           clearTimeout(this.readyTimer);
           this.readyTimer = null;
@@ -76,6 +116,7 @@ export class RealtimeSession {
         clearTimeout(this.readyTimer);
         this.readyTimer = null;
       }
+      this.ready = false;
       this.socket = null;
       this.callbacks.onClose?.(event.code, event.reason);
     };
@@ -83,7 +124,7 @@ export class RealtimeSession {
 
   sendPcm(frame: Int16Array): boolean {
     const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !this.ready) return false;
     socket.send(frame.buffer as ArrayBuffer);
     return true;
   }
@@ -136,8 +177,22 @@ export class RealtimeSession {
     return this.socket !== null && this.socket.readyState === WebSocket.OPEN;
   }
 
+  /** 已收到 session.ready，此时才应开始推 PCM、并把 UI 标成听课中。 */
+  get isReady(): boolean {
+    return this.ready && this.socket !== null && this.socket.readyState === WebSocket.OPEN;
+  }
+
+  /** 套接字是否曾经打开过（用于判断子协议握手是否根本没建立）。 */
+  get didOpen(): boolean {
+    return this.opened;
+  }
+
   get clientClosed(): boolean {
     return this.closedByClient;
+  }
+
+  get mode(): RealtimeAuthMode {
+    return this.authMode;
   }
 }
 
