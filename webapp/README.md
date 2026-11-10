@@ -32,7 +32,7 @@
 
 - Chrome / Edge / Safari 较新版本；HTTPS 或 localhost 才能使用麦克风。
 - 录音期间页面须保持前台：浏览器安全模型不支持锁屏/后台持续录音（与 App 的核心差异）。
-- 实时课堂 WebSocket 鉴权：浏览器无法设置 Authorization 头，客户端以 `Sec-WebSocket-Protocol: bearer, <token>` 携带令牌，网关 `proxy_socket` 解析并回显 `bearer`（见 `server/app/lecsync_routes.py`，对 Android 无影响）。
+- 实时课堂 WebSocket 鉴权：桌面浏览器以 `Sec-WebSocket-Protocol: bearer, <token>` 携带设备令牌，网关 `proxy_socket` 解析并回显 `bearer`（见 `server/app/lecsync_routes.py`，对 Android 无影响）。iOS 微信等 WKWebView 会丢子协议，这类环境改走 URL query `ticket=`：先 `POST /v2/lecsync/realtime/ticket` 换一张 60 秒、只能用一次的 ticket（`src/lib/api/client.ts`、`src/lib/classroom.ts`）。长期设备令牌不允许出现在 URL 里——否则会留在 Uvicorn/nginx 访问日志中，网关对 `?access_token=` 直接 4401。
 
 ## 本地开发
 

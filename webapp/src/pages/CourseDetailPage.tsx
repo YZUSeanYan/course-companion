@@ -13,6 +13,7 @@ import { importCet6Csv } from "../lib/cet6";
 import { exportCourseMarkdown } from "../lib/export";
 import { describeError, isActivationError, zhixi } from "../lib/api/client";
 import type { DocumentAsset } from "../lib/api/types";
+import { restoreMaterialDocument } from "../lib/materials";
 import ActivationNotice from "../components/ActivationNotice";
 
 export default function CourseDetailPage() {
@@ -37,7 +38,10 @@ export default function CourseDetailPage() {
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cet6InputRef = useRef<HTMLInputElement | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement | null>(null);
+  const restoreTargetRef = useRef<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [restoringId, setRestoringId] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [needsActivation, setNeedsActivation] = useState(false);
   const [openType, setOpenType] = useState<string | null>(null);
@@ -99,6 +103,20 @@ export default function CourseDetailPage() {
       reportError(error);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const restoreDocument = async (materialId: number, file: File) => {
+    setRestoringId(materialId);
+    setStatus(`正在重新解析 ${file.name}…`);
+    try {
+      const asset = await restoreMaterialDocument(materialId, file);
+      setNeedsActivation(false);
+      setStatus(`已恢复 ${file.name}（${asset.pages.length} 页）的页面预览。`);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -209,6 +227,9 @@ export default function CourseDetailPage() {
               <span className="pill">{materials?.length ?? 0} 份</span>
             </div>
             <p className="card-desc">支持 PDF / PNG / JPG（≤50MB）。生成学习包消耗当日文档解析与 AI 学习包额度。</p>
+            <p className="card-desc">
+              旧版讲义的页面预览会提示无法访问：点「恢复预览」重新选择当时的原文件即可恢复，内容需与当初完全一致。
+            </p>
             <input
               ref={fileInputRef}
               type="file"
@@ -229,6 +250,19 @@ export default function CourseDetailPage() {
                 const file = event.target.files?.[0];
                 if (file) void importCet6(file);
                 event.target.value = "";
+              }}
+            />
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                const target = restoreTargetRef.current;
+                restoreTargetRef.current = null;
+                event.target.value = "";
+                if (file && target != null) void restoreDocument(target, file);
               }}
             />
             <div className="btn-row" style={{ marginTop: 0 }}>
@@ -252,6 +286,17 @@ export default function CourseDetailPage() {
                         {material.pageCount} 页 · {new Date(material.importedAtMillis).toLocaleString("zh-CN")}
                       </div>
                     </div>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => {
+                        restoreTargetRef.current = material.id!;
+                        restoreInputRef.current?.click();
+                      }}
+                      disabled={uploading || restoringId !== null}
+                      title="旧版讲义的页面预览会提示无法访问，重新选择当时的原文件即可恢复"
+                    >
+                      {restoringId === material.id ? "恢复中…" : "恢复预览"}
+                    </button>
                     <button className="btn btn-sm" onClick={() => void generateFromMaterial(material.id!)} disabled={uploading}>
                       生成学习包
                     </button>

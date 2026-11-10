@@ -270,6 +270,7 @@ class MainActivity : ComponentActivity() {
                 val pageStateHolder = rememberSaveableStateHolder()
                 var page by remember { mutableStateOf(AppPage.Home) }
                 var pendingAnalysisId by remember { mutableStateOf<Long?>(null) }
+                var pendingRestoreMaterialId by remember { mutableStateOf<Long?>(null) }
                 var showDoubtEditor by remember { mutableStateOf(false) }
                 var doubtSourceText by remember { mutableStateOf("") }
                 var showTranslationNotice by remember { mutableStateOf(false) }
@@ -347,6 +348,22 @@ class MainActivity : ComponentActivity() {
                     ActivityResultContracts.OpenDocument(),
                 ) { uri: Uri? ->
                     if (uri != null) learningPresenter.importGlossary(uri)
+                }
+                // 旧版讲义在本机没有原文件时，由用户重新选择原文件恢复页面预览；
+                // 目标讲义 id 先存起来，回调里只处理一次。
+                val restoreMaterialLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument(),
+                ) { uri: Uri? ->
+                    val target = pendingRestoreMaterialId
+                    pendingRestoreMaterialId = null
+                    if (uri != null && target != null) {
+                        learningPresenter.restoreMaterialFromFile(
+                            materialId = target,
+                            uri = uri,
+                            displayName = queryDisplayName(context, uri),
+                            mimeType = context.contentResolver.getType(uri),
+                        )
+                    }
                 }
 
                 val audioLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -744,6 +761,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             onAnalyzeMaterial = { pendingAnalysisId = it },
+                            onRestoreMaterialPreview = { learningPresenter.restoreMaterialPreview(it) },
+                            onPickMaterialOriginal = { materialId ->
+                                pendingRestoreMaterialId = materialId
+                                restoreMaterialLauncher.launch(arrayOf("application/pdf", "image/*"))
+                            },
                             onImportGlossary = {
                                 glossaryLauncher.launch(arrayOf("text/plain", "text/csv", "text/comma-separated-values"))
                             },

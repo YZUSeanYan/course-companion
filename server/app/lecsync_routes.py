@@ -25,7 +25,9 @@ from .lecsync_gateway_schemas import (
 from .lecsync_realtime import LecsyncRealtimeConnection, StreamLimiter
 from .provider import ProviderConfigurationError, ProviderInvalidResponse, resolve_global_address, validate_provider_url
 from .rate_limit import SlidingWindowRateLimiter
-from .security import token_digest
+from .security import new_device_token, token_digest
+
+WS_TICKET_TTL_SECONDS = 60
 
 
 async def reject_websocket(socket: WebSocket, code: int, reason: str = "", subprotocol: str | None = None) -> None:
@@ -399,6 +401,22 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(404, {"code": "NOT_FOUND", "message": "找不到该任务"})
         return normalize(await call(client().voice_typing_status, request_id))
 
+    @app.post("/v2/lecsync/realtime/ticket")
+    async def realtime_ticket(device: str = Depends(authenticated)) -> dict:
+        # Browsers cannot set WebSocket headers, and WKWebView drops the
+        # subprotocol handshake, so the browser has to authenticate through the
+        # URL. A long-lived device token there would be written to every access
+        # log, so the URL only ever carries a single-use ticket.
+        check_rate(device)
+        ticket = new_device_token()
+        app.state.db.create_ws_ticket(
+            device,
+            token_digest(ticket, settings.token_pepper),
+            WS_TICKET_TTL_SECONDS,
+        )
+        # Bypass normalize()/public() on purpose: public() strips "ticket".
+        return {"ticket": ticket, "expiresIn": WS_TICKET_TTL_SECONDS}
+
     async def proxy_socket(socket: WebSocket, kind: str):
         scheme, _, token = (socket.headers.get("authorization") or "").partition(" ")
         ws_subprotocol: str | None = None
@@ -410,21 +428,32 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
             # Sec-WebSocket-Protocol: bearer, <token> 的形式携带，成功后回显 bearer。
             if len(protocols) == 2 and protocols[0].lower() == "bearer":
                 scheme, token = "bearer", protocols[1]
+        ticket_device: str | None = None
         if scheme.lower() != "bearer":
             # iOS 微信等 WKWebView 经常丢弃 Sec-WebSocket-Protocol；网页版在这类
-            # 环境下改走 query access_token（不带子协议）。
-            query_token = socket.query_params.get("access_token")
-            if query_token:
-                scheme, token = "bearer", query_token
-        if scheme.lower() != "bearer":
-            await reject_websocket(socket, 4401, "Authentication required", ws_subprotocol)
-            return
+            # 环境下改走 query ticket（不带子协议）。
+            ticket_value = socket.query_params.get("ticket")
+            if ticket_value:
+                outcome, ticket_device = app.state.db.consume_ws_ticket(
+                    token_digest(ticket_value, settings.token_pepper)
+                )
+                if outcome != "ok" or not ticket_device:
+                    await reject_websocket(socket, 4401, "Ticket is no longer valid", ws_subprotocol)
+                    return
+            elif socket.query_params.get("access_token"):
+                # Never authenticate with the long-lived device token from the
+                # URL: it would end up in Uvicorn and nginx access logs.
+                await reject_websocket(socket, 4401, "Use a short-lived ticket", ws_subprotocol)
+                return
+            else:
+                await reject_websocket(socket, 4401, "Authentication required", ws_subprotocol)
+                return
         started = time.monotonic()
         device: str | None = None
         subject = None
         accepted = False
         try:
-            device = device_id(token)
+            device = ticket_device or device_id(token)
             subject = resolve_quota_subject(app.state.db, settings, device)
             if not limiter.allow(device):
                 raise LecsyncError("Too many requests", status=429, code="RESOURCE_LIMIT")

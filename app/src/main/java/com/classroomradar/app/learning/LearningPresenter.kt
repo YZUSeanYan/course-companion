@@ -366,6 +366,106 @@ class LearningPresenter(private val appContext: Context) {
         }
     }
 
+    /**
+     * 旧版讲义导入时没有记录账号归属，页面原图接口按设计回 404。
+     * 设备上还留着原文件时，重新解析一次就能按当前账号重新登记归属——
+     * 只刷新页面预览，不生成学习包，也不改动讲义标题。
+     */
+    fun restoreMaterialPreview(materialId: Long) {
+        if (_isAnalyzing.value || _isImporting.value) return
+        scope.launch {
+            val material = withContext(Dispatchers.IO) {
+                val record = repository.getMaterial(materialId)
+                val original = record?.originalRelativePath?.let { File(appContext.filesDir, it) }
+                record to (original?.isFile == true)
+            }
+            val record = material.first
+            if (record == null) {
+                _message.value = "讲义不存在，请重新导入"
+                return@launch
+            }
+            val mime = record.mimeType
+            if (mime != "application/pdf" && !mime.startsWith("image/")) {
+                _message.value = "只有 PDF 或图片讲义才有页面预览"
+                return@launch
+            }
+            if (!material.second) {
+                _message.value = "这台设备上没有《${record.title}》的原文件，请点「重新选择原文件」"
+                return@launch
+            }
+            val original = File(appContext.filesDir, record.originalRelativePath!!)
+            _isAnalyzing.value = true
+            try {
+                val asset = learningApi.analyzeDocument(original, mime)
+                withContext(Dispatchers.IO) {
+                    repository.updateMaterial(
+                        record.copy(
+                            documentJson = protocolJson.encodeToString(DocumentAssetDto.serializer(), asset),
+                            pageCount = asset.pages.size,
+                        ),
+                    )
+                }
+                _message.value = "《${record.title}》的页面预览已恢复"
+            } catch (error: Exception) {
+                _message.value = analysisErrorMessage(error)
+                refreshAccount(silent = true)
+            } finally {
+                _isAnalyzing.value = false
+            }
+        }
+    }
+
+    /**
+     * 本机没有原文件（换设备或清理过缓存）时的恢复入口：用户重新选一次原文件，
+     * 就地更新这条讲义，不新增记录。必须是用户主动选择，不做静默重传。
+     */
+    fun restoreMaterialFromFile(materialId: Long, uri: Uri, displayName: String?, mimeType: String?) {
+        if (_isImporting.value || _isAnalyzing.value) return
+        _isImporting.value = true
+        scope.launch {
+            var importedOriginal: String? = null
+            try {
+                val record = withContext(Dispatchers.IO) { repository.getMaterial(materialId) }
+                if (record == null) {
+                    _message.value = "讲义不存在，请重新导入"
+                    return@launch
+                }
+                val imported = lectureImporter.import(appContext, uri, displayName, mimeType)
+                importedOriginal = imported.originalRelativePath
+                if (imported.mimeType != "application/pdf" && !imported.mimeType.startsWith("image/")) {
+                    throw IllegalStateException("只有 PDF 或图片讲义才有页面预览")
+                }
+                val asset = learningApi.analyzeDocument(
+                    File(appContext.filesDir, imported.originalRelativePath),
+                    imported.mimeType,
+                )
+                withContext(Dispatchers.IO) {
+                    repository.updateMaterial(
+                        record.copy(
+                            mimeType = imported.mimeType,
+                            originalRelativePath = imported.originalRelativePath,
+                            textRelativePath = imported.textRelativePath,
+                            documentJson = protocolJson.encodeToString(DocumentAssetDto.serializer(), asset),
+                            pageCount = asset.pages.size,
+                        ),
+                    )
+                }
+                _message.value = "《${record.title}》的页面预览已恢复"
+            } catch (error: Exception) {
+                // 恢复失败时清掉这次刚复制进来的文件，避免留下无人引用的原文件。
+                importedOriginal?.let { relative ->
+                    withContext(Dispatchers.IO) {
+                        File(appContext.filesDir, relative).parentFile?.deleteRecursively()
+                    }
+                }
+                _message.value = error.message ?: "恢复页面预览失败，请重试"
+                refreshAccount(silent = true)
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
     fun analyzeSession(sessionId: Long) {
         scope.launch {
             val record = withContext(Dispatchers.IO) { classroomRepository.loadExport(sessionId) }

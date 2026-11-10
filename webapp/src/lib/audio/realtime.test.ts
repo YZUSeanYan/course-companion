@@ -3,7 +3,7 @@ import {
   buildRealtimeSocketTarget,
   RealtimeSession,
   closeReason,
-  websocketUrlWithAccessToken,
+  websocketUrlWithTicket,
 } from "./realtime";
 import type { RealtimeConfig } from "../api/types";
 
@@ -21,18 +21,19 @@ describe("buildRealtimeSocketTarget", () => {
     expect(target.protocols).toEqual(["bearer", "tok-abc"]);
   });
 
-  it("query 模式把 token 放在 access_token，且不带子协议（微信兼容）", () => {
-    const target = buildRealtimeSocketTarget("wss://zhixi.example/v2/lecsync/realtime", "tok-abc", "query");
+  it("query 模式只带一次性 ticket，不带子协议（微信兼容）", () => {
+    const target = buildRealtimeSocketTarget("wss://zhixi.example/v2/lecsync/realtime", "ticket-abc", "query");
     expect(target.protocols).toBeUndefined();
     const parsed = new URL(target.url);
-    expect(parsed.searchParams.get("access_token")).toBe("tok-abc");
+    expect(parsed.searchParams.get("ticket")).toBe("ticket-abc");
+    expect(parsed.searchParams.get("access_token")).toBeNull();
     expect(parsed.pathname).toBe("/v2/lecsync/realtime");
     expect(parsed.protocol).toBe("wss:");
   });
 
   it("https 基址转 ws 后 query 编码特殊字符", () => {
-    const url = websocketUrlWithAccessToken("ws://gateway.test/v2/lecsync/realtime", "a+b/c");
-    expect(new URL(url).searchParams.get("access_token")).toBe("a+b/c");
+    const url = websocketUrlWithTicket("ws://gateway.test/v2/lecsync/realtime", "a+b/c");
+    expect(new URL(url).searchParams.get("ticket")).toBe("a+b/c");
   });
 });
 
@@ -109,10 +110,10 @@ describe("RealtimeSession", () => {
     expect(FakeWebSocket.instances[0]?.url).toBe("wss://g.test/v2/lecsync/realtime");
   });
 
-  it("query 模式不传子协议，token 只出现在 URL", () => {
+  it("query 模式不传子协议，ticket 只出现在 URL", () => {
     const session = new RealtimeSession(
       "wss://g.test/v2/lecsync/realtime",
-      "tok",
+      "ticket",
       CONFIG,
       { onEvent: () => undefined },
       { authMode: "query" },
@@ -120,7 +121,7 @@ describe("RealtimeSession", () => {
     session.connect();
     const socket = FakeWebSocket.instances[0];
     expect(socket?.protocols).toBeUndefined();
-    expect(new URL(socket?.url ?? "").searchParams.get("access_token")).toBe("tok");
+    expect(new URL(socket?.url ?? "").searchParams.get("ticket")).toBe("ticket");
   });
 
   it("onopen 只发送 config，此时 isReady 仍为 false，不能推 PCM", () => {

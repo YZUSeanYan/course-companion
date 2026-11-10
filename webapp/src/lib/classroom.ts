@@ -241,12 +241,11 @@ export class ClassroomController {
       // 消耗掉用户点击手势之前启动，否则可能静默失败或上下文一直 suspended。
       this.audioContext = createClassroomAudioContext();
       const micPromise = requestMicrophone();
-      let token: string | null = null;
       if (options.mode === "cloud") {
         // 云端：先注册设备并确认账号可用；未激活/过期时网关会在 WS 握手阶段直接拒绝，
         // 提前检查可以给出可执行的引导，而不是让连接悄悄挂起。
         try {
-          token = await zhixi.deviceToken();
+          await zhixi.deviceToken();
           const account = await zhixi.accountStatus();
           if (!account.activated) {
             throw new Error("需要先激活试用额度：在「设置 → 试用额度」用手机号激活，即可开始云端听课。");
@@ -285,7 +284,8 @@ export class ClassroomController {
       if (options.mode === "offline") {
         await this.startOffline(sessionId, options);
       } else {
-        this.startCloud(sessionId, options, token!);
+        // 凭据取最近一次：query 模式的 ticket 只有 60 秒寿命。
+        this.startCloud(sessionId, options, await this.realtimeCredential());
       }
       this.capture = await startPcmCapture(this.stream, {
         onFrame: (frame) => {
@@ -330,7 +330,15 @@ export class ClassroomController {
     }
   }
 
-  private startCloud(sessionId: number, options: ClassroomStartOptions, token: string): void {
+  /**
+   * WebSocket 凭据：protocol 模式用长期设备 token（走子协议，不落 URL）；
+   * query 模式改用网关签发的一次性 ticket，避免设备 token 留在访问日志里。
+   */
+  private async realtimeCredential(): Promise<string> {
+    return this.cloudAuthMode === "query" ? zhixi.realtimeTicket() : zhixi.deviceToken();
+  }
+
+  private startCloud(sessionId: number, options: ClassroomStartOptions, credential: string): void {
     this.cloudOptions = options;
     this.cloudSessionId = sessionId;
     this.cloudOpenedAt = Date.now();
@@ -340,7 +348,7 @@ export class ClassroomController {
     const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
     this.realtime = new RealtimeSession(
       zhixi.realtimeUrl(),
-      token,
+      credential,
       defaultConfig(options),
       {
         onEvent: (event) => {
@@ -481,9 +489,10 @@ export class ClassroomController {
         statusMessage: "当前环境无法用标准方式连接音频服务器，正在改用兼容模式重试…",
       });
       try {
-        const token = await zhixi.deviceToken();
+        // 降级到 query 通道后凭据变成 ticket，必须重新签发；复用例会被 4401 拒绝。
+        const credential = await this.realtimeCredential();
         if (this.cloudSessionId != null && this.cloudOptions) {
-          this.startCloud(this.cloudSessionId, this.cloudOptions, token);
+          this.startCloud(this.cloudSessionId, this.cloudOptions, credential);
           return;
         }
       } catch (error) {
@@ -518,13 +527,14 @@ export class ClassroomController {
         return; // 重连等待期间用户已停止或开启了新课。
       }
       try {
-        const token = await zhixi.deviceToken();
+        // 每次重连都重新取凭据：ticket 只能用一次且 60 秒过期。
+        const credential = await this.realtimeCredential();
         if (this.cloudSessionId != null && this.cloudOptions) {
-          this.startCloud(this.cloudSessionId, this.cloudOptions, token);
+          this.startCloud(this.cloudSessionId, this.cloudOptions, credential);
           return;
         }
       } catch (error) {
-        // 取 token 失败也走正常结束路径，把错误带给用户。
+        // 取凭据失败也走正常结束路径，把错误带给用户。
         this.emit({ statusMessage: error instanceof Error ? error.message : String(error) });
       }
     }

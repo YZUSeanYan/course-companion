@@ -201,14 +201,17 @@ def test_realtime_rejects_malformed_subprotocol():
     asyncio.run(run())
 
 
-def test_realtime_accepts_query_access_token(monkeypatch):
-    """iOS 微信等环境无法发送子协议：允许 ?access_token= 作为兼容鉴权通道。"""
-    socket = FakeSocket([json.dumps({"type": "session.ready", "sessionId": "session-wechat", "store": False})])
-    events = []
+def _realtime_app():
+    from app.main import create_app
+    app = create_app(make_settings())
+    app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
+    return app
 
+
+def _fake_connection(session_id: str, socket: FakeSocket):
     class Connection:
         def __init__(self, *args, **kwargs):
-            self.session_id = "session-wechat"
+            self.session_id = session_id
 
         async def __aenter__(self):
             self.events = socket.events
@@ -219,19 +222,99 @@ def test_realtime_accepts_query_access_token(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
+    return Connection
+
+
+def test_realtime_accepts_query_ticket(monkeypatch):
+    """iOS 微信等环境无法发送子协议：网页版用 60 秒一次性 ticket 通过 query 鉴权。"""
+    socket = FakeSocket([json.dumps({"type": "session.ready", "sessionId": "session-ticket", "store": False})])
+    events = []
+
     async def run():
-        from app.main import create_app
         from fastapi.testclient import TestClient
-        app = create_app(make_settings())
-        app.state.lecsync = LecsyncClient(api_key=TEST_LECSYNC)
-        app.state.lecsync_connection_factory = Connection
+        app = _realtime_app()
+        app.state.lecsync_connection_factory = _fake_connection("session-ticket", socket)
         with TestClient(app) as client:
-            token = auth_headers(client)["Authorization"].split(" ", 1)[1]
-            with client.websocket_connect(f"/v2/lecsync/realtime?access_token={token}") as device:
+            headers = auth_headers(client)
+            issued = client.post("/v2/lecsync/realtime/ticket", headers=headers)
+            assert issued.status_code == 200, issued.text
+            payload = issued.json()
+            assert payload["expiresIn"] == 60
+            ticket = payload["ticket"]
+            assert ticket and ticket != headers["Authorization"].split(" ", 1)[1]
+            with client.websocket_connect(f"/v2/lecsync/realtime?ticket={ticket}") as device:
                 device.send_json({"type": "configure", "config": {"transcribe": {"languages": ["en", "zh"]}}})
                 events.append(device.receive_json())
+            with app.state.db.connect() as connection:
+                stored = [
+                    row["ticket_hash"]
+                    for row in connection.execute("SELECT ticket_hash FROM ws_tickets").fetchall()
+                ]
+            # 数据库只保存摘要，不保存 ticket 明文。
+            assert stored and ticket not in stored
     asyncio.run(run())
-    assert events == [{"type": "session.ready", "sessionId": "session-wechat", "store": False}]
+    assert events == [{"type": "session.ready", "sessionId": "session-ticket", "store": False}]
+
+
+def test_realtime_ticket_is_single_use(monkeypatch):
+    """ticket 用一次即失效，被日志或历史记录回放也不能再次建连。"""
+    socket = FakeSocket([json.dumps({"type": "session.ready", "sessionId": "session-once", "store": False})])
+
+    async def run():
+        from fastapi.testclient import TestClient
+        app = _realtime_app()
+        app.state.lecsync_connection_factory = _fake_connection("session-once", socket)
+        with TestClient(app) as client:
+            ticket = client.post(
+                "/v2/lecsync/realtime/ticket", headers=auth_headers(client)
+            ).json()["ticket"]
+            with client.websocket_connect(f"/v2/lecsync/realtime?ticket={ticket}") as device:
+                device.send_json({"type": "configure", "config": {"transcribe": {"languages": ["en"]}}})
+                assert device.receive_json()["sessionId"] == "session-once"
+            _assert_websocket_close_code(
+                client, f"/v2/lecsync/realtime?ticket={ticket}", expected=4401
+            )
+    asyncio.run(run())
+
+
+def test_realtime_rejects_expired_ticket():
+    async def run():
+        from fastapi.testclient import TestClient
+        app = _realtime_app()
+        with TestClient(app) as client:
+            ticket = client.post(
+                "/v2/lecsync/realtime/ticket", headers=auth_headers(client)
+            ).json()["ticket"]
+            with app.state.db.connect() as connection:
+                connection.execute(
+                    "UPDATE ws_tickets SET expires_at = ?", ("2000-01-01T00:00:00+00:00",)
+                )
+            _assert_websocket_close_code(
+                client, f"/v2/lecsync/realtime?ticket={ticket}", expected=4401
+            )
+    asyncio.run(run())
+
+
+def test_realtime_rejects_long_lived_device_token_in_query():
+    """长期设备 token 不能放进 URL：否则会永久留在 Uvicorn/nginx 访问日志里。"""
+    async def run():
+        from fastapi.testclient import TestClient
+        app = _realtime_app()
+        with TestClient(app) as client:
+            token = auth_headers(client)["Authorization"].split(" ", 1)[1]
+            _assert_websocket_close_code(
+                client, f"/v2/lecsync/realtime?access_token={token}", expected=4401
+            )
+    asyncio.run(run())
+
+
+def test_realtime_ticket_requires_bearer_token():
+    async def run():
+        from fastapi.testclient import TestClient
+        app = _realtime_app()
+        with TestClient(app) as client:
+            assert client.post("/v2/lecsync/realtime/ticket").status_code == 401
+    asyncio.run(run())
 
 
 def test_realtime_rejects_missing_auth_with_close_code():

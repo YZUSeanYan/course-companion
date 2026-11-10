@@ -5,8 +5,9 @@
 // digest.update / usage.update / session.ended / session.error / result。
 //
 // 鉴权：桌面浏览器用 Sec-WebSocket-Protocol: bearer, <token>（网关回显 bearer）。
-// iOS 微信等 WKWebView 经常丢弃或拒绝该子协议，改为 URL query access_token，
-// 不带子协议；网关两种方式都认。
+// iOS 微信等 WKWebView 经常丢弃或拒绝该子协议，改为 URL query ticket，不带子协议；
+// ticket 由网关签发、60 秒内有效且只能用一次，长期设备 token 不进入 URL，
+// 也就不会被写进 Uvicorn/nginx 访问日志。
 
 import type { RealtimeConfig, RealtimeEvent } from "../api/types";
 
@@ -26,21 +27,22 @@ export interface RealtimeSessionOptions {
 const STOP_WAIT_MS = 3000;
 const READY_TIMEOUT_MS = 12000;
 
-/** 把设备 token 放到 WebSocket URL 的 access_token 查询参数里（微信兼容通道）。 */
-export function websocketUrlWithAccessToken(url: string, token: string): string {
+/** 把一次性 ticket 放到 WebSocket URL 的 ticket 查询参数里（微信兼容通道）。 */
+export function websocketUrlWithTicket(url: string, ticket: string): string {
   const parsed = new URL(url);
-  parsed.searchParams.set("access_token", token);
+  parsed.searchParams.set("ticket", ticket);
   return parsed.toString();
 }
 
-/** 按鉴权模式构造 WebSocket 的 url 与子协议，便于单测且避免 token 误进 protocol 模式的 URL。 */
+/** 按鉴权模式构造 WebSocket 的 url 与子协议，便于单测且避免凭据误进 protocol 模式的 URL。 */
 export function buildRealtimeSocketTarget(
   url: string,
   token: string,
   mode: RealtimeAuthMode,
 ): { url: string; protocols?: [string, string] } {
+  // query 模式下 token 参数是一次性 ticket，不是设备 token。
   if (mode === "query") {
-    return { url: websocketUrlWithAccessToken(url, token) };
+    return { url: websocketUrlWithTicket(url, token) };
   }
   return { url, protocols: ["bearer", token] };
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type FakeSession = {
   authMode?: string;
+  credential?: string;
   didOpen: boolean;
   isReady: boolean;
   isActive: boolean;
@@ -34,15 +35,17 @@ const { fakeRealtime, fakeCapture, fakeClient } = vi.hoisted(() => {
     clientClosed = false;
     callbacks: FakeSession["callbacks"];
     authMode?: string;
+    credential?: string;
     constructor(
       _url: string,
-      _token: string,
+      credential: string,
       _config: unknown,
       callbacks: FakeSession["callbacks"],
       options: { authMode?: string } = {},
     ) {
       this.callbacks = callbacks;
       this.authMode = options.authMode;
+      this.credential = credential;
       instances.push(this);
     }
     connect() {
@@ -98,6 +101,7 @@ const { fakeRealtime, fakeCapture, fakeClient } = vi.hoisted(() => {
     },
     fakeClient: {
       deviceToken: vi.fn(async () => "test-token"),
+      realtimeTicket: vi.fn(async () => "test-ticket"),
       accountStatus: vi.fn(async () => ({ activated: true })),
       realtimeUrl: () => "wss://gateway.test/v2/lecsync/realtime",
     },
@@ -150,6 +154,7 @@ describe("ClassroomController 云端连接相位", () => {
   beforeEach(() => {
     fakeRealtime.instances.length = 0;
     fakeClient.deviceToken.mockClear();
+    fakeClient.realtimeTicket.mockClear();
     fakeClient.accountStatus.mockClear();
     fakeCapture.requestMicrophone.mockClear();
     fakeCapture.startPcmCapture.mockClear();
@@ -173,6 +178,9 @@ describe("ClassroomController 云端连接相位", () => {
     expect(controller.getSnapshot().statusMessage).toContain("正在连接");
     expect(fakeRealtime.instances).toHaveLength(1);
     expect(fakeRealtime.instances[0]?.authMode).toBe("protocol");
+    // 走子协议时仍是长期设备 token，但不会出现在 URL 里。
+    expect(fakeRealtime.instances[0]?.credential).toBe("test-token");
+    expect(fakeClient.realtimeTicket).not.toHaveBeenCalled();
 
     fakeRealtime.instances[0]!.open();
     expect(controller.getSnapshot().phase).toBe("connecting");
@@ -184,11 +192,14 @@ describe("ClassroomController 云端连接相位", () => {
     expect(phases).toContain("connecting");
   });
 
-  it("iOS 微信 UA 首次连接就走 query 鉴权", async () => {
+  it("iOS 微信 UA 首次连接就走 query 鉴权，且 URL 凭据是一次性 ticket", async () => {
     vi.stubGlobal("navigator", { userAgent: IOS_WECHAT });
     const controller = new ClassroomController();
     await controller.start(START_OPTIONS);
     expect(fakeRealtime.instances[0]?.authMode).toBe("query");
+    // 设备 token 绝不能进 URL：query 通道必须换成 ticket 接口签发的短时效凭据。
+    expect(fakeRealtime.instances[0]?.credential).toBe("test-ticket");
+    expect(fakeClient.realtimeTicket).toHaveBeenCalledTimes(1);
   });
 
   it("子协议握手从未打开时立即改用 query 兼容模式，且不把 UI 标成听课中", async () => {
@@ -197,12 +208,14 @@ describe("ClassroomController 云端连接相位", () => {
     expect(fakeRealtime.instances[0]?.authMode).toBe("protocol");
 
     fakeRealtime.instances[0]!.fail();
-    await Promise.resolve();
-    await Promise.resolve();
-
+    // 降级要重新签发 ticket（异步），等第二条连接建起来再断言。
+    await vi.waitFor(() => expect(fakeRealtime.instances).toHaveLength(2));
     expect(controller.getSnapshot().phase).toBe("connecting");
     expect(controller.getSnapshot().statusMessage).toContain("兼容模式");
     expect(fakeRealtime.instances).toHaveLength(2);
     expect(fakeRealtime.instances[1]?.authMode).toBe("query");
+    // 降级重连必须重新签发 ticket，不能复用设备 token 或上一张已消费的 ticket。
+    expect(fakeRealtime.instances[1]?.credential).toBe("test-ticket");
+    expect(fakeClient.realtimeTicket).toHaveBeenCalledTimes(1);
   });
 });

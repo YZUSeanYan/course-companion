@@ -65,6 +65,8 @@ fun CourseDetailScreen(
     message: String?,
     onImportMaterial: () -> Unit,
     onAnalyzeMaterial: (Long) -> Unit,
+    onRestoreMaterialPreview: (Long) -> Unit,
+    onPickMaterialOriginal: (Long) -> Unit,
     onImportGlossary: () -> Unit,
     onExport: () -> Unit,
     onOpenCategory: (String) -> Unit,
@@ -201,7 +203,17 @@ fun CourseDetailScreen(
                                 runCatching { Json.decodeFromString(DocumentAssetDto.serializer(), raw) }.getOrNull()
                             }
                             if (asset != null) {
-                                DocumentPagePreview(asset, onLoadPageImage)
+                                DocumentPagePreview(
+                                    asset = asset,
+                                    onLoadImage = onLoadPageImage,
+                                    restoreEnabled = !isAnalyzing && !isImporting,
+                                    onRestoreFromOriginal = if (material.originalRelativePath != null) {
+                                        ({ onRestoreMaterialPreview(material.id) })
+                                    } else {
+                                        null
+                                    },
+                                    onPickOriginalFile = { onPickMaterialOriginal(material.id) },
+                                )
                             }
                         }
                     }

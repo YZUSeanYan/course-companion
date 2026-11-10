@@ -16,7 +16,8 @@ export function isIOS(userAgent: string): boolean {
 /**
  * 这类环境经常丢弃或拒绝 `new WebSocket(url, ["bearer", token])` 的
  * Sec-WebSocket-Protocol，导致握手在 CONNECTING 里失败或一直挂起。
- * 网页版应改为把 token 放在 query `access_token`、不带子协议。
+ * 网页版应改为把一次性 ticket 放在 query `ticket`、不带子协议：
+ * 设备 token 放 URL 会被写进网关和反代的访问日志。
  */
 export function shouldUseQueryWebSocketAuth(userAgent: string): boolean {
   return isWeChatBrowser(userAgent);

@@ -80,6 +80,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 - `POST /v2/lecsync/audio/transcriptions` 同步转写；`/audio/jobs` 上传/任务/状态/分页/取消/删除，`/audio/jobs/url` 公网音频链接。音频大小、时长、格式与实际 usage 由服务端核验。
 - `POST /v2/lecsync/voice-typing` 和 `/voice-typing/ws`；不可重放的最终文本及时保存。
 - `/v2/lecsync/realtime` 自有 WebSocket 代理，支持语言提示、单语言对双向翻译、说话人、术语/背景、AI 润色、实时纪要、区域、可选存储和实际用量事件。
+- `POST /v2/lecsync/realtime/ticket` 为浏览器签发一次性 WebSocket 凭据：`expiresIn=60` 秒、用后即失效，数据库只存 HMAC 摘要（`ws_tickets`，随 `cleanup_old_metrics` 清理）。因 WKWebView 会丢子协议，网页版在微信环境用 `ws://.../realtime?ticket=<ticket>` 建连；长期设备令牌放在 URL 会被访问日志留存，网关对 `?access_token=` 一律回 4401。
 - `/v2/lecsync/recordings/{id}` 查看/删除，`.../audio`、`.../transcript` 经网关下载。未开启 30 天存储时不提供这些操作。
 - `/admin/lecsync/webhooks/*` 使用独立 `LECSYNC_ADMIN_TOKEN`，仅服务端管理。入站 `/v2/lecsync/webhooks/events` 验证 HMAC、时间窗和去重；secret 由 `TOKEN_PEPPER` 派生密钥加密保存。
 

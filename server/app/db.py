@@ -275,6 +275,15 @@ class Database:
                     owner_key TEXT NOT NULL,
                     PRIMARY KEY (document_id, owner_key)
                 );
+                CREATE TABLE IF NOT EXISTS ws_tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                    ticket_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ws_tickets_expires ON ws_tickets(expires_at);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(lecsync_tasks)")}
@@ -703,6 +712,61 @@ class Database:
                 (document_id, owner_key),
             ).fetchone()
         return row is not None
+
+    def create_ws_ticket(self, device_id: str, ticket_hash: str, ttl_seconds: int = 60) -> None:
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat()
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM ws_tickets WHERE expires_at <= ? OR consumed_at IS NOT NULL",
+                (now.isoformat(),),
+            )
+            connection.execute(
+                "INSERT INTO ws_tickets(device_id, ticket_hash, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?)",
+                (device_id, ticket_hash, now.isoformat(), expires_at),
+            )
+
+    def consume_ws_ticket(self, ticket_hash: str) -> tuple[str, str | None]:
+        """Atomically consume a short-lived browser WebSocket ticket."""
+        now = self._now()
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM ws_tickets WHERE ticket_hash = ?",
+                (ticket_hash,),
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return "not_found", None
+            if row["consumed_at"] is not None:
+                connection.commit()
+                return "consumed", None
+            if str(row["expires_at"]) <= now:
+                connection.commit()
+                return "expired", None
+            cursor = connection.execute(
+                "UPDATE ws_tickets SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+                (now, row["id"]),
+            )
+            if cursor.rowcount != 1:
+                connection.commit()
+                return "consumed", None
+            connection.commit()
+            return "ok", str(row["device_id"])
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def purge_ws_tickets(self) -> int:
+        with self.connect() as connection:
+            return connection.execute(
+                "DELETE FROM ws_tickets WHERE expires_at <= ? OR consumed_at IS NOT NULL",
+                (self._now(),),
+            ).rowcount
 
     def reserve_document(
         self, device_id: str, daily_quota: int, account_id: str | None = None
@@ -1513,12 +1577,14 @@ class Database:
         requests = self.purge_api_requests(request_days)
         codes = self.purge_expired_codes(code_days)
         orphans = self.purge_orphan_sync_records()
+        tickets = self.purge_ws_tickets()
         return {
             "anonymousDevices": devices["devices"],
             "apiRequests": requests,
             "smsCodes": codes["smsCodes"],
             "activationCodes": codes["activationCodes"],
             "orphanSyncRecords": orphans,
+            "wsTickets": tickets,
         }
 
     def record_api_request(

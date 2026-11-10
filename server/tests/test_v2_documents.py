@@ -163,3 +163,60 @@ def test_document_access_failure_releases_document_quota(settings, monkeypatch, 
         owner["accountId"], client.app.state.db.today()
     )
     assert usage["documents"] == 0
+
+
+def test_same_document_can_be_claimed_by_multiple_accounts(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    first = register(client)
+    second = register(client)
+    first_headers = {"Authorization": f"Bearer {first['token']}"}
+    second_headers = {"Authorization": f"Bearer {second['token']}"}
+    first_asset = _upload_lecture(client, first_headers, source)
+    second_asset = _upload_lecture(client, second_headers, source)
+    assert second_asset["documentId"] == first_asset["documentId"]
+
+    filename = first_asset["pages"][0]["imageRelativePath"].rsplit("/", 1)[-1]
+    page_url = f"/v2/documents/{first_asset['documentId']}/pages/{filename}"
+    assert client.get(page_url, headers=first_headers).status_code == 200
+    assert client.get(page_url, headers=second_headers).status_code == 200
+    assert client.get(page_url, headers=auth_headers(client)).status_code == 404
+
+    with client.app.state.db.connect() as connection:
+        owners = connection.execute(
+            "SELECT owner_key FROM document_access WHERE document_id = ?",
+            (first_asset["documentId"],),
+        ).fetchall()
+    assert {row["owner_key"] for row in owners} == {
+        f"account:{first['accountId']}",
+        f"account:{second['accountId']}",
+    }
+
+
+def test_reupload_restores_access_to_legacy_document(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCUMENT_STORAGE_ROOT", str(tmp_path / "assets"))
+    source = tmp_path / "lecture.pdf"
+    _write_lecture_pdf(source)
+
+    client = make_client(settings, lambda request: None)
+    owner = register(client)
+    headers = {"Authorization": f"Bearer {owner['token']}"}
+    asset = _upload_lecture(client, headers, source)
+    filename = asset["pages"][0]["imageRelativePath"].rsplit("/", 1)[-1]
+    page_url = f"/v2/documents/{asset['documentId']}/pages/{filename}"
+    with client.app.state.db.connect() as connection:
+        connection.execute(
+            "DELETE FROM document_access WHERE document_id = ?",
+            (asset["documentId"],),
+        )
+    assert client.get(page_url, headers=headers).status_code == 404
+
+    restored = _upload_lecture(client, headers, source)
+
+    assert restored["documentId"] == asset["documentId"]
+    image = client.get(page_url, headers=headers)
+    assert image.status_code == 200, image.text
+    assert image.content.startswith(b"\xff\xd8")
