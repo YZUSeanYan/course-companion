@@ -7,8 +7,9 @@ export const CURRENT_RELEASE = {
   productName: '知习',
   version: '2.0.11',
   channel: '正式版',
-  // 本次沿用原证书签名，安装包由官网提供；旧版 Gitee 链接保持不变。
-  apkUrl: 'https://shuike.seanyan.store/downloads/zhixi-v2.0.11.apk',
+  // 默认走 Gitee 分发；备用地址直连官网，不经过加速重定向。
+  apkUrl: 'https://gitee.com/seanyan-dev/zhixi-apk/releases/download/v2.0.11/zhixi-v2.0.11.apk',
+  backupApkUrl: 'https://shuike.seanyan.store/downloads/backup/zhixi-v2.0.11.apk',
   minAndroid: 'Android 10（API 29）及以上',
   minAndroidShort: 'Android 10+',
   abi: 'arm64',
