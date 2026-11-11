@@ -11,7 +11,8 @@ const LEGACY_COUNT_URL = '/api/downloads/count'
 const LEGACY_INCREMENT_URL = '/api/downloads/increment'
 
 const STORES = [
-  { name: '知习官网直链', status: `v${CURRENT_RELEASE.version} ${CURRENT_RELEASE.channel}`, live: true },
+  { name: 'Gitee 加速下载', status: `v${CURRENT_RELEASE.version} ${CURRENT_RELEASE.channel}`, live: true },
+  { name: '官网备用直链', status: '同一签名安装包', live: true },
   { name: '小米应用商店', status: '审核筹备中', live: false },
   { name: '华为应用市场', status: '计划中', live: false },
 ]
@@ -100,9 +101,16 @@ export default function Download() {
                   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16" />
                   </svg>
-                  下载知习 v{CURRENT_RELEASE.version}
+                  Gitee 加速下载 v{CURRENT_RELEASE.version}
                 </a>
-                <p className="tiny mt-4">安装包需在系统设置中允许「安装未知来源应用」；SHA-256 见右侧安装须知。</p>
+                <a
+                  className="btn btn--ghost btn--block mt-3"
+                  href={CURRENT_RELEASE.backupApkUrl}
+                  download={`zhixi-v${CURRENT_RELEASE.version}.apk`}
+                >
+                  官网备用下载（速度较慢）
+                </a>
+                <p className="tiny mt-4">默认由 Gitee 分发；两条线路提供同一签名安装包。若加速线路不可用，请用官网备用下载。安装需允许「安装未知来源应用」；SHA-256 见右侧安装须知。</p>
                 <div className="notice notice--warn mt-4">
                   <strong>首次离线听课前：</strong>release 版不内置离线识别模型，请先联网进入「设置」下载模型；
                   也可以主动开启云端听课。
@@ -152,7 +160,7 @@ export default function Download() {
                 ))}
               </div>
               <p className="small mt-5">
-                官网当前提供知习 v{CURRENT_RELEASE.version} {CURRENT_RELEASE.channel} APK 直链。
+                官网当前提供知习 v{CURRENT_RELEASE.version} {CURRENT_RELEASE.channel}，默认使用 Gitee 加速下载，并保留官网备用线路。
                 应用商店仍在筹备；前代「{LEGACY_RELEASE.productName}」作为独立旧版本保留，不与知习新版混计。
               </p>
             </Reveal>

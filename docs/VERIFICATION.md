@@ -326,11 +326,23 @@
 - 本轮未做真实 iOS/Android 微信、Android arm64 真机、新 APK 真机安装/升级、生产付费 ASR 或真实课堂检查；完整讲义恢复文件选择端到端仍未验证。备份恢复演练、非回环代理/限流与安全回退演练未提供完成证据，继续保留待验收状态。
 - 公网完整 APK 下载与官网切换均已完成，不再列为 pending；部署、完整性与负向冒烟通过不等同于所有功能或真实课堂质量通过。
 
+## APK 下载分流加速修复（2026-11-11）
+
+- **问题**：2.0.11 首发走官网服务器直链，50,863,795 字节整包下载耗时 125.1 秒，未沿用旧版 Gitee 分发，导致官网带宽成为瓶颈。文件完整性通过不代表下载体验达标。
+- **修复与授权**：用户确认 Gitee 分流、默认下载切换、旧链接跳转和源站备用；另明确批准本次受控工具使用本机既有 Gitee 凭据认证。工具只向 Gitee API 使用凭据，不输出到对话/日志/命令参数或提交仓库；不运行会删除附件的旧脚本，不改变长期权限规则。
+- **Gitee**：向 `seanyan-dev/zhixi-apk` 新增 `v2.0.11` 发行附件，release ID `1298912`、attachment ID `3667001`；沿用原签名 APK，不重新构建、签名或修改版本，未删除旧附件。
+- **完整性与速度**：公开 Gitee 下载最终落到 `foruda.gitee.com`，HTTP 200、50,863,795 字节、SHA-256 `f1794c85bcbaa28805a8b7e1603095e21e15fffd9222df2fa34bfd720d2fd866`；实测 **24.58 秒、2.07 MB/s**，相对先前 125.1 秒约快 **5.09 倍**。这是同机不同时刻的单次观测，不是所有网络或持续性能保证。
+- **线上线路**：官网默认使用 Gitee；旧 `/downloads/zhixi-v2.0.11.apk` 返回 302 到同一 Gitee URL，设置 no-store；独立 `/downloads/backup/zhixi-v2.0.11.apk` 返回 200、长度正确、不含 Location，alias 到原 APK，备用线路不经过 Gitee。
+- **官网**：发布 `index-BVvqDuTC.js`，保留旧资源、模型、下载文件；改前配置和被覆盖静态文件备份到 `/root/zhixi-gitee-acceleration-20261111/backup`。nginx 配置检查后 reload，网关与后台未改。
+- **验证**：`npm run build` 和 17 文件产物扫描通过；公网旧链302目标、备用HEAD200/长度、线上bundle双URL核对通过；浏览器DOM确认“Gitee 加速下载”与“官网备用下载（速度较慢）”及相应链接。备用文件哈希在服务器上复核，与本次Gitee全量下载一致；本轮未重复全量下载备用路径。
+- **检查边界**：修改的 `Download.tsx` 与 `release.ts` 定向 ESLint 通过。首次 lint 指令因工作目录未匹配找不到文件；随后 npm lint 脚本附带 `.` 扫描全站，报出 10 个既有模板错误（均不在本次修改文件），最后在 site 目录直接执行定向 ESLint 成功；不声称全站 lint 通过。
+- **失败保留**：Git fetch 首两次连接重置，之后以 GitHub API 核对 main 与本地基线均为 `f0439a1` 再工作。Gitee 缺失 tag 查询返回200+null，初次误按对象解析失败；修复判断后创建/上传成功，失败阶段未写入附件。其他既有真机/课堂未验收项不因此变为通过。
+
 ## 产物（截至 2026-11-11）
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
 - 当前已发布并完成公网完整下载校验的 Release：**V2.0.11，`versionCode=13`，50,863,795 字节**，SHA-256 `f1794c85bcbaa28805a8b7e1603095e21e15fffd9222df2fa34bfd720d2fd866`；包名及证书延续归档公开 V2.0.9，zipalign / apksigner 通过。
 - 历史公开 Release V2.0.9：`versionCode=11`，50,847,411 字节，SHA-256 `ED9F4207A09563113C75BC3F60DC0C4568D150AAE91677E88515C79648F96E81`，当时已从 Gitee 完整下载复验。V2.0.10 于 2026-11-03 撤回，不再分发。
-- 官网下载页：`https://shuike.seanyan.store/#/download`；当前 APK：`https://shuike.seanyan.store/downloads/zhixi-v2.0.11.apk`。公网完整下载与页面渲染冒烟均已完成，未进行新包真机安装/升级验收。
+- 官网下载页：`https://shuike.seanyan.store/#/download`；当前默认 APK：`https://gitee.com/seanyan-dev/zhixi-apk/releases/download/v2.0.11/zhixi-v2.0.11.apk`，备用：`https://shuike.seanyan.store/downloads/backup/zhixi-v2.0.11.apk`。旧官网 APK 链接 302 到 Gitee。公网完整下载与双线路页面冒烟已完成，未进行新包真机安装/升级验收。
 - 运营后台：`https://zhixi.seanyan.store/admin/`，管理员密码只保存在服务器 `/opt/zhixi-gateway/.env`（600），不写入仓库、APK 或前端 bundle。
 - Release 默认网关为 `https://zhixi.seanyan.store`，不包含模型权重或 API 密钥；离线模型首次使用前需下载或恢复。

@@ -38,6 +38,7 @@
 - **已合并**：[PR #106](https://github.com/YZUSeanYan/course-companion/pull/106) 最终 head `2119055` 已 Squash merge 为 `a617dfc`，main CI 全部通过。用户在会话中确认审阅完成，不记作 GitHub Review 事件。
 - **已部署**：网关 **R23**（`/opt/zhixi-gateway-20261111-r23`）与网页版 **r32**（`/opt/zhixi-webapp/r32`）。公网健康、ticket 接口/未鉴权 401、旧 App 五字段兼容 schema、网页版 ticket/恢复文案及 WSS 负向鉴权冒烟已核对。
 - **已发布**：**V2.0.11 / versionCode 13** [签名 APK](https://shuike.seanyan.store/downloads/zhixi-v2.0.11.apk) 与[官网](https://shuike.seanyan.store/#/download)。包名/证书延续 V2.0.9，签名与对齐校验、公网完整下载哈希、下载页渲染冒烟通过；不是 App 真机安装验收。
+- **下载加速**：默认使用 [Gitee 分发](https://gitee.com/seanyan-dev/zhixi-apk/releases/download/v2.0.11/zhixi-v2.0.11.apk)，[官网备用下载](https://shuike.seanyan.store/downloads/backup/zhixi-v2.0.11.apk) 独立保留。旧官网 APK 链接已 302 到 Gitee；同一包完整下载实测 24.58 秒、2.07 MB/s，较此前源站 125.1 秒约快 5.1 倍（单次网络观测，不保证所有网络相同速度）。
 - **已备份与脱敏**：一致性 SQLite/文档及原部署配置、官网备份已保存，旧发布保留；日志不含查询串。启动保留策略清理 19 台过期未绑定设备，账号/绑定/任务数量未变；恢复与安全回退演练仍未验证。
 - **授权与边界**：本次生产操作及 APK/官网发布获用户明确的一次性例外批准，不修改 `AGENTS.md` 的长期限制。真实微信、arm64 真机、生产付费 ASR 和真实课堂本轮仍未验收。完整校验和、测试及失败记录见 [验收记录](docs/VERIFICATION.md#2026-11-11-上线进度)，剩余检查见 [上线检查表](docs/ROLLOUT-20261110.md)。
 

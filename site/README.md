@@ -35,6 +35,14 @@ src/lib/release.ts
 
 官网修改至少运行 `npm run build`。当前 UI 模板目录还有已知 ESLint 错误，不能把“全量 lint 通过”写成事实。
 
+## APK 分发线路
+
+- `CURRENT_RELEASE.apkUrl` 默认指向 Gitee 发行附件；`backupApkUrl` 指向官网独立备用直链，两条线路必须是同一签名包、相同 SHA-256。
+- 旧官网 `/downloads/zhixi-v2.0.11.apk` 返回 302 到 Gitee；`/downloads/backup/zhixi-v2.0.11.apk` 直接提供原文件，不再跳转，避免备用线路循环。
+- 切换默认线路前必须完成整包下载哈希和测速，不能只测 HEAD/HTTP 200；镜像尚未上传或校验失败时不得先修改线上按钮。
+- 2026-11-11：Gitee 2.0.11 整包实测 24.58 秒、2.07 MB/s，哈希与官网已发布 APK 一致；此前源站实测 125.1 秒。网络速度会变化，不作固定倍数承诺。
+- 上传只新增发行附件，不删除/替换旧附件；令牌只能在受控工具中使用，不输出、不写入源码/命令参数或 Git。
+
 ## 禁止事项
 
 - 不提交 `node_modules/`、`dist/`、APK、生产服务器配置或密钥。
