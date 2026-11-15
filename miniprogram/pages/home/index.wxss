@@ -1,0 +1,18 @@
+.hero { padding: 36rpx 0 40rpx; }
+.hero .title { font-size: 58rpx; line-height: 1.35; }
+.review-banner { border-radius: 56rpx; }
+.review-number { font-size: 62rpx; font-weight: 700; line-height: 1.4; margin-top: 6rpx; }
+.review-number text { font-size: 26rpx; font-weight: 500; }
+.compact { font-size: 25rpx; padding: 18rpx 22rpx; flex-shrink: 0; }
+.banner-foot { border-top: 1rpx solid #FFD9C2; margin-top: 24rpx; padding-top: 20rpx; font-size: 23rpx; color: #955334; }
+.section-heading { margin: 18rpx 0 12rpx; }
+.section-heading .section-title { margin: 16rpx 0; }
+.empty-symbol { margin: 0 auto 24rpx; width: 90rpx; height: 90rpx; line-height: 90rpx; border-radius: 30rpx; background: #FFF1E8; color: #E04E00; font-size: 44rpx; font-weight: 700; }
+.empty-action { margin: 32rpx 0 10rpx; }
+.course-card { width: 100%; text-align: left; font-weight: 400; }
+.course-mark { width: 88rpx; height: 88rpx; border-radius: 28rpx; background: #FFF1E8; color: #A33A00; line-height: 88rpx; text-align: center; font-size: 36rpx; flex-shrink: 0; }
+.course-info { flex: 1; min-width: 0; }
+.course-title { font-size: 32rpx; font-weight: 600; word-break: break-all; }
+.chevron { color: #A19A95; font-size: 42rpx; }
+.course-foot { display: flex; flex-wrap: wrap; gap: 24rpx; padding-top: 28rpx; font-size: 23rpx; color: #6F6F6F; }
+.local-note { text-align: center; color: #6F6F6F; font-size: 21rpx; padding: 20rpx 0; }

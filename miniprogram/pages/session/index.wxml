@@ -1,0 +1,72 @@
+<view class="page session-page {{reducedMotion ? 'reduced-motion' : ''}}">
+  <view wx:if="{{loading}}" class="card empty">
+    <view class="empty-title">正在读取课堂</view>
+    <text class="muted">资料仅保存在本机。</text>
+  </view>
+  <view wx:elif="{{errorMessage}}" class="card empty">
+    <view class="error">{{errorMessage}}</view>
+    <button class="button-secondary" bindtap="refresh" hover-class="none">重新读取</button>
+  </view>
+  <view wx:elif="{{!session}}" class="card empty">
+    <view class="eyebrow">SESSION</view>
+    <view class="empty-title">课堂不存在或已归档</view>
+    <view class="muted empty-note">课堂或所属课程已归档时，请先在「我的」的回收站恢复。</view>
+    <button class="button-secondary" bindtap="goHome" hover-class="none">返回课程列表</button>
+  </view>
+  <block wx:else>
+    <view class="session-heading">
+      <view class="eyebrow">SESSION / 课堂记录</view>
+      <view class="title session-title">{{session.title}}</view>
+      <button class="button-ghost course-link" bindtap="openCourse" hover-class="none">{{course.name}} →</button>
+      <view class="subtitle">{{dateLabel}}记录 · {{session.transcript.length}} 字原文</view>
+    </view>
+
+    <view class="card card-accent source-facts">
+      <text class="badge">手动整理（不是AI生成）</text>
+      <view class="source-description">原文来自你手动输入或粘贴的课堂文字。疑问、解答与卡片由你整理，请结合原文核对。</view>
+      <text class="muted">仅保存在本机 · 不录音 · 不上传</text>
+    </view>
+
+    <view class="section-title">接下来，整理一下</view>
+    <view class="session-actions">
+      <button class="button-primary" bindtap="addDoubt" disabled="{{archiving}}" hover-class="none">标记疑问</button>
+      <button class="button-secondary" bindtap="addCard" disabled="{{archiving}}" hover-class="none">手动做卡片</button>
+    </view>
+    <view class="muted action-hint">卡片会关联到本节课堂，便于复习时核对来源。</view>
+
+    <view class="spread section-heading"><view class="section-title">我的疑问</view><text class="pill">{{resolvedCount}} / {{doubts.length}} 已解答</text></view>
+    <view wx:if="{{!doubts.length}}" class="card empty">
+      <view class="empty-title">把没想明白的地方记下来</view>
+      <text class="muted">长按下方原文复制片段，点「标记疑问」记录你的问题，再回来补充解答。</text>
+    </view>
+    <view wx:for="{{doubts}}" wx:key="id" class="card doubt-card">
+      <view class="spread"><text class="badge">{{item.hasAnswer ? '已手动解答' : '待解答'}}</text><text class="muted">{{item.dateLabel}}</text></view>
+      <block wx:if="{{item.sourceText}}">
+        <view class="body-label">原文片段</view>
+        <text class="source-quote" selectable>{{item.sourceText}}</text>
+      </block>
+      <view class="body-label">我的疑问</view>
+      <text class="content-text" selectable>{{item.note || '已标记原文片段，尚未补充疑问说明。'}}</text>
+      <block wx:if="{{item.hasAnswer}}">
+        <view class="divider"></view>
+        <view class="body-label">我的解答 · 手动填写</view>
+        <text class="content-text" selectable>{{item.answer}}</text>
+      </block>
+      <view class="doubt-actions">
+        <button class="button-secondary" data-id="{{item.id}}" bindtap="resolveDoubt" disabled="{{archiving}}" hover-class="none">{{item.hasAnswer ? '修改解答' : '填写解答'}}</button>
+        <button class="button-ghost" data-id="{{item.id}}" bindtap="archiveDoubt" disabled="{{archiving}}" hover-class="none">归档疑问</button>
+      </view>
+    </view>
+
+    <view class="spread section-heading"><view class="section-title">课堂原文</view><text class="pill">完整文字</text></view>
+    <view class="card transcript-panel">
+      <view class="muted transcript-hint">长按文字可选择和复制，不作自动翻译或润色。</view>
+      <text class="transcript-text" selectable>{{session.transcript}}</text>
+    </view>
+
+    <view class="archive-section">
+      <text class="muted">归档不会永久删除资料，可在回收站恢复。</text>
+      <button class="button-ghost" bindtap="archiveSession" disabled="{{archiving}}" hover-class="none">归档课堂</button>
+    </view>
+  </block>
+</view>

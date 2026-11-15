@@ -1,0 +1,24 @@
+.editor-page { padding-bottom: calc(48rpx + env(safe-area-inset-bottom)); }
+.editor-heading { margin-bottom: 30rpx; }
+.editor-context, .form-panel { border-radius: 56rpx; }
+.context-title { font-size: 29rpx; font-weight: 600; margin: 20rpx 0 8rpx; word-break: break-all; }
+.context-detail { word-break: break-all; }
+.form-panel .label:first-child { margin-top: 0; }
+.label { font-size: 28rpx; }
+.required-label, .optional-label { margin-left: 10rpx; font-size: 22rpx; font-weight: 400; color: #6F6F6F; }
+.required-label { color: #A33A00; }
+.field-hint { color: #6F6F6F; font-size: 24rpx; line-height: 1.7; margin: -2rpx 0 16rpx; }
+.field-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 16rpx; margin-top: 10rpx; color: #6F6F6F; font-size: 22rpx; }
+.field-meta > text:last-child { flex-shrink: 0; }
+.field-error { color: #A62228; }
+.field-invalid { border-color: #A62228; background: #FFF9F9; }
+.textarea { padding: 24rpx; }
+.transcript-input { height: 520rpx; }
+.answer-input { height: 400rpx; }
+.save-notice { color: #6F6F6F; font-size: 24rpx; line-height: 1.8; margin: 28rpx 4rpx; }
+.cancel-button { margin-top: 12rpx; }
+.source-heading { color: #6F6F6F; font-size: 23rpx; margin: 24rpx 0 12rpx; }
+.source-heading:first-child { margin-top: 0; }
+.source-quote, .context-text { display: block; font-size: 26rpx; line-height: 1.85; white-space: pre-wrap; word-break: break-all; }
+.source-quote { border-left: 5rpx solid #FF670D; background: #F3F2F1; border-radius: 0 20rpx 20rpx 0; padding: 20rpx 24rpx; }
+.saved-note { margin-bottom: 28rpx; }

@@ -1,0 +1,100 @@
+<view class="page editor-page {{reducedMotion ? 'reduced-motion' : ''}}">
+  <view class="editor-heading">
+    <view class="eyebrow">CREATE / 手动整理</view>
+    <view class="title">{{title}}</view>
+    <view class="subtitle">{{caption}}</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card empty">
+    <view class="empty-title">正在读取资料</view>
+    <text class="muted">资料仅保存在本机。</text>
+  </view>
+  <view wx:elif="{{!ready}}" class="card empty">
+    <view class="error">{{errorMessage}}</view>
+    <button wx:if="{{kind}}" class="button-secondary" bindtap="refreshContext" hover-class="none">重新读取</button>
+    <button class="button-ghost" bindtap="cancel" hover-class="none">返回</button>
+  </view>
+  <view wx:elif="{{saved}}" class="card card-accent empty">
+    <view class="empty-title">已保存到本机</view>
+    <view class="muted saved-note">资料已保存，无需重复提交。</view>
+    <button class="button-primary" bindtap="finish" hover-class="none">查看已保存内容</button>
+  </view>
+  <block wx:else>
+    <view class="card card-accent editor-context">
+      <text class="badge">手动整理（不是AI生成）</text>
+      <view class="context-title">{{contextLabel}}</view>
+      <view class="muted context-detail">{{contextDetail}}</view>
+    </view>
+
+    <view wx:if="{{kind === 'answer'}}" class="card answer-source">
+      <view class="source-heading">原文片段</view>
+      <text class="source-quote" selectable>{{sourceText}}</text>
+      <block wx:if="{{doubtNote}}">
+        <view class="source-heading">我的疑问</view>
+        <text class="context-text" selectable>{{doubtNote}}</text>
+      </block>
+    </view>
+
+    <form bindsubmit="onSubmit">
+      <view wx:if="{{formError}}" class="error">{{formError}}</view>
+      <view class="card form-panel">
+        <block wx:if="{{kind === 'course'}}">
+          <label class="label" for="course-name">课程名称 <text class="required-label">必填</text></label>
+          <input id="course-name" class="field {{errors.name ? 'field-invalid' : ''}}" name="name" data-field="name" value="{{values.name}}" bindinput="onInput" maxlength="80" placeholder="例如：工程力学" disabled="{{submitting}}" aria-label="课程名称，必填，最多80字" />
+          <view class="field-meta"><text class="field-error">{{errors.name}}</text><text>{{values.name.length}} / 80</text></view>
+
+          <label class="label" for="course-teacher">教师 <text class="optional-label">选填</text></label>
+          <input id="course-teacher" class="field {{errors.teacher ? 'field-invalid' : ''}}" name="teacher" data-field="teacher" value="{{values.teacher}}" bindinput="onInput" maxlength="80" placeholder="填写教师或讲师" disabled="{{submitting}}" aria-label="教师，选填，最多80字" />
+          <view class="field-meta"><text class="field-error">{{errors.teacher}}</text><text>{{values.teacher.length}} / 80</text></view>
+
+          <label class="label" for="course-language">授课语言 <text class="optional-label">选填</text></label>
+          <input id="course-language" class="field {{errors.language ? 'field-invalid' : ''}}" name="language" data-field="language" value="{{values.language}}" bindinput="onInput" maxlength="80" placeholder="例如：中英双语" disabled="{{submitting}}" aria-label="授课语言，选填，最多80字" />
+          <view class="field-meta"><text class="field-error">{{errors.language}}</text><text>{{values.language.length}} / 80</text></view>
+        </block>
+
+        <block wx:elif="{{kind === 'session'}}">
+          <label class="label" for="session-title">课堂标题 <text class="required-label">必填</text></label>
+          <input id="session-title" class="field {{errors.title ? 'field-invalid' : ''}}" name="title" data-field="title" value="{{values.title}}" bindinput="onInput" maxlength="120" placeholder="例如：第 1 讲 · 认识基本概念" disabled="{{submitting}}" aria-label="课堂标题，必填，最多120字" />
+          <view class="field-meta"><text class="field-error">{{errors.title}}</text><text>{{values.title.length}} / 120</text></view>
+
+          <label class="label" for="session-transcript">课堂原文 <text class="required-label">必填</text></label>
+          <view class="field-hint">手动粘贴或输入文字。保留完整原文，之后可随时回看。</view>
+          <textarea id="session-transcript" class="textarea transcript-input {{errors.transcript ? 'field-invalid' : ''}}" name="transcript" data-field="transcript" value="{{values.transcript}}" bindinput="onInput" maxlength="30000" placeholder="在这里记录课堂文字……" disabled="{{submitting}}" cursor-spacing="36" show-confirm-bar="{{true}}" aria-label="课堂原文，必填，最多30000字" />
+          <view class="field-meta"><text class="field-error">{{errors.transcript}}</text><text>{{values.transcript.length}} / 30000</text></view>
+        </block>
+
+        <block wx:elif="{{kind === 'doubt'}}">
+          <label class="label" for="doubt-source">原文片段 <text class="required-label">必填</text></label>
+          <view class="field-hint">从课堂原文中复制相关片段，便于回看与核对。</view>
+          <textarea id="doubt-source" class="textarea {{errors.sourceText ? 'field-invalid' : ''}}" name="sourceText" data-field="sourceText" value="{{values.sourceText}}" bindinput="onInput" maxlength="2000" placeholder="粘贴你想弄明白的原文片段……" disabled="{{submitting}}" cursor-spacing="36" show-confirm-bar="{{true}}" aria-label="原文片段，必填，最多2000字" />
+          <view class="field-meta"><text class="field-error">{{errors.sourceText}}</text><text>{{values.sourceText.length}} / 2000</text></view>
+
+          <label class="label" for="doubt-note">我的疑问 <text class="optional-label">选填</text></label>
+          <textarea id="doubt-note" class="textarea {{errors.note ? 'field-invalid' : ''}}" name="note" data-field="note" value="{{values.note}}" bindinput="onInput" maxlength="2000" placeholder="哪一步还不理解？你想追问什么？" disabled="{{submitting}}" cursor-spacing="36" show-confirm-bar="{{true}}" aria-label="我的疑问，选填，最多2000字" />
+          <view class="field-meta"><text class="field-error">{{errors.note}}</text><text>{{values.note.length}} / 2000</text></view>
+        </block>
+
+        <block wx:elif="{{kind === 'card'}}">
+          <label class="label" for="card-front">卡片正面 · 问题 <text class="required-label">必填</text></label>
+          <textarea id="card-front" class="textarea {{errors.front ? 'field-invalid' : ''}}" name="front" data-field="front" value="{{values.front}}" bindinput="onInput" maxlength="2000" placeholder="写一个清晰的问题、概念或待回忆的知识点……" disabled="{{submitting}}" cursor-spacing="36" show-confirm-bar="{{true}}" aria-label="卡片正面，必填，最多2000字" />
+          <view class="field-meta"><text class="field-error">{{errors.front}}</text><text>{{values.front.length}} / 2000</text></view>
+
+          <label class="label" for="card-back">卡片背面 · 答案 <text class="required-label">必填</text></label>
+          <textarea id="card-back" class="textarea {{errors.back ? 'field-invalid' : ''}}" name="back" data-field="back" value="{{values.back}}" bindinput="onInput" maxlength="4000" placeholder="用自己的话写下答案，并核对来源……" disabled="{{submitting}}" cursor-spacing="36" show-confirm-bar="{{true}}" aria-label="卡片背面，必填，最多4000字" />
+          <view class="field-meta"><text class="field-error">{{errors.back}}</text><text>{{values.back.length}} / 4000</text></view>
+        </block>
+
+        <block wx:elif="{{kind === 'answer'}}">
+          <label class="label" for="doubt-answer">我的解答 <text class="required-label">必填</text></label>
+          <view class="field-hint">这是你的手动解答，不代表自动核验结果。保存后可继续修改。</view>
+          <textarea id="doubt-answer" class="textarea answer-input {{errors.answer ? 'field-invalid' : ''}}" name="answer" data-field="answer" value="{{values.answer}}" bindinput="onInput" maxlength="4000" placeholder="结合原文和自己的理解，写下解答……" disabled="{{submitting}}" cursor-spacing="36" show-confirm-bar="{{true}}" aria-label="我的解答，必填，最多4000字" />
+          <view class="field-meta"><text class="field-error">{{errors.answer}}</text><text>{{values.answer.length}} / 4000</text></view>
+        </block>
+      </view>
+
+      <view class="save-notice">仅保存在本机，不上传内容。离开前请保存；清理小程序数据前，请先到「我的」导出备份。</view>
+      <button class="button-primary" form-type="submit" disabled="{{submitting}}" loading="{{submitting}}" hover-class="none">{{submitting ? '正在保存' : (kind === 'answer' ? '保存解答' : '保存到本机')}}</button>
+      <button class="button-ghost cancel-button" bindtap="cancel" disabled="{{submitting}}" hover-class="none">取消</button>
+    </form>
+  </block>
+</view>

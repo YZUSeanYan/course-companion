@@ -1,0 +1,24 @@
+{
+  "description": "知习 · 微信小程序本地学习版（开发中，非已发布产品）",
+  "miniprogramRoot": "./",
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "zhixi-miniapp",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "minifyWXSS": true,
+    "minifyWXML": true
+  },
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "tests" },
+      { "type": "folder", "value": "tools" },
+      { "type": "file", "value": "README.md" },
+      { "type": "file", "value": "package.json" }
+    ]
+  }
+}

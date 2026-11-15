@@ -1,0 +1,20 @@
+<view class="page tab-page {{reduceMotion ? 'reduced-motion' : ''}}">
+  <text class="eyebrow">YOUR SPACE / 我的学习空间</text>
+  <view class="title">知识在这里，{{'\n'}}选择在你手里。</view>
+  <view class="subtitle">无需登录。当前版本仅保存本机学习资料，{{'\n'}}不录音，不调用 AI，不自动上传。</view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view class="section-title">使用偏好</view>
+  <view class="card spread"><view><view class="setting-title">减少动态效果</view><view class="muted">关闭页面入场、按压与翻卡过渡</view></view><switch checked="{{reduceMotion}}" color="#E04E00" bindchange="toggleMotion" aria-label="减少动态效果" /></view>
+  <view class="section-title">数据由你掌握</view>
+  <view class="card">
+    <view class="setting-title">备份与恢复</view>
+    <view class="muted note">本地缓存不是永久保管箱。清理微信数据、删除小程序或更换设备可能丢失资料，请定期导出。首版数据容量有限，不适合存放整本教材。</view>
+    <view class="stack"><button class="button-primary" bindtap="exportBackup" disabled="{{busy || !!error}}" hover-class="button-hover">生成 JSON 备份</button><button wx:if="{{backupReady}}" class="button-secondary" bindtap="shareBackup" disabled="{{busy}}">选择微信会话保存备份</button><button class="button-secondary" bindtap="importBackup" disabled="{{busy || !!error}}" hover-class="button-hover">从微信会话导入备份</button></view>
+    <view class="muted note">备份未加密，包含回收站。导出文件可能保留在微信沙箱中；本版无自动同步或账号注销入口，因为未创建账号。</view>
+  </view>
+  <view class="spread"><text class="section-title">回收站</text><text class="pill">{{trash.length}} 项</text></view>
+  <view wx:if="{{!trash.length}}" class="card muted">回收站是空的。移除条目时不会立即永久删除。</view>
+  <view wx:for="{{trash}}" wx:key="id" class="card trash-row"><view class="trash-info"><text class="badge">{{item.label}}</text><view class="trash-title">{{item.title}}</view><text class="muted">{{item.date}} 移入</text></view><button class="button-secondary" data-id="{{item.id}}" data-kind="{{item.kind}}" bindtap="restore">恢复</button></view>
+  <button class="card policy-button spread" bindtap="openPrivacy"><text>隐私说明与能力边界</text><text>›</text></button>
+  <view class="version">知习 · {{version}}{{'\n'}}开发首版，尚未通过正式上架审核</view>
+</view>

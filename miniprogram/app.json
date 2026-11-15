@@ -1,0 +1,30 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/review/index",
+    "pages/settings/index",
+    "pages/course/index",
+    "pages/session/index",
+    "pages/editor/index",
+    "pages/privacy/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "知习",
+    "navigationBarBackgroundColor": "#FCFCFC",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#FCFCFC"
+  },
+  "style": "v2",
+  "tabBar": {
+    "custom": true,
+    "color": "#6F6F6F",
+    "selectedColor": "#E04E00",
+    "backgroundColor": "#FFFFFF",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "学习" },
+      { "pagePath": "pages/review/index", "text": "复习" },
+      { "pagePath": "pages/settings/index", "text": "我的" }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

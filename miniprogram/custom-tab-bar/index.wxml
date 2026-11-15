@@ -1,0 +1,8 @@
+<view class="dock-wrap">
+  <view class="dock">
+    <button wx:for="{{tabs}}" wx:key="path" class="tab {{selected === index ? 'active' : ''}}" data-index="{{index}}" bindtap="switchTab" aria-label="{{item.label}}{{selected === index ? '，已选中' : ''}}" hover-class="pressed">
+      <view class="icon icon-{{item.icon}}"><view></view></view>
+      <text>{{item.label}}</text>
+    </button>
+  </view>
+</view>

@@ -1,0 +1,28 @@
+<view class="page tab-page {{reduceMotion ? 'reduced-motion' : ''}}">
+  <view class="spread"><text class="eyebrow">知习 / ZHIXI</text><text class="pill">本地学习版</text></view>
+  <view class="hero">
+    <view class="title">让每一次学习，{{'\n'}}都留下收获。</view>
+    <view class="subtitle">整理课堂与讲义，把疑问变成理解，{{'\n'}}把知识变成下一次想得起来的答案。</view>
+  </view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view class="card card-accent review-banner">
+    <view class="spread">
+      <view><view class="muted">今天，给记忆一点时间</view><view class="review-number">{{dueCount}}<text> 张待复习</text></view></view>
+      <button class="button-secondary compact" bindtap="openReview" hover-class="button-hover">去复习 →</button>
+    </view>
+    <view class="banner-foot">{{sessionCount}} 份学习资料 · {{cardCount}} 张复习卡</view>
+  </view>
+  <view class="spread section-heading"><text class="section-title">我的课程</text><button class="button-ghost compact" bindtap="addCourse" hover-class="button-hover">＋ 新建课程</button></view>
+  <view wx:if="{{!courses.length && !error}}" class="card empty">
+    <view class="empty-symbol">知</view>
+    <view class="empty-title">从第一门课程开始</view>
+    <view class="muted">保存一段学习资料，记下一个疑问。{{'\n'}}不用登录，也不用开启麦克风。</view>
+    <button class="button-primary empty-action" bindtap="addCourse" hover-class="button-hover">创建我的第一门课程</button>
+    <button class="button-ghost" bindtap="seedDemo">先看看合成示例</button>
+  </view>
+  <button wx:for="{{courses}}" wx:key="id" class="card course-card" data-id="{{item.id}}" bindtap="openCourse" hover-class="button-hover">
+    <view class="row"><view class="course-mark">{{item.initial}}</view><view class="course-info"><view class="course-title">{{item.name}}</view><view class="muted">{{item.teacher || '自主学习'}} · {{item.language}}</view></view><text class="chevron">›</text></view>
+    <view class="course-foot"><text>{{item.sessionCount}} 份资料</text><text>{{item.cardCount}} 张卡片</text><text>{{item.dateLabel}}</text></view>
+  </button>
+  <view class="local-note">只在本机保存 · 不自动上传 · 未接入 AI</view>
+</view>

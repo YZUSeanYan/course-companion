@@ -1,0 +1,8 @@
+.setting-title { font-size: 30rpx; font-weight: 600; }
+.note { margin: 18rpx 0 26rpx; line-height: 1.85; }
+.trash-row { display: flex; align-items: center; gap: 24rpx; }
+.trash-info { flex: 1; min-width: 0; }
+.trash-title { font-size: 28rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 8rpx 0; }
+.trash-row button { font-size: 24rpx; padding: 18rpx 22rpx; flex-shrink: 0; }
+.policy-button { width: 100%; font-size: 28rpx; font-weight: 500; margin-top: 30rpx; }
+.version { text-align: center; color: #6F6F6F; font-size: 22rpx; padding-top: 20rpx; }
