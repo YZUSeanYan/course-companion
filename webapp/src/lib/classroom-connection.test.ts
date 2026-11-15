@@ -374,4 +374,17 @@ describe("ClassroomController 云端连接相位", () => {
     expect(fakeRealtime.instances[1]?.credential).toBe("test-ticket");
     expect(fakeClient.realtimeTicket).toHaveBeenCalledTimes(1);
   });
+
+  it("降级取 ticket 遇到 403/429 业务错误时直接结束会话，不进入重连退避", async () => {
+    const { ZhixiApiError } = await import("./api/client");
+    const controller = createController();
+    await controller.start(START_OPTIONS);
+    fakeClient.realtimeTicket.mockRejectedValueOnce(new ZhixiApiError("quota exhausted", 429, "quota_exceeded", "audio"));
+
+    fakeRealtime.instances[0]!.fail();
+    await vi.waitFor(() => expect(controller.getSnapshot().phase).toBe("ended"));
+    expect(controller.getSnapshot().statusMessage).toContain("音频额度");
+    expect(fakeRealtime.instances).toHaveLength(1);
+    expect(fakeClient.realtimeTicket).toHaveBeenCalledTimes(1);
+  });
 });

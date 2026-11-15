@@ -207,6 +207,7 @@ export function closeReason(code: number): string | null {
       return "需要激活试用额度后才能云端听课。";
     case 4429:
       return "请求过于频繁，请稍后再试。";
+    case 4012:
     case 4408:
       return "单节课堂时长已达上限，请开始新的一节课。";
     case 4013:

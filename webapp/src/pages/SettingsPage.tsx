@@ -98,7 +98,7 @@ export default function SettingsPage() {
               className="text-input"
               value={modelBase}
               onChange={(event) => setModelBase(event.target.value)}
-              placeholder="https://shuike.seanyan.store/models/zhixi/web/asr-zh-en-v1/"
+              placeholder="https://zhixi.seanyan.store/models/zhixi/web/asr-zh-en-v1/"
             />
             <div className="btn-row">
               <button

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
 import PageHero from '../components/site/PageHero'
 import { CURRENT_RELEASE } from '../lib/release'
@@ -213,7 +214,7 @@ export default function Privacy() {
             <H2 id="contact">十、联系我们</H2>
             <P>
               如对本政策或本应用的隐私实践有任何疑问，可通过
-              <a href="/#/feedback">反馈页面</a>
+              <Link to="/feedback">反馈页面</Link>
               与我们联系。
             </P>
           </div>
@@ -225,9 +226,9 @@ export default function Privacy() {
               <ul className="mt-3 flex flex-col gap-2" style={{ fontSize: 13, fontWeight: 600 }}>
                 {TOC.map((item) => (
                   <li key={item.id}>
-                    <a href={`#${item.id}`} className="hover:text-[var(--brand-deep)]" style={{ color: 'var(--ink-2)' }}>
+                    <Link to={`/privacy#${item.id}`} className="hover:text-[var(--brand-deep)]" style={{ color: 'var(--ink-2)' }}>
                       {item.label}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>

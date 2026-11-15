@@ -447,6 +447,7 @@ class SyncManager private constructor(private val appContext: Context) {
                 }
                 ENTITY_MATERIALS -> {
                     val courseId = resolveParent(ENTITY_COURSES, payload, "courseUid", "courseId") ?: return
+                    val existing = dao.material(id)
                     dao.updateMaterial(
                         id,
                         courseId,
@@ -454,6 +455,7 @@ class SyncManager private constructor(private val appContext: Context) {
                         payload.str("mimeType") ?: "application/octet-stream",
                         payload.int("pageCount") ?: 1,
                         payload.long("importedAtMillis") ?: System.currentTimeMillis(),
+                        payload.str("documentJson") ?: existing?.documentJson,
                     )
                 }
                 ENTITY_ITEMS -> {

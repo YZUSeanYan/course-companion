@@ -395,13 +395,15 @@ export class ZhixiClient {
     return this.requestJson("/v2/documents/analyze", { method: "POST", body: form });
   }
 
-  /** 带鉴权获取文档页面图片并返回 blob URL，供 <img> 使用。 */
+  /** 带鉴权获取文档页面图片并返回 blob URL，供 <img> 使用；401 时与 JSON 请求一样自动重注设备并重试一次。 */
   async fetchDocumentPageBlobUrl(documentId: string, filename: string): Promise<string> {
-    const credential = await this.ensureDevice();
-    const response = await fetch(
-      `${this.baseUrl}/v2/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(filename)}`,
-      { headers: { Authorization: `Bearer ${credential.token}` } },
-    );
+    const url = `${this.baseUrl}/v2/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(filename)}`;
+    let credential = await this.ensureDevice();
+    let response = await fetch(url, { headers: { Authorization: `Bearer ${credential.token}` } });
+    if (response.status === 401) {
+      credential = await this.reRegister();
+      response = await fetch(url, { headers: { Authorization: `Bearer ${credential.token}` } });
+    }
     if (!response.ok) throw await errorFromResponse(response);
     const blob = await response.blob();
     return URL.createObjectURL(blob);

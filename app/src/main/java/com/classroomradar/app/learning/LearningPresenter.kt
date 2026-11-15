@@ -862,9 +862,9 @@ class LearningPresenter(private val appContext: Context) {
             } catch (error: Exception) {
                 "服务检查失败 · ${aiServiceConfig.displayTarget}\n${error.message ?: "未知错误"}"
             }
-        }
-        if (_serviceStatus.value.contains("在线")) {
-            refreshAccount(silent = true)
+            if (_serviceStatus.value.contains("在线")) {
+                refreshAccount(silent = true)
+            }
         }
     }
 

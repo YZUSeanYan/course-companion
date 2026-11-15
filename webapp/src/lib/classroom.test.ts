@@ -13,6 +13,7 @@ describe("shouldReconnectAfterClose", () => {
     expect(shouldReconnectAfterClose({ code: 4403, livedMs: 4200, userStopped: false, attempts: 0 })).toBe(false);
     expect(shouldReconnectAfterClose({ code: 4429, livedMs: 4200, userStopped: false, attempts: 0 })).toBe(false);
     expect(shouldReconnectAfterClose({ code: 4408, livedMs: 14_400_000, userStopped: false, attempts: 0 })).toBe(false);
+    expect(shouldReconnectAfterClose({ code: 4012, livedMs: 14_400_000, userStopped: false, attempts: 0 })).toBe(false);
   });
 
   it("用户主动停止不重连", () => {

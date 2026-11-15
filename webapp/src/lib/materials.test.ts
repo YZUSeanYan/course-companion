@@ -98,4 +98,24 @@ describe("restoreMaterialDocument", () => {
     expect(await db.materials.count()).toBe(0);
     expect(fakeAnalyze).not.toHaveBeenCalled();
   });
+
+  it("跨设备同步来的讲义仅有 documentJson.documentId 时也能恢复并回填顶层 documentId", async () => {
+    const id = await db.materials.add({
+      uid: "android-synced-uid",
+      courseId: 7,
+      title: "第 4 讲.pdf",
+      mimeType: "application/pdf",
+      documentId: null,
+      documentJson: JSON.stringify({ documentId: ASSET.documentId, pages: [] }),
+      pageCount: 1,
+      importedAtMillis: 1_700_000_000_000,
+    });
+    fakeAnalyze.mockResolvedValue(ASSET);
+
+    const file = new File([new Uint8Array([1, 2, 3])], "lecture4.pdf", { type: "application/pdf" });
+    const asset = await restoreMaterialDocument(id, file);
+    expect(asset.documentId).toBe(ASSET.documentId);
+    const updated = await db.materials.get(id);
+    expect(updated?.documentId).toBe(ASSET.documentId);
+  });
 });
