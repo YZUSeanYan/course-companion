@@ -6,6 +6,25 @@ import { zhixi } from "./api/client";
 import type { DocumentAsset } from "./api/types";
 import { db } from "./db/db";
 
+function resolveDocumentId(record: { documentId?: string | null; documentJson?: string | null }): string | null {
+  if (record.documentId && /^[0-9a-f]{24}$/.test(record.documentId)) {
+    return record.documentId;
+  }
+  if (!record.documentJson) return record.documentId ?? null;
+  try {
+    const parsed = JSON.parse(record.documentJson) as { documentId?: unknown; id?: unknown };
+    const candidate =
+      typeof parsed?.documentId === "string"
+        ? parsed.documentId
+        : typeof parsed?.id === "string"
+          ? parsed.id
+          : null;
+    return candidate ?? record.documentId ?? null;
+  } catch {
+    return record.documentId ?? null;
+  }
+}
+
 /**
  * 重新解析原文件并更新既有讲义记录。
  * 必须 update 而不是 add：同一份讲义在列表里只应有一条，首次导入时间与同步 uid 都保留。
@@ -16,7 +35,8 @@ export async function restoreMaterialDocument(
 ): Promise<DocumentAsset> {
   const original = await db.materials.get(materialId);
   if (!original) throw new Error("讲义记录已不存在，请刷新后重试。");
-  if (!original.documentId || !/^[0-9a-f]{24}$/.test(original.documentId)) {
+  const resolvedDocId = resolveDocumentId(original);
+  if (!resolvedDocId || !/^[0-9a-f]{24}$/.test(resolvedDocId)) {
     throw new Error("讲义缺少原文件校验信息，请重新导入为新讲义，旧记录不会被替换。");
   }
   if (file.size === 0 || file.size > 50 * 1024 * 1024) {
@@ -25,7 +45,7 @@ export async function restoreMaterialDocument(
   // 与服务端 documentId 一致；先在本机校验，选错文件不上传、不消耗解析额度。
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
   const documentId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 24);
-  if (documentId !== original.documentId) {
+  if (documentId !== resolvedDocId) {
     throw new Error("所选文件与原文件不一致，请选择当时导入的同一文件；旧讲义未修改。");
   }
   const asset = await zhixi.analyzeDocument(file);
@@ -33,10 +53,11 @@ export async function restoreMaterialDocument(
   await db.transaction("rw", db.materials, async () => {
     const current = await db.materials.get(materialId);
     if (!current) throw new Error("讲义记录已不存在，请刷新后重试。");
-    if (current.uid !== original.uid || current.documentId !== original.documentId) {
+    if (current.uid !== original.uid || resolveDocumentId(current) !== resolvedDocId) {
       throw new Error("讲义记录已变化，请刷新后重试。");
     }
     await db.materials.update(materialId, {
+      documentId: asset.documentId,
       mimeType: asset.mimeType,
       documentJson: JSON.stringify(asset),
       pageCount: asset.pages.length,

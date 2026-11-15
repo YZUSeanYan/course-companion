@@ -78,7 +78,7 @@ export const api = {
     request<{ deleted: boolean }>(`/accounts/${id}`, { method: 'DELETE' }),
   unbindAccount: (id: string) =>
     request<{ unbound: number }>(`/accounts/${id}/unbind`, { method: 'POST' }),
-  devices: () => request<{ items: Device[]; total: number }>('/devices'),
+  devices: () => request<{ items: Device[]; total: number }>('/devices?scope=all'),
   requests: (errorsOnly = false) =>
     request<{ items: RequestRow[]; total: number }>(
       `/requests?limit=300${errorsOnly ? '&errorsOnly=true' : ''}`,

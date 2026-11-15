@@ -148,7 +148,7 @@ export default function Home() {
               直接打开网页版
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M6 3h7v7M13 3 7.5 8.5M9 13H3V7" /></svg>
             </a>
-            <a href="#how" className="btn btn--ghost">看看它怎么工作</a>
+            <Link to="/#how" className="btn btn--ghost">看看它怎么工作</Link>
           </>
         }
         media={

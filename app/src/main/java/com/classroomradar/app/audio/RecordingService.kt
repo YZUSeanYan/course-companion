@@ -598,7 +598,7 @@ class RecordingService : Service() {
                 NotificationCompat.BigTextStyle()
                     .setBigContentTitle(getString(R.string.notification_recording_title))
                     .bigText(expandedText)
-                    .setSummaryText(if (paused) "● 已暂停 · 课堂仍保留" else "● 正在录音 · ${formatDuration(elapsedSeconds)} · 设备端识别"),
+                    .setSummaryText(if (paused) "● 已暂停 · 课堂仍保留" else "● 正在录音 · ${formatDuration(elapsedSeconds)} · ${if (preferences.cloudListeningEnabled) "云端听课" else "设备端识别"}"),
             )
             .setRequestPromotedOngoing(true)
             .addAction(0, if (paused) "继续" else "暂停", pauseAction)
@@ -819,7 +819,7 @@ class RecordingService : Service() {
                 append(compactNotificationText(line, 96))
             }
             if (latestPartialText.isNotBlank()) {
-                if (isNotEmpty()) append("\\n\\n")
+                if (isNotEmpty()) append("\n\n")
                 append("正在识别：")
                 append(compactNotificationText(latestPartialText, 120))
             }

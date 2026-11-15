@@ -344,12 +344,13 @@ def test_admin_requests_hide_anonymous_and_polling_by_default(settings):
     assert [item["route"] for item in polling_rows] == ["/v1/accounts/me"]
     assert polling_rows[0]["accountName"] == "Test User"
 
-    assert client.get(
-        "/admin/api/devices", params={"scope": "unbound"}
-    ).json()["unboundTotal"] == 1
-    assert client.get(
-        "/admin/api/devices", params={"scope": "bound"}
-    ).json()["boundTotal"] == 1
+    unbound_res = client.get("/admin/api/devices", params={"scope": "unbound"}).json()
+    assert unbound_res["unboundTotal"] == 1
+    assert [item["deviceId"] for item in unbound_res["items"]] == [anonymous["deviceId"]]
+
+    bound_res = client.get("/admin/api/devices", params={"scope": "bound"}).json()
+    assert bound_res["boundTotal"] == 1
+    assert [item["deviceId"] for item in bound_res["items"]] == [bound["deviceId"]]
 
 
 def test_admin_can_unbind_one_device_and_clean_anonymous_data(settings):

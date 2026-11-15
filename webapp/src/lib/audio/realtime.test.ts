@@ -42,6 +42,8 @@ describe("closeReason", () => {
     expect(closeReason(4401)).toContain("鉴权");
     expect(closeReason(4403)).toContain("激活");
     expect(closeReason(4429)).toContain("频繁");
+    expect(closeReason(4012)).toContain("上限");
+    expect(closeReason(4408)).toContain("上限");
     expect(closeReason(1006)).toBeNull();
   });
 });

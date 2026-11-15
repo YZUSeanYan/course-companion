@@ -141,10 +141,24 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
     def finish_task(device: str, task_id: str, kind: str, result: dict, reserved: float = 0) -> dict:
         current = app.state.db.own_lecsync_task(device, task_id)
         if current is not None:
-            actual = audio_seconds(result, current["actual_seconds"])
-            if reserved or actual:
-                app.state.db.settle_lecsync_task_audio(device, task_id, actual)
-            app.state.db.update_lecsync_task(device, task_id, status=str(result.get("status", "succeeded")), upstream_request_id=result.get("request_id"), actual_seconds=actual, usage=result.get("usage") if isinstance(result.get("usage"), dict) else {})
+            status = str(result.get("status", "succeeded"))
+            prior_actual = float(current["actual_seconds"] or 0)
+            reserved_total = float(current["reserved_seconds"] or reserved or 0)
+            if status == "succeeded":
+                fallback_seconds = prior_actual or reserved_total
+                actual = audio_seconds(result, fallback_seconds)
+                if current["settled_seconds"] or actual:
+                    app.state.db.settle_lecsync_task_audio(device, task_id, actual)
+            elif status in {"failed", "cancelled", "expired"}:
+                actual = audio_seconds(result, prior_actual)
+                if current["settled_seconds"] or actual:
+                    app.state.db.settle_lecsync_task_audio(device, task_id, actual)
+            else:
+                # 异步任务仍在 accepted/processing 等非终态时，不得将预扣额度清零退款。
+                actual = audio_seconds(result, prior_actual)
+                if actual > 0:
+                    app.state.db.settle_lecsync_task_audio(device, task_id, actual)
+            app.state.db.update_lecsync_task(device, task_id, status=status, upstream_request_id=result.get("request_id"), actual_seconds=actual, usage=result.get("usage") if isinstance(result.get("usage"), dict) else {})
         return normalize(result)
 
     def task_id(result: dict, fallback: str | None = None) -> str:
@@ -235,13 +249,26 @@ def register_lecsync_routes(app: FastAPI, settings: Settings) -> None:
         if cached and time.monotonic() - cached[0] < 3600:
             return cached[1]
         try:
-            app.state.db.reserve_lecsync_text(device, len(payload.sourceText), settings.lecsync_daily_text_quota)
+            subject = resolve_quota_subject(app.state.db, settings, device)
+            app.state.db.reserve_lecsync_text(
+                device, len(payload.sourceText), subject.limits.text_characters, subject.account_id
+            )
+        except AccountError as account_error:
+            raise HTTPException(
+                status_code=account_error.status_code,
+                detail={"code": account_error.code.upper(), "message": str(account_error)},
+                headers={"X-Zhixi-Error-Code": account_error.code},
+            ) from account_error
         except QuotaExceeded as exc:
-            raise HTTPException(429, {"code": "TEXT_QUOTA_EXCEEDED", "message": "今日云端翻译额度已用完"}) from exc
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "TEXT_QUOTA_EXCEEDED", "message": "今日云端翻译额度已用完"},
+                headers={"X-Zhixi-Error-Code": "quota_exceeded", "X-Zhixi-Quota-Scope": "text"},
+            ) from exc
         try:
             result = await call(client().translate, options, client().key_for(f"translate-{device}", options))
-        except HTTPException:
-            app.state.db.release_lecsync_text(device, len(payload.sourceText))
+        except Exception:
+            app.state.db.release_lecsync_text(device, len(payload.sourceText), subject.account_id)
             raise
         response = normalize(result)
         if isinstance(result.get("request_id"), str):

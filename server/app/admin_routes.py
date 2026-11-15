@@ -467,6 +467,7 @@ def register_admin_routes(app: FastAPI, settings: Settings) -> None:
         rows = database.list_devices(
             max(1, min(limit, 1000)),
             unbound_only=(scope == "unbound"),
+            bound_only=(scope == "bound"),
         )
         items = []
         for row in rows:

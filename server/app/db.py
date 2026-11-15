@@ -1359,6 +1359,7 @@ class Database:
         *,
         account_id: str | None = None,
         unbound_only: bool = False,
+        bound_only: bool = False,
     ) -> list[dict]:
         with self.connect() as connection:
             if account_id is not None:
@@ -1380,9 +1381,10 @@ class Database:
                     """,
                     (account_id, limit),
                 ).fetchall()
-            elif unbound_only:
+            elif unbound_only or bound_only:
+                predicate = "ad.account_id IS NULL" if unbound_only else "ad.account_id IS NOT NULL"
                 rows = connection.execute(
-                    """
+                    f"""
                     SELECT d.id, d.created_at,
                            ad.account_id, ad.activated_at,
                            a.phone_ciphertext, a.display_name,
@@ -1393,7 +1395,7 @@ class Database:
                     FROM devices d
                     LEFT JOIN account_devices ad ON ad.device_id = d.id
                     LEFT JOIN access_accounts a ON a.id = ad.account_id
-                    WHERE ad.account_id IS NULL
+                    WHERE {predicate}
                     ORDER BY d.created_at DESC
                     LIMIT ?
                     """,

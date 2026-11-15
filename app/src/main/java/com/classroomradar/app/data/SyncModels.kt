@@ -59,8 +59,8 @@ interface SyncDao {
     @Query("UPDATE courses SET name=:name, teacher=:teacher, language=:language, examProfile=:examProfile, courseNature=:courseNature WHERE id=:id")
     fun updateCourse(id: Long, name: String, teacher: String, language: String, examProfile: String, courseNature: String)
 
-    @Query("UPDATE materials SET courseId=:courseId, title=:title, mimeType=:mimeType, pageCount=:pageCount, importedAtMillis=:importedAtMillis WHERE id=:id")
-    fun updateMaterial(id: Long, courseId: Long, title: String, mimeType: String, pageCount: Int, importedAtMillis: Long)
+    @Query("UPDATE materials SET courseId=:courseId, title=:title, mimeType=:mimeType, pageCount=:pageCount, importedAtMillis=:importedAtMillis, documentJson=:documentJson WHERE id=:id")
+    fun updateMaterial(id: Long, courseId: Long, title: String, mimeType: String, pageCount: Int, importedAtMillis: Long, documentJson: String?)
 
     @Query("UPDATE learning_items SET courseId=:courseId, type=:type, title=:title, content=:content, translation=:translation, example=:example, sourceIdsCsv=:sourceIdsCsv, inCET6=:inCet6, origin=:origin, updatedAtMillis=:updatedAtMillis WHERE id=:id")
     fun updateLearningItem(id: Long, courseId: Long, type: String, title: String, content: String, translation: String?, example: String?, sourceIdsCsv: String, inCet6: Boolean, origin: String, updatedAtMillis: Long)
@@ -153,6 +153,9 @@ interface SyncDao {
 
     @Query("SELECT * FROM courses WHERE id = :id")
     fun course(id: Long): CourseEntity?
+
+    @Query("SELECT * FROM materials WHERE id = :id")
+    fun material(id: Long): MaterialEntity?
 
     @Query("SELECT * FROM learning_items WHERE id = :id")
     fun learningItem(id: Long): LearningItemEntity?

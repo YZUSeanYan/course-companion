@@ -290,4 +290,30 @@ describe("云空间同步接口", () => {
     expect(response.records[0].entity).toBe("courses");
     expect(response.records[0].payload).toEqual({ name: "市场营销导论", createdAtMillis: 1000 });
   });
+
+  it("fetchDocumentPageBlobUrl 在 401 时重新注册设备并重试一次", async () => {
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:page-0001");
+    try {
+      let step = 0;
+      mockFetch((url) => {
+        step += 1;
+        if (step === 1) {
+          expect(url).toBe(`${GATEWAY}/v2/documents/039058c6f2c0cb492c533b0a/pages/page-0000.jpg`);
+          return jsonResponse({ detail: "Unauthorized" }, { status: 401 });
+        }
+        if (step === 2) {
+          expect(url).toBe(`${GATEWAY}/v1/devices/register`);
+          return jsonResponse({ deviceId: "device-2", token: "token-2", tokenType: "bearer" }, { status: 201 });
+        }
+        expect(url).toBe(`${GATEWAY}/v2/documents/039058c6f2c0cb492c533b0a/pages/page-0000.jpg`);
+        return new Response(new Uint8Array([0xff, 0xd8]), { status: 200, headers: { "Content-Type": "image/jpeg" } });
+      });
+
+      const blobUrl = await zhixi.fetchDocumentPageBlobUrl("039058c6f2c0cb492c533b0a", "page-0000.jpg");
+      expect(blobUrl).toBe("blob:page-0001");
+      expect(new Headers(calls[2].init.headers).get("Authorization")).toBe("Bearer token-2");
+    } finally {
+      createObjectURL.mockRestore();
+    }
+  });
 });

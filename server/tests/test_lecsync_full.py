@@ -11,7 +11,7 @@ from app.config import Settings
 from app.db import Database, QuotaExceeded
 from app.lecsync import LecsyncClient, LecsyncError, verify_webhook_signature
 from app.main import create_app
-from conftest import auth_headers, make_client
+from conftest import auth_headers, bind_test_device, create_test_account, make_client, register_unactivated
 
 
 def test_official_translation_result_wrapper_and_full_options(settings, monkeypatch):
@@ -162,3 +162,131 @@ def test_webhook_signature_and_deduplication(settings, monkeypatch):
     assert first.status_code == 200 and first.json()["accepted"]
     assert second.status_code == 200 and not second.json()["accepted"]
     assert client.post("/v2/lecsync/webhooks/events", content=payload, headers=headers | {"LecSync-Signature": "v1=bad"}).status_code == 401
+
+
+def test_translate_enforces_and_records_account_text_quota(settings, monkeypatch):
+    monkeypatch.setenv("LECSYNC_API_KEY", "test-only-lecsync")
+    monkeypatch.setattr("app.lecsync.validate_provider_url", lambda url: url + "/chat/completions")
+    fail_next = False
+
+    def handler(request):
+        if fail_next:
+            return httpx.Response(502, json={"error": "upstream down"})
+        return httpx.Response(
+            200,
+            json={"request_id": "req-t1", "status": "succeeded", "result": {"text": "你好", "model": "translate-default"}},
+        )
+
+    client = make_client(settings, lambda request: None)
+    client.app.state.lecsync = LecsyncClient(transport=httpx.MockTransport(handler))
+    account, _ = create_test_account(client, phone="13900000099", text_chars_daily_limit=10, max_devices=2)
+    dev1 = register_unactivated(client)
+    dev2 = register_unactivated(client)
+    bind_test_device(client, dev1["deviceId"], account)
+    bind_test_device(client, dev2["deviceId"], account)
+
+    res1 = client.post(
+        "/v2/lecsync/translate",
+        headers={"Authorization": f"Bearer {dev1['token']}"},
+        json={"sourceText": "123456", "targetLang": "zh"},
+    )
+    assert res1.status_code == 200, res1.text
+    usage = client.app.state.db.account_usage_today(account["id"], client.app.state.db.today())
+    assert usage["textCharacters"] == 6
+
+    # Fails on upstream: characters released back to 6
+    fail_next = True
+    res_fail = client.post(
+        "/v2/lecsync/translate",
+        headers={"Authorization": f"Bearer {dev2['token']}"},
+        json={"sourceText": "abcd", "targetLang": "zh"},
+    )
+    assert res_fail.status_code == 502
+    assert client.app.state.db.account_usage_today(account["id"], client.app.state.db.today())["textCharacters"] == 6
+
+    # Second device shares the same 10-char limit (6 + 5 > 10 -> 429)
+    fail_next = False
+    res2 = client.post(
+        "/v2/lecsync/translate",
+        headers={"Authorization": f"Bearer {dev2['token']}"},
+        json={"sourceText": "12345", "targetLang": "zh"},
+    )
+    assert res2.status_code == 429
+    assert res2.headers["X-Zhixi-Quota-Scope"] == "text"
+
+
+def test_pending_job_and_voicetyping_preserve_reserved_audio_quota(settings, monkeypatch):
+    monkeypatch.setenv("LECSYNC_API_KEY", "test-only-lecsync")
+    monkeypatch.setattr("app.lecsync.validate_provider_url", lambda url: url + "/chat/completions")
+    current_job_id = "job-q1"
+    job_status_payload = {"job_id": "job-q1", "status": "accepted", "progress": 10, "usage": {}}
+
+    def handler(request):
+        path = request.url.path
+        if path == "/v1/audio/uploads":
+            return httpx.Response(200, json={"upload_id": "up-q1", "upload_url": "https://1.1.1.1/upload", "headers": {}})
+        if path == "/upload":
+            return httpx.Response(200)
+        if path == "/v1/audio/transcription-jobs" and request.method == "POST":
+            return httpx.Response(202, json={"job_id": current_job_id, "request_id": f"req-{current_job_id}", "status": "accepted", "progress": 0, "usage": {}})
+        if path == f"/v1/audio/transcription-jobs/{current_job_id}":
+            return httpx.Response(200, json=job_status_payload | {"job_id": current_job_id})
+        if path == "/v1/audio/transcription-jobs/job-q1/cancel":
+            return httpx.Response(200, json={"job_id": "job-q1", "status": "cancelled"})
+        if path == "/v1/voicetyping":
+            return httpx.Response(200, json={"request_id": "req-vt1", "status": "succeeded", "raw": "hi", "text": "Hi."})
+        return httpx.Response(200, json={})
+
+    client = make_client(settings, lambda request: None)
+    client.app.state.lecsync = LecsyncClient(transport=httpx.MockTransport(handler))
+    account, _ = create_test_account(client, phone="13900000098", audio_minutes_daily_limit=10)
+    dev = register_unactivated(client)
+    bind_test_device(client, dev["deviceId"], account)
+    headers = {"Authorization": f"Bearer {dev['token']}"}
+
+    # 30 seconds PCM WAV (960,000 bytes @ 16kHz 16-bit mono = 30.0s)
+    pcm_bytes = 960_000
+    wav = (
+        b"RIFF"
+        + struct.pack("<I", 36 + pcm_bytes)
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
+        + b"data"
+        + struct.pack("<I", pcm_bytes)
+        + bytes(pcm_bytes)
+    )
+
+    def current_audio_seconds() -> float:
+        with client.app.state.db.connect() as conn:
+            row = conn.execute(
+                "SELECT audio_seconds FROM account_lecsync_usage WHERE account_id = ?",
+                (account["id"],),
+            ).fetchone()
+            return 0.0 if row is None else float(row[0])
+
+    # Creating async job keeps 30s reserved while accepted/processing
+    r1 = client.post("/v2/lecsync/audio/jobs", headers=headers, files={"file": ("a.wav", wav, "audio/wav")})
+    assert r1.status_code == 200
+    assert current_audio_seconds() == pytest.approx(30.0)
+
+    # Polling while accepted preserves 30s
+    assert client.get("/v2/lecsync/audio/jobs/job-q1", headers=headers).status_code == 200
+    assert current_audio_seconds() == pytest.approx(30.0)
+
+    # Cancelling a pending job refunds the 30s
+    assert client.post("/v2/lecsync/audio/jobs/job-q1/cancel", headers=headers).status_code == 200
+    assert current_audio_seconds() == pytest.approx(0.0)
+
+    # A job reaching succeeded without usage.audio_seconds preserves reserved 30s
+    current_job_id = "job-q2"
+    r2 = client.post("/v2/lecsync/audio/jobs", headers=headers, files={"file": ("b.wav", wav, "audio/wav")})
+    assert r2.status_code == 200
+    assert current_audio_seconds() == pytest.approx(30.0)
+    job_status_payload["status"] = "succeeded"
+    assert client.get("/v2/lecsync/audio/jobs/job-q2", headers=headers).status_code == 200
+    assert current_audio_seconds() == pytest.approx(30.0)
+
+    # Voice-typing without usage.audio_seconds keeps another 30s billed (total 60s)
+    r3 = client.post("/v2/lecsync/voice-typing", headers=headers, files={"file": ("v.wav", wav, "audio/wav")})
+    assert r3.status_code == 200
+    assert current_audio_seconds() == pytest.approx(60.0)

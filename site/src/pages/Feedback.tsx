@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import Reveal from '../components/site/Reveal'
 import PageHero from '../components/site/PageHero'
 import SectionHead from '../components/site/SectionHead'
@@ -141,7 +142,7 @@ export default function Feedback() {
                 </span>
                 <p className="h3 mt-4" style={{ fontSize: 17 }}>先看常见问题</p>
                 <p className="small mt-2">激活、离线模型、断线、iOS 支持等问题，下面大多有直接答案。</p>
-                <a href="#faq" className="btn btn--ghost mt-5">跳到常见问题</a>
+                <Link to="/feedback#faq" className="btn btn--ghost mt-5">跳到常见问题</Link>
               </div>
             </Reveal>
 

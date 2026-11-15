@@ -2,7 +2,7 @@
 // 事件口径与 Android LecsyncRealtimeEngine 一致；浏览器离线识别（sherpa-onnx WASM）在 offline 引擎中单独实现。
 
 import { db, newUid } from "./db/db";
-import { zhixi, sleep } from "./api/client";
+import { zhixi, sleep, ZhixiApiError } from "./api/client";
 import { startPcmCapture, requestMicrophone, createClassroomAudioContext, type PcmCaptureHandle } from "./audio/capture";
 import { RealtimeSession, closeReason, type RealtimeAuthMode } from "./audio/realtime";
 import { shouldFallbackFromProtocolAuth, shouldUseQueryWebSocketAuth, weChatOpenInSafariHint } from "./audio/browser-env";
@@ -115,8 +115,8 @@ export function shouldReconnectAfterClose(input: {
   maxAttempts?: number;
 }): boolean {
   if (input.userStopped) return false;
-  // 4401 鉴权 / 4403 额度 / 4429 限流 / 4408 4 小时上限：重连也会被拒，直接结束并给指引。
-  const fatal = new Set([4401, 4403, 4429, 4408]);
+  // 4401 鉴权 / 4403 额度 / 4429 限流 / 4408 & 4012 4 小时上限：重连也会被拒，直接结束并给指引。
+  const fatal = new Set([4401, 4403, 4429, 4408, 4012]);
   if (fatal.has(input.code)) return false;
   // 正常关闭且课堂已持续较久：视为真实结束，不重连。
   if (input.code === 1000 && input.livedMs >= SHORT_LIVED_MS) return false;
@@ -548,7 +548,15 @@ export class ClassroomController {
         }
       } catch (error) {
         if (!this.isCurrentConnection(generation)) return;
-        this.emit({ statusMessage: error instanceof Error ? error.message : String(error) });
+        const message = error instanceof ZhixiApiError ? error.userMessage : (error instanceof Error ? error.message : String(error));
+        this.emit({ statusMessage: message });
+        if (error instanceof ZhixiApiError && (error.status === 401 || error.status === 402 || error.status === 403 || error.status === 429)) {
+          this.fatalSessionError = true;
+          this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
+          await this.finishSession();
+          this.emit({ phase: "ended", statusMessage: message });
+          return;
+        }
       }
     }
     // 瞬时断开自动重连（最多 3 次，指数退避）：非用户停止、非语义性拒绝。
