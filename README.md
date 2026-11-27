@@ -33,6 +33,10 @@
 公开仓库用于协作与审阅，**不授予开源许可**（All rights reserved，全文见 [`LICENSE`](LICENSE)）。禁止把本项目的代码、提示词或生成内容用于训练/蒸馏竞品模型、批量抓取、转售服务或绕过额度与设备限制；细则见 [`SECURITY.md`](SECURITY.md)。
 
 
+## 比赛本地候选（2026-11-27）
+
+**V2.0.12 / versionCode 14** 已使用新证书签名并在断网模拟器验证全新安装。**不能覆盖旧签名版本**；如需保留旧版的本地数据，先导出或改用没有旧版的设备。官网和 Gitee 分发状态以实际下载页为准。查看[比赛候选验收记录](docs/VERIFICATION.md#比赛本地候选-v2012-2026-11-27未发布)和 [AI 实现与参赛说明](docs/AI_IMPLEMENTATION.md)。
+
 ## 发布状态（2026-11-11）
 
 - **已合并**：[PR #106](https://github.com/YZUSeanYan/course-companion/pull/106) 最终 head `2119055` 已 Squash merge 为 `a617dfc`，main CI 全部通过。用户在会话中确认审阅完成，不记作 GitHub Review 事件。

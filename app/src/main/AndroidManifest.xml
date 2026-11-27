@@ -12,6 +12,9 @@
     <queries>
         <package android:name="com.larus.nova" />
         <package android:name="com.deepseek.chat" />
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <!-- 金标联盟大屏专项：全尺寸屏幕 + 任意密度 + 窗口可调（分屏/自由窗口）都要支持。 -->

@@ -338,6 +338,16 @@
 - **检查边界**：修改的 `Download.tsx` 与 `release.ts` 定向 ESLint 通过。首次 lint 指令因工作目录未匹配找不到文件；随后 npm lint 脚本附带 `.` 扫描全站，报出 10 个既有模板错误（均不在本次修改文件），最后在 site 目录直接执行定向 ESLint 成功；不声称全站 lint 通过。
 - **失败保留**：Git fetch 首两次连接重置，之后以 GitHub API 核对 main 与本地基线均为 `f0439a1` 再工作。Gitee 缺失 tag 查询返回200+null，初次误按对象解析失败；修复判断后创建/上传成功，失败阶段未写入附件。其他既有真机/课堂未验收项不因此变为通过。
 
+## 比赛本地候选 V2.0.12（2026-11-27，未发布）
+
+- 本地分支 `release/v2.0.12-competition` 从 `origin/main` 的 `70c6b85` 快进合入 PR #115 `86aedaa`，未推送。Android 版本为 `2.0.12` / `versionCode=14`，包名 `store.seanyan.coursecompanion`，目标 API 36、arm64-v8a。未改变 Room schema 或运行时权限。
+- `:app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleRelease :app:assembleDebug -PLEARNING_API_BASE_URL=https://zhixi.seanyan.store` 成功。JVM **134 项通过，0 失败、0 跳过**。Debug Lint 为 0 errors、46 warnings、4 hints；Release 为 0 errors、48 warnings、4 hints。
+- PR #115 的后端 pytest **220 项通过**，网页版 Vitest **186 项通过**，网页版和管理后台构建成功。官网 `npm ci`、两处修改的定向 ESLint、本地构建，以及反馈页和隐私页的浏览器文案检查通过；未跑全站 ESLint。
+- `app/build/outputs/apk/release/app-release-unsigned.apk` 对齐检查通过，SHA-256 `90367fdab498ec79c4d470260a9b07e8d2a18e594f1fc879a12d08c95877b91a`。通过 BuildConfig 和 APK DEX 核对默认网关；没有请求生产网关。官网继续指向已发布的 V2.0.11，不把本地候选写成已发布版本。
+- 断网 API 34 模拟器（x86_64 转译 arm64-v8a）用一次性测试证书签名的 Release 副本完成安装、冷启动与重启、设置版本显示、建课、合成 TXT 讲义导入、复习空态及缺模型时的录音入口阻止。冒烟期间无应用崩溃日志；测试副本不是正式交付包。
+- 负责人批准仅本次使用新长期证书进行公开分发。`zhixi-v2.0.12.apk`（50,859,705 字节）通过签名和对齐检查；全部 611 个非签名 ZIP 条目与上述已测试构建一致。APK SHA-256：`988a3950dc8b8191bef77439d5dc00501138a74910dd9dad2c481d24c3de999f`；证书 SHA-256：`88615a928e9d5b7144871467f3ce48af3b1d2c62e085ebba191a8966f005d37a`。在独立断网 API 34 模拟器验证该签名包全新安装及冷启动，未见崩溃。**仅支持全新安装，不能覆盖旧签名版本。**
+- 无 arm64 真机，未跑 `:app:connectedDebugAndroidTest`；真实录音和长课、Android 15–16 及国产系统后台行为、含数据的检索与打卡界面、有声 TTS、付费云端与生产联调未验收。
+
 ## 产物（截至 2026-11-11）
 
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`

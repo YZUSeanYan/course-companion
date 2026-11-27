@@ -1,6 +1,5 @@
 package com.classroomradar.app.learning
 
-import android.speech.tts.TextToSpeech
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,7 +57,6 @@ fun ReviewSessionScreen(
     onConsumeMessage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
     var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -68,30 +64,12 @@ fun ReviewSessionScreen(
             nowMillis = System.currentTimeMillis()
         }
     }
-    var ttsReady by remember { mutableStateOf(false) }
-    val tts = remember {
-        TextToSpeech(context) { status ->
-            ttsReady = status == TextToSpeech.SUCCESS
-        }
-    }
-    DisposableEffect(tts) {
-        onDispose {
-            tts.stop()
-            tts.shutdown()
-        }
-    }
-    fun pronounce(text: String) {
-        if (!ttsReady) return
-        val locale = if (text.any { it in '\u4e00'..'\u9fff' }) Locale.CHINA else Locale.ENGLISH
-        val availability = tts.isLanguageAvailable(locale)
-        if (availability >= TextToSpeech.LANG_AVAILABLE) {
-            tts.language = locale
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "learning-${System.nanoTime()}")
-        }
-    }
-
     val dueCards = cards.filter { it.dueAtMillis <= nowMillis }
+    // Count cards in the current deck (all cards or the selected category), including no-longer-due cards.
+    val reviewedToday = countCardsReviewedToday(cards, nowMillis)
     val card = dueCards.firstOrNull()
+    val speech = if (card != null) rememberLearningSpeech() else null
+    LaunchedEffect(speech, card?.id) { speech?.stop() }
     var revealed by remember(card?.id) { mutableStateOf(false) }
     val rotation by animateFloatAsState(
         targetValue = if (revealed) 180f else 0f,
@@ -116,7 +94,7 @@ fun ReviewSessionScreen(
                         color = LiquidTextPrimary,
                     )
                     Text(description, color = LiquidTextSecondary)
-                    Text("共 ${cards.size} 张卡片", color = RadarBrandDeep, fontWeight = FontWeight.SemiBold)
+                    Text("共 ${cards.size} 张卡片 · 今日已打卡 $reviewedToday 张", color = RadarBrandDeep, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -177,18 +155,24 @@ fun ReviewSessionScreen(
                         )
                         GlassTextAction(
                             label = if (rotation > 90f) "返回题目" else "翻面看答案",
-                            onClick = { revealed = !revealed },
+                            onClick = {
+                                speech?.stop()
+                                revealed = !revealed
+                            },
                             modifier = Modifier.fillMaxWidth(),
                             tone = GlassTone.Accent,
                         )
+                        val speechText = if (rotation > 90f) card.back else card.front
                         GlassTextAction(
-                            label = if (ttsReady) {
-                                if (rotation > 90f) "朗读答案" else "朗读题目"
-                            } else "正在准备发音",
-                            onClick = { pronounce(if (rotation > 90f) card.back else card.front) },
+                            label = when (speech?.status) {
+                                LearningSpeechStatus.Ready -> if (rotation > 90f) "朗读答案" else "朗读题目"
+                                LearningSpeechStatus.Initializing -> "正在准备发音"
+                                else -> "离线发音不可用"
+                            },
+                            onClick = { speech?.speak(speechText) },
                             modifier = Modifier.fillMaxWidth(),
                             icon = Icons.AutoMirrored.Outlined.VolumeUp,
-                            enabled = ttsReady,
+                            enabled = speech?.status == LearningSpeechStatus.Ready && speechText.isNotBlank(),
                         )
                     }
                 }

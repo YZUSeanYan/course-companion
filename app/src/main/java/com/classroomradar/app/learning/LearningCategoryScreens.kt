@@ -138,6 +138,13 @@ fun LearningCategoryScreen(
         }
         return
     }
+    var query by remember(courseName, type) { mutableStateOf("") }
+    val showSearch = group.items.size >= 2
+    val matchingItems = remember(group.items, query, showSearch) {
+        if (showSearch) filterLearningItems(group.items, query) else group.items
+    }
+    val speech = if (supportsLearningPronunciation(type)) rememberLearningSpeech() else null
+
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -179,11 +186,32 @@ fun LearningCategoryScreen(
                 }
             }
         }
-        items(group.items, key = { courseDetailItemKey("learning", it.id) }) { item ->
+        if (showSearch) {
+            item(key = "learning-search") {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GlassTextInput(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = "搜索本分类",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "匹配 ${matchingItems.size} / ${group.items.size} 项",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiquidTextSecondary,
+                    )
+                }
+            }
+        }
+        if (matchingItems.isEmpty()) {
+            item { Text("没有匹配的学习内容", color = LiquidTextSecondary) }
+        }
+        items(matchingItems, key = { courseDetailItemKey("learning", it.id) }) { item ->
             LearningItemCard(
                 item,
                 showTypeLabel = false,
                 onActions = { actionItem = item },
+                speech = speech,
             )
         }
         item { Spacer(Modifier.height(16.dp)) }

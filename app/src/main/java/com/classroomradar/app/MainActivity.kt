@@ -1184,12 +1184,18 @@ private class ClassroomPresenter(private val appContext: Context) {
         scope.cancel()
     }
 
-    fun start(courseId: Long?) = ContextCompat.startForegroundService(
-        appContext,
-        Intent(appContext, RecordingService::class.java)
-            .setAction(RecordingService.ACTION_START)
-            .putExtra(RecordingService.EXTRA_COURSE_ID, courseId ?: -1L),
-    )
+    fun start(courseId: Long?) {
+        runCatching {
+            ContextCompat.startForegroundService(
+                appContext,
+                Intent(appContext, RecordingService::class.java)
+                    .setAction(RecordingService.ACTION_START)
+                    .putExtra(RecordingService.EXTRA_COURSE_ID, courseId ?: -1L),
+            )
+        }.onFailure {
+            RecordingBus.emit(RecorderEvent.Failure("无法启动录音，请在前台重试"))
+        }
+    }
 
     fun stop() = appContext.startService(
         Intent(appContext, RecordingService::class.java).setAction(RecordingService.ACTION_STOP),
@@ -3058,7 +3064,7 @@ private fun SettingsScreen(
         item {
             val context = LocalContext.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("知习 v2.0.8 · 离线识别 + AI 学习包", color = LiquidTextSecondary)
+                Text("知习 v${BuildConfig.VERSION_NAME} · 离线识别 + AI 学习包", color = LiquidTextSecondary)
                 Text("包含 sherpa-onnx 与 Silero VAD 等开源组件，详情见应用随附的第三方声明。", color = LiquidTextSecondary)
                 GlassTextAction(
                     "访问官网",
@@ -3411,10 +3417,17 @@ private fun openWebsite(context: Context) {
     }
 }
 
-private fun openBatteryOptimizationSettings(context: Context) {    runCatching {
+private fun openBatteryOptimizationSettings(context: Context) {
+    runCatching {
         context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }.onFailure {
+    }.onFailure { openSystemSettingsFallback(context) }
+}
+
+private fun openSystemSettingsFallback(context: Context) {
+    runCatching {
         context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        Toast.makeText(context, "无法打开系统设置，请手动打开", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -3439,7 +3452,7 @@ private fun openRealtimeNotificationSettings(context: Context) {
                 .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             runCatching { context.startActivity(fallback) }
-                .onFailure { context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { openSystemSettingsFallback(context) }
         }
 }
 

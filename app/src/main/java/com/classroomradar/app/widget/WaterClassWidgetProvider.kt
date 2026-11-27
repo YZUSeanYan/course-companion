@@ -25,18 +25,26 @@ class WaterClassWidgetProvider : AppWidgetProvider() {
                 ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
                 RecordingService.isRealtimeNotificationEnabled(context)
             ) {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_START),
-                )
+                runCatching {
+                    ContextCompat.startForegroundService(
+                        context,
+                        Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_START),
+                    )
+                }.onFailure { openApp(context) }
             } else {
                 // Do not launch a microphone foreground service from the widget when its
                 // required visible/live notification is unavailable. The main screen explains
                 // the precise permission or channel setting and can request microphone access.
-                context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                openApp(context)
             }
         }
         super.onReceive(context, intent)
+    }
+
+    private fun openApp(context: Context) {
+        runCatching {
+            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
     companion object {

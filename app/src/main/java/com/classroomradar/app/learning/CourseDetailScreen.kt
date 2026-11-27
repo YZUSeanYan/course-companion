@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FileUpload
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.classroomradar.app.GlassEffect
 import com.classroomradar.app.GlassPanel
+import com.classroomradar.app.GlassRoundIconAction
 import com.classroomradar.app.GlassTextAction
 import com.classroomradar.app.GlassTone
 import com.classroomradar.app.LiquidTextPrimary
@@ -285,6 +287,7 @@ internal fun LearningItemCard(
     item: LearningItemEntity,
     showTypeLabel: Boolean = true,
     onActions: (() -> Unit)? = null,
+    speech: LearningSpeech? = null,
 ) {
     val cardModifier = if (onActions == null) {
         Modifier.fillMaxWidth()
@@ -293,6 +296,7 @@ internal fun LearningItemCard(
             .fillMaxWidth()
             .combinedClickable(onClick = {}, onLongClick = onActions)
     }
+    val pronunciation = speech?.takeIf { supportsLearningPronunciation(item.type) && item.title.isNotBlank() }
     GlassPanel(modifier = cardModifier, tone = GlassTone.Neutral, effect = GlassEffect.Static) {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(
@@ -328,7 +332,30 @@ internal fun LearningItemCard(
                     }
                 }
             }
-            Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+            if (pronunciation != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LiquidTextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    GlassRoundIconAction(
+                        icon = Icons.AutoMirrored.Outlined.VolumeUp,
+                        contentDescription = when (pronunciation.status) {
+                            LearningSpeechStatus.Initializing -> "正在准备发音"
+                            LearningSpeechStatus.Ready -> "朗读：${item.title}"
+                            LearningSpeechStatus.Unavailable -> "离线发音不可用"
+                        },
+                        onClick = { pronunciation.speak(item.title) },
+                        enabled = pronunciation.status == LearningSpeechStatus.Ready,
+                        tint = RadarBrandDeep,
+                    )
+                }
+            } else {
+                Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = LiquidTextPrimary)
+            }
             if (item.content.isNotBlank()) Text(item.content, color = LiquidTextPrimary)
             item.translation?.takeIf { it.isNotBlank() }?.let { Text(it, color = LiquidTextSecondary) }
             item.example?.takeIf { it.isNotBlank() }?.let { Text("例句：$it", color = LiquidTextSecondary) }

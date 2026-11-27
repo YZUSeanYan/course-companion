@@ -29,6 +29,8 @@ import com.classroomradar.app.learning.OfflineSyncManager
 import com.classroomradar.app.widget.WaterClassWidgetProvider
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 class RecordingService : Service() {
     private val worker = Executors.newSingleThreadExecutor()
@@ -50,6 +52,7 @@ class RecordingService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioLock = Any()
     private val transcriptLock = Any()
+    private val stopLock = Any()
     private var audioWriter: WavFileWriter? = null
     @Volatile private var activeSessionId: Long? = null
     private var startedAt = 0L
@@ -58,6 +61,7 @@ class RecordingService : Service() {
     private var pausedAtMillis = 0L
     private var pausedTotalMillis = 0L
     @Volatile private var finishingRecording = false
+    private val finalizationStarted = AtomicBoolean(false)
     @Volatile private var latestPartialText = ""
     @Volatile private var latestFinalText = ""
     @Volatile private var latestQuestionText = ""
@@ -88,20 +92,27 @@ class RecordingService : Service() {
         // Multiple UI/widget start intents are harmless. In particular, never turn an active
         // recording into a service stop just because a stale start PendingIntent was tapped.
         if (recording || finishingRecording) return
-        // startForegroundService 要求 5 秒内进入前台；放在所有可能提前返回的检查之前，
-        // 否则缺少模型/权限等快速失败路径会触发 ForegroundServiceDidNotStartInTime。
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, foregroundNotification(0))
-        if (!modelManager.canRecognize() && !preferences.cloudListeningEnabled) {
-            RecordingBus.emit(RecorderEvent.Failure("未安装离线识别模型，请下载模型或开启云端听课"))
-            stopSelf()
-            return
-        }
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            RecordingBus.emit(RecorderEvent.Failure("请先授予麦克风权限再开始听课"))
             stopSelf()
             return
         }
         startedAt = System.currentTimeMillis()
+        try {
+            createNotificationChannel()
+            startForeground(NOTIFICATION_ID, foregroundNotification(0))
+        } catch (_: Throwable) {
+            RecordingBus.emit(RecorderEvent.Failure("无法启动录音，请打开知习并在前台重试"))
+            stopSelf()
+            return
+        }
+        if ((!preferences.cloudListeningEnabled || preferences.forceOfflineRecording) && !modelManager.canRecognize()) {
+            RecordingBus.emit(RecorderEvent.Failure("未安装离线识别模型，请下载模型或开启云端听课"))
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            stopSelf()
+            return
+        }
+        finalizationStarted.set(false)
         pausedTotalMillis = 0L
         pausedAtMillis = 0L
         recording = true
@@ -119,7 +130,7 @@ class RecordingService : Service() {
             )
         }
         acquireWakeLock()
-        WaterClassWidgetProvider.refresh(this, isRecording = true)
+        runCatching { WaterClassWidgetProvider.refresh(this, isRecording = true) }
         RecordingBus.emit(RecorderEvent.Status(isRecording = true, elapsedSeconds = 0))
         scheduleElapsedUpdate()
 
@@ -130,7 +141,7 @@ class RecordingService : Service() {
                     return@execute
                 }
             if (!recording) {
-                repository.finishSession(sessionId, System.currentTimeMillis())
+                runCatching { repository.finishSession(sessionId, System.currentTimeMillis()) }
                 return@execute
             }
             activeSessionId = sessionId
@@ -171,12 +182,11 @@ class RecordingService : Service() {
                 val wantCloud = preferences.cloudListeningEnabled && !forceOffline
                 if (!wantCloud && !modelManager.canRecognize()) {
                     // A corrupt/missing model would abort inside sherpa-native; refuse gracefully.
-                    recording = false
-                    finishingRecording = true
-                    updateActiveSnapshot { null }
-                    RecordingBus.emit(RecorderEvent.Status(isRecording = false, elapsedSeconds = 0))
-                    RecordingBus.emit(RecorderEvent.Failure("离线模型不可用或已损坏，请在设置 → 离线模式 → 离线模型 中重新下载"))
-                    stopSelf()
+                    if (beginStoppingRecording()) {
+                        releaseRecordingResources()
+                        finishRecordingAfterFinalPass(allowCloudSync = false)
+                        RecordingBus.emit(RecorderEvent.Failure("离线模型不可用或已损坏，请在设置 → 离线模式 → 离线模型 中重新下载"))
+                    }
                     return@execute
                 }
                 val offlineFirst = wantCloud && preferences.offlineFirstStart && modelManager.canRecognize()
@@ -496,68 +506,92 @@ class RecordingService : Service() {
         })
     }
 
-    private fun stopRecording() {
-        if (!recording) return
-        // Flags flip first on the calling thread so the UI and the read loop react at once.
-        // The blocking native teardown (AudioRecord.stop/release, VAD flush, final-pass drain)
-        // is queued on the same serial worker that owns the read loop: the loop observes
-        // recording=false and exits first, then the teardown runs, so ordering and the
-        // final-pass persistence chain are identical to before — only the main-thread freeze
-        // is gone.
-        recording = false
-        finishingRecording = true
+    private fun beginStoppingRecording(): Boolean {
+        synchronized(stopLock) {
+            if (!recording) return false
+            finishingRecording = true
+            recording = false
+        }
         mainHandler.removeCallbacksAndMessages(null)
         foregroundUpdatePending = false
         updateActiveSnapshot { null }
         releaseWakeLock()
-        WaterClassWidgetProvider.refresh(this, isRecording = false)
+        runCatching { WaterClassWidgetProvider.refresh(this, isRecording = false) }
         RecordingBus.emit(RecorderEvent.Status(isRecording = false, elapsedSeconds = 0))
-        worker.execute {
-            recorder?.runCatching {
-                if (recordingState == AudioRecord.RECORDSTATE_RECORDING) stop()
-                release()
+        return true
+    }
+
+    private fun releaseRecordingResources() {
+        recorder?.let { localRecorder ->
+            runCatching {
+                if (localRecorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) localRecorder.stop()
             }
-            recorder = null
-            synchronized(audioLock) {
-                audioWriter?.runCatching { close() }
-                audioWriter = null
-            }
-            // Offline-first preview buffers its finals in memory; persist them before teardown.
-            settlePreviewForStop()
-            val localEngine = engine
-            engine = null
-            if (localEngine != null) localEngine.stop(::finishRecordingAfterFinalPass)
-            else finishRecordingAfterFinalPass()
+            runCatching { localRecorder.release() }
+        }
+        recorder = null
+        synchronized(audioLock) {
+            audioWriter?.runCatching { close() }
+            audioWriter = null
         }
     }
 
-    /** Stops the service only once Sherpa's queued Paraformer results are persisted. */
-    private fun finishRecordingAfterFinalPass() {
-        val sessionId = activeSessionId
-        val finish = Runnable {
-            sessionId?.let { repository.finishSession(it, System.currentTimeMillis()) }
-            // Offline / on-device sessions hand their WAV to the cloud re-transcription queue.
-            val shouldSync = sessionId != null && preferences.autoCloudSync && (
-                !preferences.cloudListeningEnabled ||
-                    preferences.forceOfflineRecording ||
-                    offlineFirstSession
-                )
-            if (shouldSync && sessionId != null) {
-                repository.getSessionAudioPath(sessionId)?.let { relative ->
-                    OfflineSyncManager.get(applicationContext).schedule(sessionId, relative)
+    private fun stopRecording() {
+        if (!beginStoppingRecording()) return
+        // Queue blocking native teardown behind the capture loop, which exits when recording flips.
+        try {
+            worker.execute {
+                releaseRecordingResources()
+                // Offline-first preview buffers its finals in memory; persist them before teardown.
+                runCatching { settlePreviewForStop() }
+                val localEngine = engine
+                engine = null
+                if (localEngine != null) {
+                    runCatching { localEngine.stop(::finishRecordingAfterFinalPass) }
+                        .onFailure { finishRecordingAfterFinalPass() }
+                } else {
+                    finishRecordingAfterFinalPass()
                 }
             }
-            activeSessionId = null
-            finishingRecording = false
-            mainHandler.post {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+        } catch (_: RejectedExecutionException) {
+            // A shut-down worker still drains any capture task already queued on it.
+            finishRecordingAfterFinalPass(allowCloudSync = false)
+        }
+    }
+
+    private fun finishRecordingAfterFinalPass() = finishRecordingAfterFinalPass(allowCloudSync = true)
+
+    /** Stops the service only once Sherpa's queued Paraformer results are persisted. */
+    private fun finishRecordingAfterFinalPass(allowCloudSync: Boolean) {
+        if (!finalizationStarted.compareAndSet(false, true)) return
+        val sessionId = activeSessionId
+        val finish = Runnable {
+            try {
+                if (sessionId != null) {
+                    repository.finishSession(sessionId, System.currentTimeMillis())
+                    // Only normal stops may hand a WAV to the cloud re-transcription queue.
+                    if (allowCloudSync && preferences.autoCloudSync &&
+                        (!preferences.cloudListeningEnabled || preferences.forceOfflineRecording || offlineFirstSession)
+                    ) {
+                        repository.getSessionAudioPath(sessionId)?.let { relative ->
+                            OfflineSyncManager.get(applicationContext).schedule(sessionId, relative)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                RecordingBus.emit(RecorderEvent.Failure("未能保存本次听课状态，请在课堂记录中检查"))
+            } finally {
+                activeSessionId = null
+                mainHandler.post {
+                    runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                    stopSelf()
+                    finishingRecording = false
+                }
             }
         }
-        // onDestroy may already have shut the pool down (refusal / fast stop); run inline then.
+        // onDestroy may already have shut the pool down; still finish the session in that case.
         try {
             persistenceWorker.execute(finish)
-        } catch (rejected: java.util.concurrent.RejectedExecutionException) {
+        } catch (_: RejectedExecutionException) {
             finish.run()
         }
     }
@@ -628,7 +662,9 @@ class RecordingService : Service() {
             .addAction(0, "DeepSeek", openDeepSeek)
             .setAutoCancel(true)
             .build()
-        getSystemService(NotificationManager::class.java).notify(QUESTION_NOTIFICATION_ID, notification)
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(QUESTION_NOTIFICATION_ID, notification)
+        }
     }
 
     private fun questionActionPendingIntent(action: String, question: String, requestCode: Int): PendingIntent =
@@ -784,10 +820,12 @@ class RecordingService : Service() {
     }
 
     private fun updateForegroundNotification() {
-        getSystemService(NotificationManager::class.java).notify(
-            NOTIFICATION_ID,
-            foregroundNotification(elapsedSeconds()),
-        )
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(
+                NOTIFICATION_ID,
+                foregroundNotification(elapsedSeconds()),
+            )
+        }
     }
 
     private fun elapsedSeconds(): Long = when {

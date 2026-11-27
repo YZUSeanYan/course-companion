@@ -30,6 +30,55 @@ import com.classroomradar.app.learning.api.DocumentAssetDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private const val PREVIEW_MAX_EDGE_PX = 2048
+private val previewDocumentIdPattern = Regex("[0-9a-f]{24}")
+private val previewPageFilenamePattern = Regex("page-[0-9]{4}\\.jpg")
+
+// Only pass the gateway's expected path segments, never the DTO's full path.
+internal fun documentPreviewFilename(documentId: String, relativePath: String): String? =
+    relativePath.substringAfterLast('/').takeIf {
+        previewDocumentIdPattern.matches(documentId) && previewPageFilenamePattern.matches(it)
+    }
+
+internal fun documentPreviewAspectRatio(
+    widthPx: Int,
+    heightPx: Int,
+    bitmapWidth: Int = 0,
+    bitmapHeight: Int = 0,
+): Float {
+    val ratio = when {
+        widthPx > 0 && heightPx > 0 -> widthPx.toFloat() / heightPx
+        bitmapWidth > 0 && bitmapHeight > 0 -> bitmapWidth.toFloat() / bitmapHeight
+        else -> 3f / 4f
+    }
+    return ratio.coerceIn(0.2f, 5f)
+}
+
+internal fun documentPreviewSampleSize(widthPx: Int, heightPx: Int): Int? {
+    if (widthPx <= 0 || heightPx <= 0) return null
+    val maxEdge = maxOf(widthPx, heightPx)
+    var sampleSize = 1
+    // Compare before dividing so an odd source edge cannot round down to the limit.
+    while (maxEdge > PREVIEW_MAX_EDGE_PX.toLong() * sampleSize) sampleSize *= 2
+    return sampleSize
+}
+
+private fun decodeDocumentPreview(bytes: ByteArray): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    val sampleSize = documentPreviewSampleSize(bounds.outWidth, bounds.outHeight) ?: return null
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inScaled = false
+    }
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+    if (maxOf(bitmap.width, bitmap.height) > PREVIEW_MAX_EDGE_PX) {
+        bitmap.recycle()
+        return null
+    }
+    return bitmap.asImageBitmap()
+}
+
 @Composable
 fun DocumentPagePreview(
     asset: DocumentAssetDto,
@@ -40,17 +89,21 @@ fun DocumentPagePreview(
     onPickOriginalFile: (() -> Unit)? = null,
 ) {
     val page = asset.pages.firstOrNull() ?: return
-    val filename = page.imageRelativePath.substringAfterLast('/')
     // 失败后必须能重试：旧版讲义会被网关回 404，网络抖动也可能失败。
     var attempt by remember(asset.documentId, page.pageId) { mutableIntStateOf(0) }
     val request = PageImageRequest(asset.documentId, page.pageId, page.imageRelativePath, previewRevision, attempt)
     val state by produceState<PageImage<ImageBitmap>>(initialValue = PageImage.Loading, request) {
         value = PageImage.Loading
-        value = withContext(Dispatchers.IO) {
-            loadPageImage(
-                load = { onLoadImage(asset.documentId, filename) },
-                decode = { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() },
-            )
+        val filename = documentPreviewFilename(request.documentId, request.imageRelativePath)
+        value = if (filename == null) {
+            PageImage.Failed
+        } else {
+            withContext(Dispatchers.IO) {
+                loadPageImage(
+                    load = { onLoadImage(request.documentId, filename) },
+                    decode = ::decodeDocumentPreview,
+                )
+            }
         }
     }
     GlassPanel(modifier = Modifier.fillMaxWidth(), tone = GlassTone.Neutral, effect = GlassEffect.Static) {
@@ -60,7 +113,10 @@ fun DocumentPagePreview(
                 bitmap != null -> Image(
                     bitmap = bitmap,
                     contentDescription = "讲义第 ${page.pageIndex + 1} 页原图",
-                    modifier = Modifier.fillMaxWidth().aspectRatio(page.widthPx.toFloat() / page.heightPx).clip(RoundedCornerShape(14.dp)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(documentPreviewAspectRatio(page.widthPx, page.heightPx, bitmap.width, bitmap.height))
+                        .clip(RoundedCornerShape(14.dp)),
                     contentScale = ContentScale.Fit,
                 )
 

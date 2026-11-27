@@ -1,6 +1,7 @@
 package com.classroomradar.app.audio
 
 import android.content.Context
+import android.util.Log
 import com.classroomradar.app.data.AppPreferences
 import com.classroomradar.app.data.ClassroomRepository
 import com.classroomradar.app.data.TranslationEntity
@@ -288,13 +289,13 @@ class LecsyncRealtimeEngine(
             }
             "digest.update" -> {
                 val currentSession = sessionId ?: return
-                runBlocking { repository.saveLiveMinutes(currentSession, raw) }
+                persistBestEffort("digest.update") { repository.saveLiveMinutes(currentSession, raw) }
                 RecordingBus.emit(RecorderEvent.LiveMinutes(raw))
             }
             "session.ended" -> {
                 ended = true
                 cloudTaskId?.let { id ->
-                    runBlocking {
+                    persistBestEffort("session.ended") {
                         repository.getCloudTask(id)?.let { task ->
                             repository.saveCloudTask(task.copy(status = "succeeded", updatedAtMillis = System.currentTimeMillis()))
                         }
@@ -303,13 +304,11 @@ class LecsyncRealtimeEngine(
             }
             "usage.update" -> {
                 val currentSession = sessionId ?: return
-                runBlocking {
-                    repository.saveLiveUsage(
-                        currentSession,
-                        event.double("effectiveSeconds") ?: 0.0,
-                        event.double("accruedCents"),
-                        event.double("discardedSeconds") ?: 0.0,
-                    )
+                val effectiveSeconds = event.double("effectiveSeconds") ?: 0.0
+                val accruedCents = event.double("accruedCents")
+                val discardedSeconds = event.double("discardedSeconds") ?: 0.0
+                persistBestEffort("usage.update") {
+                    repository.saveLiveUsage(currentSession, effectiveSeconds, accruedCents, discardedSeconds)
                 }
             }
             "session.error" -> {
@@ -348,21 +347,27 @@ class LecsyncRealtimeEngine(
         val parts = TranscriptClauseSplitter.splitTranslation(translated, lines.size, lines.map { it.text })
         val targetLang = event.string("targetLanguage") ?: "zh"
         val now = System.currentTimeMillis()
-        runBlocking {
-            lines.forEachIndexed { index, line ->
-                val part = parts.getOrNull(index).orEmpty()
-                if (part.isBlank()) return@forEachIndexed
-                repository.upsertTranslation(
-                    TranslationEntity(
-                        transcriptLineId = line.id,
-                        targetLang = targetLang,
-                        sourceHash = line.text.toByteArray().sha256(),
-                        translatedText = part,
-                        status = TranslationEntity.STATUS_DONE,
-                        updatedAtMillis = now,
-                    ),
-                )
-            }
+        lines.forEachIndexed { index, line ->
+            val part = parts.getOrNull(index).orEmpty()
+            if (part.isBlank()) return@forEachIndexed
+            val translation = TranslationEntity(
+                transcriptLineId = line.id,
+                targetLang = targetLang,
+                sourceHash = line.text.toByteArray().sha256(),
+                translatedText = part,
+                status = TranslationEntity.STATUS_DONE,
+                updatedAtMillis = now,
+            )
+            persistBestEffort("translation.final") { repository.upsertTranslation(translation) }
+        }
+    }
+
+    // These Room calls are synchronous and already run on a background worker.
+    private inline fun persistBestEffort(operation: String, write: () -> Unit) {
+        runCatching(write).onFailure { failure ->
+            if (failure !is RuntimeException) throw failure
+            // Exception messages can contain database values; log the fixed operation only.
+            Log.w("LecsyncRealtimeEngine", "Local persistence failed for $operation")
         }
     }
 
